@@ -100,7 +100,7 @@ employees:
   - id: aide2
     name: 연구 보조 "Mira"
     title: Research Aide
-    desk: 4
+    desk: 3
     sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d" }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
