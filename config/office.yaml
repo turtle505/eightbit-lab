@@ -1,0 +1,11 @@
+# 사무실 전체 설정
+port: 8787
+# 구독(Pro/Max) rate limit 보호: 동시에 일하는 직원 수
+maxConcurrent: 3
+# 기본 모델 (role에서 덮어쓸 수 있음). 비워두면 Claude Code 기본값.
+model: ""
+# 직원들이 작업할 연구 코드 repo (git). 비워두면 ./workspaces/shared 를 사용.
+# 코드 수정 직원(useWorktree: true)은 이 repo의 git worktree를 각자 받는다.
+researchRepo: ""
+# worktree / 공용 작업 폴더 위치
+workspaceRoot: ./workspaces

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>8-bit Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>🧬 8-BIT LAB</h1>
+      <div id="stats" class="stats"></div>
+      <button id="notify-btn" hidden title="완료·승인 요청을 데스크톱 알림으로 받기">🔔 알림 켜기</button>
+    </header>
+
+    <main class="layout">
+      <section class="left">
+        <div id="office" class="office">
+          <div id="overlay" class="overlay"></div>
+        </div>
+        <section id="approvals" class="panel approvals" hidden></section>
+        <section id="employee" class="panel employee"></section>
+      </section>
+
+      <aside class="right">
+        <section class="panel">
+          <h2>📋 작업 보드</h2>
+          <form id="task-form" class="task-form">
+            <input id="task-title" placeholder="새 작업 제목 (예: FrameFlow 논문 요약)" autocomplete="off" />
+            <textarea id="task-detail" rows="2" placeholder="세부 지시 (선택)"></textarea>
+            <div class="row">
+              <select id="task-assignee"></select>
+              <button class="primary" type="submit">추가</button>
+            </div>
+          </form>
+          <div id="board" class="board"></div>
+        </section>
+        <section id="routines" class="panel"></section>
+        <section id="jobs" class="panel"></section>
+      </aside>
+    </main>
+    <div id="toasts" class="toasts"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

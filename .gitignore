@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# runtime state (task board, logs, sessions) and agent work output
+data/
+workspaces/
+# personal settings — never committed
+config/*.local.yaml
+config/servers.yaml
+.env
+.DS_Store
