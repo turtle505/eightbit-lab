@@ -19,6 +19,7 @@ import { UsageMonitor } from './usage.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
+import { HostRegistry } from './hosts.ts';
 import { mkdirSync } from 'node:fs';
 
 const office = loadOffice();
@@ -33,6 +34,10 @@ agents.pluginDirs = [skills.dir];
 const attachments = new AttachmentLibrary(office.workspaceRoot, store);
 mkdirSync(attachments.dir, { recursive: true });
 agents.extraDirs = [attachments.dir];
+const hosts = new HostRegistry(office.hosts);
+agents.hosts = hosts;
+for (const r of roles)
+  if (r.host && !hosts.get(r.host)) console.warn(`⚠️ ${r.id}: host '${r.host}' 가 office(.local).yaml 의 hosts 에 없습니다`);
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;
 for (const r of roles)
@@ -157,6 +162,7 @@ function snapshot(): Snapshot {
     maxConcurrent: office.maxConcurrent,
     figureNames: figureNames(),
     providers: providers.views(),
+    hosts: hosts.views(),
   };
 }
 
@@ -404,6 +410,7 @@ http.listen(office.port, '127.0.0.1', () => {
   routines.start();
   usage.start();
   providers.start();
+  hosts.start();
   setInterval(pollReports, 5_000);
   setInterval(pollTodos, 3_000);
   attachments.cleanup();

@@ -22,6 +22,8 @@ export interface OfficeConfig {
   permissionMode: PermissionSetting;
   /** close an idle employee session after this many minutes (0 = never close) */
   sessionIdleMinutes: number;
+  /** machines sessions can run on; `local` is this machine */
+  hosts: HostConfig[];
 }
 
 /**
@@ -29,6 +31,19 @@ export interface OfficeConfig {
  * through an SSH tunnel and spoken to through its Anthropic-compatible API. A future kind (e.g. codex)
  * needs its own runner in AgentManager.
  */
+/** A machine the office starts Claude Code sessions on. */
+export interface HostConfig {
+  id: string;
+  /** label in the UI, e.g. "🖥 desktop" */
+  name: string;
+  /** 'local' = the machine the backend runs on; otherwise an ssh alias from ~/.ssh/config */
+  ssh: string;
+  /** where this host's project folders live, e.g. ~/project */
+  projectRoot: string;
+  /** absolute path to the CLI — a non-login ssh often lacks ~/.local/bin on PATH */
+  claudePath?: string;
+}
+
 export interface ProviderConfig {
   id: string;
   /** label in the UI, e.g. "🖥 desktop" */
@@ -72,6 +87,8 @@ export interface RoleConfig {
   deskStyle?: 'lead';
   /** overrides office.permissionMode for this employee */
   permissionMode?: PermissionSetting;
+  /** machine this employee's sessions run on (office.hosts id); omitted = local */
+  host?: string;
   /** run on this provider (office.providers id) instead of the Claude subscription */
   provider?: string;
 }
@@ -152,8 +169,21 @@ export function loadOffice(): OfficeConfig {
       : null,
     permissionMode: c.permissionMode === 'ask' ? 'ask' : 'auto',
     sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
+    hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };
+}
+
+export function normalizeHosts(list: Partial<HostConfig>[]): HostConfig[] {
+  const out: HostConfig[] = [];
+  for (const h of list) {
+    if (!h.id || !h.ssh) {
+      console.warn(`⚠️ host ${h.id ?? '(id 없음)'}: id 와 ssh 가 필요합니다 — 무시함`);
+      continue;
+    }
+    out.push({ id: h.id, name: h.name || h.id, ssh: h.ssh, projectRoot: h.projectRoot || '~/project', claudePath: h.claudePath });
+  }
+  return out;
 }
 
 export function normalizeProviders(list: Partial<ProviderConfig>[]): ProviderConfig[] {

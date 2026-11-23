@@ -35,6 +35,17 @@ export interface EmployeeView {
   provider?: string;
 }
 
+/** a machine the office can run Claude Code sessions on ('local' = the machine the backend runs on) */
+export interface HostView {
+  id: string;
+  name: string;
+  local: boolean;
+  ok: boolean;
+  claudeVersion: string | null;
+  projectRoot: string;
+  error: string | null;
+}
+
 /** a non-Claude model backend (currently an Ollama server reached over an SSH tunnel) */
 export interface ProviderView {
   id: string;
@@ -263,6 +274,7 @@ export interface Snapshot {
   /** display names of the decorative figures in the game view (professor, the manager = you) */
   figureNames: Record<FigureKey, string>;
   providers: ProviderView[];
+  hosts: HostView[];
 }
 
 /** editable labels in the game view that are not employees: professor / manager name tags and the whiteboard text */
@@ -289,6 +301,7 @@ export type ServerMsg =
   | { t: 'todos'; data: TodayTodos }
   | { t: 'usage'; data: UsageView }
   | { t: 'provider'; data: ProviderView }
+  | { t: 'host'; data: HostView }
   | { t: 'figureName'; key: FigureKey; name: string }
   | { t: 'log'; data: LogLine }
   | { t: 'logs'; employeeId: string; lines: LogLine[] }

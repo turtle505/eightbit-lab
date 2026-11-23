@@ -8,6 +8,7 @@ import { labToolsServer } from '../mcp/labTools.ts';
 import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { ProviderHub } from '../providers.ts';
+import type { HostRegistry } from '../hosts.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
 
@@ -93,6 +94,10 @@ class Employee {
   lastText = '';
   /** mode requested for the current run (to report a fallback from auto) */
   wantedPermission: PermissionSetting = 'ask';
+  /** the stored session id is not on this machine (resume failed) — retry once without it */
+  resumeMissing = false;
+  /** host whose transcript store holds view.sessionId */
+  sessionHost: string | null = null;
 
   constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number, permission: PermissionSetting) {
     this.view = {
@@ -187,6 +192,8 @@ export class AgentManager {
   extraDirs: string[] = [];
   /** non-Claude backends; set by index.ts */
   providers: ProviderHub | null = null;
+  /** machines sessions can run on; set by index.ts */
+  hosts: HostRegistry | null = null;
 
   constructor(
     private office: OfficeConfig,
@@ -198,6 +205,7 @@ export class AgentManager {
     for (const r of roles) {
       const s = store.getSession(r.id);
       const e = new Employee(r, s.sessionId, s.costUsd, store.getEmployeePerm(r.id) ?? r.permissionMode ?? office.permissionMode);
+      e.sessionHost = s.hostId;
       e.view.name = store.getEmployeeName(r.id) ?? r.name;
       this.emps.set(r.id, e);
     }
@@ -237,7 +245,11 @@ export class AgentManager {
     bus.send({ t: 'employee', data: { ...e.view } });
   }
 
+  /** Transcripts live on the machine that ran them, so a session id does not travel between hosts. */
+  private static readonly NO_SESSION = /No conversation found with session ID/i;
+
   private log(e: Employee, kind: LogLine['kind'], text: string) {
+    if (kind === 'error' && AgentManager.NO_SESSION.test(text)) e.resumeMissing = true;
     const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text };
     this.store.addLog(line);
     bus.send({ t: 'log', data: line });
@@ -333,7 +345,11 @@ export class AgentManager {
   private openSession(e: Employee): LiveSession {
     if (e.live) return e.live;
 
-    const cwd = ensureWorkspace(this.office, e.role); // throws → caller reports
+    // A remote host's filesystem is not ours: the folder is checked there (see checkHost), not created here.
+    const host = e.role.host ? this.hosts?.get(e.role.host) : undefined;
+    if (e.role.host && !host) throw new Error(`설정에 없는 host: ${e.role.host} (office.local.yaml 의 hosts 확인)`);
+    if (host && !host.view.ok) throw new Error(`${host.view.name}에 연결할 수 없음: ${host.view.error ?? '알 수 없음'}`);
+    const cwd = host && !host.isLocal ? (e.role.cwd ?? '.') : ensureWorkspace(this.office, e.role); // throws → caller reports
     e.view.cwd = cwd;
 
     const autoAllow = new Set(e.role.autoAllow);
@@ -353,6 +369,14 @@ export class AgentManager {
 
     // the current work changes every turn, so the callbacks read e.current instead of closing over one Work
     const extraAllowNow = () => e.current?.extraAllow ?? [];
+    // A session id only means something on the machine that recorded it.
+    const hostId = e.role.host ?? null;
+    if (e.view.sessionId && (e.sessionHost ?? null) !== hostId) {
+      this.log(e, 'system', `이전 대화는 다른 머신(${e.sessionHost ?? '이 머신'})의 기록이라 여기서는 새 세션으로 시작합니다`);
+      e.view.sessionId = null;
+      this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd, hostId);
+    }
+
     const perm = effectivePermission(e.view.permission, e.current?.requireApproval ?? false);
     const abort = new AbortController();
     const input = new MessageQueue();
@@ -361,7 +385,9 @@ export class AgentManager {
       prompt: input,
       options: {
         cwd,
-        additionalDirectories: this.extraDirs,
+        // attachments live on the backend's disk, so a remote session cannot read them
+        additionalDirectories: host && !host.isLocal ? [] : this.extraDirs,
+        spawnClaudeCodeProcess: host?.spawner(),
         model,
         env,
         abortController: abort,
@@ -475,7 +501,7 @@ export class AgentManager {
   }
 
   /** Send one instruction into the employee's session and wait for that turn to finish. */
-  private async run(e: Employee, work: Work) {
+  private async run(e: Employee, work: Work): Promise<void> {
     e.current = work;
     e.view.taskId = work.taskId;
     e.lastText = '';
@@ -515,6 +541,19 @@ export class AgentManager {
       this.set(e, 'idle', this.idleActivity(e));
       return;
     }
+
+    // The stored session id belongs to another machine's transcript store (or was deleted):
+    // drop it and run this same instruction once more on a fresh session.
+    if (e.resumeMissing && e.view.sessionId) {
+      e.resumeMissing = false;
+      this.closeSession(e);
+      e.view.sessionId = null;
+      this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
+      this.log(e, 'system', '이전 대화를 이 머신에서 찾을 수 없어 새 세션으로 다시 시작합니다');
+      e.current = null;
+      return await this.run(e, work);
+    }
+    e.resumeMissing = false;
     const ok = e.view.status !== 'error';
     if (ok) this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
     bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null } satisfies RunFinished);
@@ -538,7 +577,8 @@ export class AgentManager {
           if (e.view.sessionId !== m.session_id) {
             this.log(e, 'system', `🧠 모델: ${m.model} · ${modeKo}`);
             e.view.sessionId = m.session_id;
-            this.store.saveSession(e.role.id, m.session_id, e.view.costUsd, e.view.cwd);
+            e.sessionHost = e.role.host ?? null;
+            this.store.saveSession(e.role.id, m.session_id, e.view.costUsd, e.view.cwd, e.sessionHost);
           } else this.log(e, 'system', modeKo);
           if (e.wantedPermission === 'auto' && mode && mode !== 'auto')
             this.log(e, 'system', `⚠️ 이 환경에서는 자동 모드를 쓸 수 없어 ${modeKo}로 실행합니다`);
@@ -573,7 +613,7 @@ export class AgentManager {
           if (live.lastCost !== null && !e.role.provider) e.view.costUsd += Math.max(0, total - live.lastCost);
           live.lastCost = total;
         }
-        this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd);
+        this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd, e.sessionHost);
         if (m.subtype === 'success') {
           if (m.result) e.lastText = m.result;
           this.log(e, 'result', `완료 (${m.num_turns} turns, ${(m.duration_ms / 1000).toFixed(0)}s)`);

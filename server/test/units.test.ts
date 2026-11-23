@@ -891,3 +891,68 @@ describe('live sessions', async () => {
     expect(m.views()[0].live).toBe(true);
   });
 });
+
+describe('remote hosts', async () => {
+  const { remoteCommand, forwardEnv, SSH_BASE } = await import('../src/hosts.ts');
+  const { normalizeHosts } = await import('../src/config.ts');
+
+  const cfg: any = { id: 'desktop', name: 'desktop', ssh: 'desktop', projectRoot: '~/project', claudePath: '/home/ybshin/.local/bin/claude' };
+
+  it('forwards only the session env, never the local shell env', () => {
+    const env = forwardEnv({ PATH: '/opt/homebrew/bin', HOME: '/Users/ybshin', SHELL: '/bin/zsh', ANTHROPIC_BASE_URL: 'http://127.0.0.1:11435', CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.5:9b', ANTHROPIC_API_KEY: '', NOPE: undefined });
+    expect(env).toEqual({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:11435', CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.5:9b' });
+  });
+
+  it('cds into the session folder and execs the absolute CLI path', () => {
+    const cmd = remoteCommand(cfg, { command: '/opt/homebrew/bin/claude', args: ['--output-format', 'stream-json'], cwd: '/home/ybshin/project/rna', env: {} });
+    expect(cmd).toBe("cd '/home/ybshin/project/rna' && exec env '/home/ybshin/.local/bin/claude' '--output-format' 'stream-json'");
+    expect(cmd).not.toContain('/opt/homebrew'); // the local path would not exist there
+  });
+
+  it('quotes folders, args and env values so nothing can break out of the remote shell', async () => {
+    // run the generated line through a real shell with a harmless "CLI" that just prints its argv
+    const { execFileSync, } = await import('node:child_process');
+    const { mkdtempSync, existsSync, writeFileSync, chmodSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'host spike '));   // a space in the path, on purpose
+    const fake = join(dir, 'fake-claude');
+    writeFileSync(fake, '#!/bin/sh\nfor a in "$@"; do echo "ARG:$a"; done\necho "URL:$ANTHROPIC_BASE_URL"\n');
+    chmodSync(fake, 0o755);
+    const canary = join(dir, 'pwned');
+
+    const cmd = remoteCommand({ ...cfg, claudePath: fake }, {
+      command: 'claude',
+      args: ['--append-system-prompt', `it's fine; touch ${canary}`],
+      cwd: dir,
+      env: { ANTHROPIC_BASE_URL: `http://x; touch ${canary}` },
+    });
+    const out = execFileSync('bash', ['-c', cmd], { encoding: 'utf8' });
+
+    expect(out).toContain(`ARG:it's fine; touch ${canary}`); // arrived as one literal argument
+    expect(out).toContain(`URL:http://x; touch ${canary}`);
+    expect(existsSync(canary)).toBe(false); // nothing escaped into the shell
+  });
+
+  it('never asks ssh for a tty (a tty would corrupt stream-json)', () => {
+    expect(SSH_BASE).toContain('-T');
+    expect(SSH_BASE).not.toContain('-t');
+    expect(SSH_BASE).toContain('BatchMode=yes');
+  });
+
+  it('remembers which machine a session id belongs to', () => {
+    const store = new Store(':memory:');
+    expect(store.getSession('exec')).toMatchObject({ sessionId: null, hostId: null });
+    store.saveSession('exec', 'sess-remote', 0.5, '/home/ybshin/project', 'desktop');
+    expect(store.getSession('exec')).toMatchObject({ sessionId: 'sess-remote', cwd: '/home/ybshin/project', hostId: 'desktop' });
+    store.saveSession('exec', 'sess-local', 0.5, '/Users/ybshin/x', null); // moved back to this machine
+    expect(store.getSession('exec').hostId).toBeNull();
+  });
+
+  it('fills in host defaults and drops incomplete entries', () => {
+    const hs = normalizeHosts([{ id: 'desktop', ssh: 'local' }, { name: 'no id' }, { id: 'master', ssh: 'master', projectRoot: '/data/proj' }]);
+    expect(hs).toHaveLength(2);
+    expect(hs[0]).toMatchObject({ id: 'desktop', name: 'desktop', ssh: 'local', projectRoot: '~/project' });
+    expect(hs[1].projectRoot).toBe('/data/proj');
+  });
+});

@@ -95,6 +95,8 @@ export class Store {
     if (!cols.includes('skill')) this.db.exec('ALTER TABLE routines ADD COLUMN skill TEXT');
     const tcols = (this.db.prepare('PRAGMA table_info(tasks)').all() as any[]).map((c) => c.name);
     if (!tcols.includes('createdBy')) this.db.exec('ALTER TABLE tasks ADD COLUMN createdBy TEXT');
+    const scols = (this.db.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
+    if (!scols.includes('hostId')) this.db.exec('ALTER TABLE sessions ADD COLUMN hostId TEXT');
     if (!tcols.includes('requireApproval')) this.db.exec('ALTER TABLE tasks ADD COLUMN requireApproval INTEGER NOT NULL DEFAULT 0');
   }
 
@@ -213,17 +215,18 @@ export class Store {
   }
 
   // ---- sessions
-  getSession(employeeId: string): { sessionId: string | null; costUsd: number; cwd: string | null } {
+  getSession(employeeId: string): { sessionId: string | null; costUsd: number; cwd: string | null; hostId: string | null } {
     const r = this.db.prepare('SELECT * FROM sessions WHERE employeeId = ?').get(employeeId) as any;
-    return r ? { sessionId: r.sessionId, costUsd: r.costUsd, cwd: r.cwd } : { sessionId: null, costUsd: 0, cwd: null };
+    return r ? { sessionId: r.sessionId, costUsd: r.costUsd, cwd: r.cwd, hostId: r.hostId ?? null } : { sessionId: null, costUsd: 0, cwd: null, hostId: null };
   }
-  saveSession(employeeId: string, sessionId: string | null, costUsd: number, cwd: string) {
+  /** `hostId` records which machine's transcript store holds this session id — it cannot be resumed elsewhere. */
+  saveSession(employeeId: string, sessionId: string | null, costUsd: number, cwd: string, hostId: string | null = null) {
     this.db
       .prepare(
-        `INSERT INTO sessions (employeeId, sessionId, costUsd, cwd) VALUES (?, ?, ?, ?)
-         ON CONFLICT(employeeId) DO UPDATE SET sessionId = excluded.sessionId, costUsd = excluded.costUsd, cwd = excluded.cwd`,
+        `INSERT INTO sessions (employeeId, sessionId, costUsd, cwd, hostId) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(employeeId) DO UPDATE SET sessionId = excluded.sessionId, costUsd = excluded.costUsd, cwd = excluded.cwd, hostId = excluded.hostId`,
       )
-      .run(employeeId, sessionId, costUsd, cwd);
+      .run(employeeId, sessionId, costUsd, cwd, hostId);
   }
 
   // ---- logs
