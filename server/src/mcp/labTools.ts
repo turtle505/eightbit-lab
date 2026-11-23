@@ -3,14 +3,45 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { isLocalHost } from '../compute/adapter.ts';
-import { sshThrottle } from '../hosts.ts';
+import { isLocalHost, sq } from '../compute/adapter.ts';
+import { sshControlOpts, sshThrottle } from '../hosts.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { Store } from '../db.ts';
 
 const text = (s: string, isError = false) => ({ content: [{ type: 'text' as const, text: s }], isError });
 
 /** In-process MCP server giving one employee access to the lab's GPU servers. Tools appear as mcp__lab__<name>. */
+
+const run = (cmd: string, args: string[]) =>
+  new Promise<number>((res) => {
+    const p = spawn(cmd, args, { stdio: 'ignore' });
+    p.on('close', (c) => res(c ?? -1));
+    p.on('error', () => res(-1));
+  });
+
+/**
+ * Pull a remote path as one gzip stream: `ssh host 'tar czf - -C dir base' | tar xzf - -C dest`.
+ * A single connection and a single transfer — `scp -r` would negotiate per file, which is the
+ * pattern that gets a lab's IP blocked.
+ */
+function tarFetch(sshHost: string, remotePath: string, dest: string): Promise<number> {
+  const clean = remotePath.replace(/\/+$/, '');
+  const slash = clean.lastIndexOf('/');
+  const dir = slash > 0 ? clean.slice(0, slash) : slash === 0 ? '/' : '.';
+  const base = clean.slice(slash + 1) || '.';
+  return new Promise((res) => {
+    const remote = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...sshControlOpts(), sshHost,
+      `tar czf - -C ${sq(dir)} ${sq(base)}`], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const local = spawn('tar', ['xzf', '-', '-C', dest], { stdio: ['pipe', 'ignore', 'ignore'] });
+    remote.stdout.pipe(local.stdin);
+    let remoteCode = 0;
+    remote.on('close', (c) => (remoteCode = c ?? -1));
+    remote.on('error', () => (remoteCode = -1));
+    local.on('close', (c) => res(remoteCode !== 0 ? remoteCode : c ?? -1));
+    local.on('error', () => res(-1));
+  });
+}
+
 export function labToolsServer(employeeId: string, cwd: string, registry: ServerRegistry, store: Store) {
   return createSdkMcpServer({
     name: 'lab',
@@ -74,29 +105,30 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
       }),
       tool(
         'fetch_results',
-        'Copy a file or directory from a server into your local working directory (under remote_results/).',
+        'Copy a file or directory from a server into your local working directory (under remote_results/). ' +
+          'It is streamed as one compressed archive over a single connection, so fetching a whole folder at once ' +
+          'is correct and much kinder to the network than copying files one by one.',
         { server: z.string(), remote_path: z.string() },
         async ({ server, remote_path }) => {
           try {
             const cfg = registry.get(server).cfg;
             const dest = resolve(cwd, 'remote_results', server);
             mkdirSync(dest, { recursive: true });
-            // `ssh_host: local` means the backend already runs on that machine — a plain copy, no scp hop
+            // `ssh_host: local` means the backend already runs on that machine — a plain copy, no network
             const local = isLocalHost(cfg.ssh_host);
-            const [cmd, args] = local
-              ? ['cp', ['-r', remote_path, dest]]
-              : ['scp', ['-r', '-o', 'BatchMode=yes', `${cfg.ssh_host}:${remote_path}`, dest]];
-            if (!local && !(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
+            if (local) {
+              const code = await run('cp', ['-r', remote_path, dest]);
+              return code === 0 ? text(`copied to ${dest}`) : text(`cp failed (exit ${code})`, true);
+            }
+            if (!(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
               return text(
                 `ssh 횟수 제한 (${cfg.ssh_host}: 분당 ${sshThrottle.limitFor(cfg.ssh_host)}회)으로 지금은 가져올 수 없습니다. 잠시 후 다시 시도하세요.`,
                 true,
               );
-            const code = await new Promise<number>((res) => {
-              const p = spawn(cmd, args, { stdio: 'ignore' });
-              p.on('close', (c) => res(c ?? -1));
-              p.on('error', () => res(-1));
-            });
-            return code === 0 ? text(`copied to ${dest}`) : text(`${cmd} failed (exit ${code})`, true);
+            // One compressed stream over one connection. `scp -r` of a folder talks per file, which is
+            // what gets lab IPs blocked; tar sends a single archive instead.
+            const code = await tarFetch(cfg.ssh_host, remote_path, dest);
+            return code === 0 ? text(`copied to ${dest} (압축 스트림 1회 전송)`) : text(`전송 실패 (exit ${code})`, true);
           } catch (e) {
             return text(String((e as Error).message), true);
           }
