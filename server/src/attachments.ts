@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, resolve } from 'node:path';
 import type { AttachmentView } from '../../shared/protocol.ts';
 import type { Store } from './db.ts';
 
@@ -17,8 +17,8 @@ const MIME: Record<string, string> = {
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xls': 'application/vnd.ms-excel',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation', '.zip': 'application/zip',
 };
-/** converted to plain text next to the original with macOS `textutil` */
-const TEXTUTIL_EXT = new Set(['.docx', '.doc', '.rtf', '.odt', '.html', '.htm']);
+/** converted to plain text next to the original (textutil on macOS, LibreOffice elsewhere) */
+const CONVERTIBLE_EXT = new Set(['.docx', '.doc', '.rtf', '.odt', '.html', '.htm']);
 
 export const mimeFor = (name: string) => MIME[extname(name).toLowerCase()] ?? 'application/octet-stream';
 
@@ -43,6 +43,7 @@ export function humanSize(n: number): string {
 export interface AttachmentRow {
   id: number;
   name: string;
+  /** absolute, resolved against the current workspaceRoot (the DB stores it relative) */
   path: string;
   textPath: string | null;
   size: number;
@@ -63,19 +64,35 @@ export function attachmentBlock(rows: AttachmentRow[]): string {
   return `\n\n## 첨부 파일 (읽기 전용 원본 — 고치려면 작업 폴더에 복사해서)\n${lines.join('\n')}`;
 }
 
-function textutil(src: string, out: string): Promise<boolean> {
-  return new Promise((res) => {
-    if (process.platform !== 'darwin') return res(false);
-    execFile('textutil', ['-convert', 'txt', '-output', out, src], { timeout: 60_000 }, (err) => res(!err && existsSync(out)));
-  });
+const run = (cmd: string, args: string[], ms = 120_000) =>
+  new Promise<boolean>((res) => execFile(cmd, args, { timeout: ms }, (err) => res(!err)));
+
+/**
+ * Plain text next to the original so an agent can just Read it. macOS has `textutil`; elsewhere
+ * LibreOffice does the same job (it writes <basename>.txt into the output directory).
+ * Neither available → no conversion, the original is still attached.
+ */
+async function toPlainText(src: string, out: string): Promise<boolean> {
+  if (process.platform === 'darwin') return (await run('textutil', ['-convert', 'txt', '-output', out, src])) && existsSync(out);
+  const dir = dirname(out);
+  for (const soffice of ['soffice', 'libreoffice']) {
+    if (!(await run(soffice, ['--headless', '--convert-to', 'txt:Text', '--outdir', dir, src]))) continue;
+    // LibreOffice names it <basename-without-ext>.txt; our `out` is <file>.txt
+    const produced = resolve(dir, basename(src).replace(/\.[^.]+$/, '') + '.txt');
+    if (produced !== out && existsSync(produced)) renameSync(produced, out);
+    if (existsSync(out)) return true;
+  }
+  return false;
 }
 
 /** Files the manager attached, stored under <workspaceRoot>/attachments/<date>/<id>-<name>. */
 export class AttachmentLibrary {
   readonly dir: string;
 
-  constructor(workspaceRoot: string, private store: Store) {
+  constructor(readonly workspaceRoot: string, private store: Store) {
     this.dir = resolve(workspaceRoot, 'attachments');
+    // paths written by an older version (or on another machine) are absolute; re-root them once
+    this.store.rerootAttachments(workspaceRoot);
   }
 
   async save(rawName: string, data: Buffer): Promise<AttachmentView> {
@@ -89,7 +106,7 @@ export class AttachmentLibrary {
     const path = resolve(dayDir, `${id}-${name}`);
     writeFileSync(path, data);
     let textPath: string | null = null;
-    if (TEXTUTIL_EXT.has(extname(name).toLowerCase()) && (await textutil(path, `${path}.txt`))) textPath = `${path}.txt`;
+    if (CONVERTIBLE_EXT.has(extname(name).toLowerCase()) && (await toPlainText(path, `${path}.txt`))) textPath = `${path}.txt`;
     this.store.updateAttachmentPaths(id, path, textPath);
     return toView(this.store.getAttachments([id])[0]);
   }

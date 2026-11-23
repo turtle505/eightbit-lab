@@ -73,6 +73,28 @@ maxConcurrent: 4
 - 열려만 있고 쉬는 세션은 `maxConcurrent`(동시 근무 인원)에 포함되지 않는다. 지금 턴을 돌고 있는 직원만 센다.
 - 직원 패널과 콘솔 표에 `🟢 세션 열림` / `⚪ 세션 대기`로 표시된다.
 
+## 다른 머신에서 세션 돌리기 / 백엔드 옮기기
+
+`config/office.local.yaml` 의 `hosts` 에 머신을 적고, 직원이나 프로젝트에 `host: <id>` 를 주면 그 머신에서 Claude Code 세션이 돈다.
+
+```yaml
+hosts:
+  - { id: desktop, name: "🖥 desktop", ssh: local, projectRoot: "~/project" }
+  - { id: gpu1, name: "🧮 gpu1", ssh: gpu1, projectRoot: "~/project", claudePath: "/home/me/.local/bin/claude" }
+```
+
+- `ssh: local` = 백엔드가 도는 그 머신. 그 밖에는 `~/.ssh/config` 의 alias (키 인증 필수).
+- **`claudePath` 는 절대 경로로**: 비대화형 ssh 는 보통 `~/.local/bin` 을 PATH 에 넣지 않는다.
+- 머신마다 claude CLI 설치 + 구독 로그인이 따로 필요하다. 30초마다 `claude --version` 으로 확인하고, 죽은 머신에서는 세션이 시작되지 않는다.
+- 세션 ID 는 그 기록을 가진 머신에서만 의미가 있다. 직원을 다른 머신으로 옮기거나 **백엔드 자체를 옮기면** 자동으로 새 세션에서 시작한다.
+- 원격 세션은 첨부 파일을 읽을 수 없다 (파일이 백엔드 디스크에 있음). `mcp__lab__fetch_results` 도 백엔드 디스크로 내려받는다.
+
+**백엔드를 서버로 옮기려면**: `git clone` → `npm ci` → `npm run build` → `deploy/eightbit-lab.service` 참고.
+`data/office.db` 와 `workspaces/` 를 rsync 하면 작업·루틴·첨부가 이어진다 (첨부 경로는 `workspaceRoot` 기준 상대 경로로 저장된다).
+그 서버의 `servers.local.yaml` 에서 자기 자신은 `ssh_host: local` 로 두면 ssh 를 거치지 않는다.
+Obsidian 할 일 패널을 계속 쓰려면 vault 를 그 서버에 동기화하고 (Syncthing 등) `obsidian.vault` 를 그 사본에 맞춘다.
+**맥과 서버에서 동시에 띄우지 말 것** — 루틴이 두 번 실행된다.
+
 ## 접속 범위
 
 백엔드는 `127.0.0.1`에만 바인딩되고, 브라우저에서 오는 요청은 **Origin이 사무실 자신이나 vite 개발 서버(5173)일 때만** 받는다 (WebSocket과 `/api` 모두).

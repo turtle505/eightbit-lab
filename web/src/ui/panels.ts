@@ -66,6 +66,15 @@ export function resetText(ts: number | null): string {
   return `${when} 초기화 · ${rel}`;
 }
 
+/** "🖥 desktop" when the employee's sessions run on another machine, else '' (the backend's own machine). */
+export function hostBadge(st: UIState, e: EmployeeView, plainText = false): string {
+  if (!e.hostId) return '';
+  const h = (st.snap.hosts ?? []).find((x) => x.id === e.hostId);
+  if (!h) return `<span class="prov off" title="설정에 host '${esc(e.hostId)}' 가 없음">${esc(e.hostId)} · 설정 없음</span>`;
+  const tip = h.ok ? `세션이 이 머신에서 실행됩니다 · claude ${h.claudeVersion ?? ''}` : h.error ?? '';
+  return `<span class="prov ${h.ok ? 'on' : 'off'}" title="${esc(tip)}">${esc(plainText ? plain(h.name) : h.name)}${h.ok ? '' : ' · 연결 안 됨'}</span>`;
+}
+
 /** Provider (local model) of an employee, if it runs on one. */
 export function providerOf(st: UIState, e: EmployeeView) {
   return e.provider ? (st.snap.providers ?? []).find((p) => p.id === e.provider) ?? null : null;
@@ -316,7 +325,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
     });
   }
   const prov = providerOf(st, e);
-  if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd), prov])) {
+  if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd), prov, st.snap.hosts])) {
     $('emp-head').innerHTML = `
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
         <b>${esc(e.name)}</b> <button type="button" id="emp-rename" class="icon-btn" title="이름 바꾸기">✏️</button> <span class="muted">${esc(e.title)}</span>
@@ -327,6 +336,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
             : '✋ 승인 모드: 자동 허용 목록 밖의 도구는 모두 승인 요청. 클릭하면 자동 모드로 (다음 지시부터 적용)'
         }">${st.view === 'console' ? (e.permission === 'auto' ? '[자동]' : '[승인]') : e.permission === 'auto' ? '🤖 자동' : '✋ 승인'}</button></div>
       <div class="muted small">${esc(st.view === 'console' ? plain(e.activity) : e.activity)}</div>
+      ${e.hostId ? `<div class="small emp-prov">${hostBadge(st, e, st.view === 'console')}</div>` : ''}
       ${
         e.provider
           ? `<div class="small emp-prov">${providerBadge(st, e, st.view === 'console')}${

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { isLocalHost } from '../compute/adapter.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { Store } from '../db.ts';
 
@@ -79,12 +80,17 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
             const cfg = registry.get(server).cfg;
             const dest = resolve(cwd, 'remote_results', server);
             mkdirSync(dest, { recursive: true });
+            // `ssh_host: local` means the backend already runs on that machine — a plain copy, no scp hop
+            const local = isLocalHost(cfg.ssh_host);
+            const [cmd, args] = local
+              ? ['cp', ['-r', remote_path, dest]]
+              : ['scp', ['-r', '-o', 'BatchMode=yes', `${cfg.ssh_host}:${remote_path}`, dest]];
             const code = await new Promise<number>((res) => {
-              const p = spawn('scp', ['-r', '-o', 'BatchMode=yes', `${cfg.ssh_host}:${remote_path}`, dest], { stdio: 'ignore' });
+              const p = spawn(cmd, args, { stdio: 'ignore' });
               p.on('close', (c) => res(c ?? -1));
               p.on('error', () => res(-1));
             });
-            return code === 0 ? text(`copied to ${dest}`) : text(`scp failed (exit ${code})`, true);
+            return code === 0 ? text(`copied to ${dest}`) : text(`${cmd} failed (exit ${code})`, true);
           } catch (e) {
             return text(String((e as Error).message), true);
           }

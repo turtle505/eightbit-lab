@@ -2,7 +2,7 @@ import type { Job, ServerView } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
 import type { ServerConfig } from '../config.ts';
 import type { Store } from '../db.ts';
-import type { ComputeAdapter, SubmitSpec } from './adapter.ts';
+import { isLocalHost, localExec, type ComputeAdapter, type SubmitSpec } from './adapter.ts';
 import { SlurmAdapter } from './slurm.ts';
 import { SshAdapter } from './ssh.ts';
 
@@ -17,7 +17,8 @@ export class ServerRegistry {
 
   constructor(configs: ServerConfig[], private store: Store) {
     for (const c of configs) {
-      this.adapters.set(c.name, c.type === 'slurm' ? new SlurmAdapter(c) : new SshAdapter(c));
+      const exec = isLocalHost(c.ssh_host) ? localExec : undefined;
+      this.adapters.set(c.name, c.type === 'slurm' ? new SlurmAdapter(c, exec) : new SshAdapter(c, exec));
       this.views.set(c.name, { name: c.name, type: c.type, online: false, gpus: [], note: '확인 전', checkedAt: 0 });
     }
   }

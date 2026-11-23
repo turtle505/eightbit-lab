@@ -31,6 +31,8 @@ export interface EmployeeView {
   permission: PermissionSetting;
   /** a session is open right now (the next instruction skips process start) */
   live: boolean;
+  /** machine this employee's sessions run on (HostView.id); unset = the machine the backend runs on */
+  hostId?: string;
   /** set when this employee runs on a non-Claude provider (ProviderView.id) */
   provider?: string;
 }

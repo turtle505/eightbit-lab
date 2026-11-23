@@ -38,6 +38,15 @@ export class OllamaLink {
   private stopped = false;
   private timers: NodeJS.Timeout[] = [];
 
+  /** the Ollama server runs on this machine, so the "tunnel" is a no-op */
+  get isLocal() {
+    return this.cfg.ssh_host === 'local';
+  }
+  /** port to talk to: the tunnel's local end, or the server's own port when it is on this machine */
+  get port() {
+    return this.isLocal ? this.cfg.remotePort : this.cfg.localPort;
+  }
+
   constructor(
     readonly cfg: ProviderConfig,
     private store: Store,
@@ -56,7 +65,8 @@ export class OllamaLink {
 
   start() {
     this.stopped = false;
-    this.openTunnel();
+    // `ssh: local` → Ollama is on this machine already; no tunnel, talk to it directly
+    if (!this.isLocal) this.openTunnel();
     this.timers.push(setInterval(() => void this.check(), HEALTH_MS));
   }
 
@@ -94,7 +104,7 @@ export class OllamaLink {
   }
 
   private async getJson(path: string): Promise<any> {
-    const r = await fetch(`http://127.0.0.1:${this.cfg.localPort}${path}`, { signal: AbortSignal.timeout(5_000) });
+    const r = await fetch(`http://127.0.0.1:${this.port}${path}`, { signal: AbortSignal.timeout(5_000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   }
@@ -125,7 +135,7 @@ export class OllamaLink {
   /** what AgentManager needs to start a run, or why it can't */
   runtime(): { model: string; env: Record<string, string> } | { error: string } {
     if (!this.view.ok) return { error: `${this.cfg.name} Ollama에 연결할 수 없음: ${this.view.error ?? '알 수 없음'}` };
-    return { model: this.view.model, env: ollamaEnv(process.env, this.cfg.localPort, this.view.model) };
+    return { model: this.view.model, env: ollamaEnv(process.env, this.port, this.view.model) };
   }
 }
 

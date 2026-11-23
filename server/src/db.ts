@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ROOT } from './config.ts';
 import { type AttachmentRow, toView } from './attachments.ts';
+import { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import type { FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
 
 const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, attachments });
@@ -158,17 +159,40 @@ export class Store {
     return Number(r.lastInsertRowid);
   }
   updateAttachmentPaths(id: number, path: string, textPath: string | null) {
-    this.db.prepare('UPDATE attachments SET path = ?, textPath = ? WHERE id = ?').run(path, textPath, id);
+    const rel = (p: string | null) => (p && isAbsolute(p) && !relative(this.root, p).startsWith('..') ? relative(this.root, p) : p);
+    this.db.prepare('UPDATE attachments SET path = ?, textPath = ? WHERE id = ?').run(rel(path), rel(textPath), id);
   }
+  /**
+   * Attachment paths are stored relative to workspaceRoot so the DB can move between machines;
+   * everything above the Store sees absolute paths.
+   */
+  private root = ROOT;
+  private abs = (r: any): AttachmentRow => ({
+    ...r,
+    path: isAbsolute(r.path) ? r.path : resolvePath(this.root, r.path),
+    textPath: r.textPath ? (isAbsolute(r.textPath) ? r.textPath : resolvePath(this.root, r.textPath)) : null,
+  });
+
+  /** Called once at startup: remember the root and rewrite any absolute rows under it as relative. */
+  rerootAttachments(workspaceRoot: string) {
+    this.root = workspaceRoot;
+    const up = this.db.prepare('UPDATE attachments SET path = ?, textPath = ? WHERE id = ?');
+    for (const r of this.db.prepare('SELECT * FROM attachments').all() as any[]) {
+      const rel = (p: string | null) => (p && isAbsolute(p) && !relative(workspaceRoot, p).startsWith('..') ? relative(workspaceRoot, p) : p);
+      const [p, t] = [rel(r.path), rel(r.textPath)];
+      if (p !== r.path || t !== r.textPath) up.run(p, t, r.id);
+    }
+  }
+
   /** existing rows for these ids, in the given order (unknown ids dropped) */
   getAttachments(ids: number[]): AttachmentRow[] {
     const get = this.db.prepare('SELECT * FROM attachments WHERE id = ?');
-    return [...new Set(ids)].map((id) => get.get(id) as unknown as AttachmentRow | undefined).filter((r): r is AttachmentRow => !!r);
+    return [...new Set(ids)].map((id) => get.get(id)).filter(Boolean).map((r) => this.abs(r));
   }
   attachmentsForTask(taskId: number): AttachmentRow[] {
-    return this.db
+    return (this.db
       .prepare('SELECT a.* FROM task_attachments ta JOIN attachments a ON a.id = ta.attachmentId WHERE ta.taskId = ? ORDER BY a.id')
-      .all(taskId) as unknown as AttachmentRow[];
+      .all(taskId) as any[]).map((r) => this.abs(r));
   }
   /** link attachments to a task (a file may belong to several tasks); returns the linked rows */
   bindAttachments(taskId: number, ids: number[]): AttachmentRow[] {
@@ -184,9 +208,9 @@ export class Store {
   }
   /** uploaded before `before`, never linked to a task nor sent with an instruction */
   pendingAttachments(before: number): AttachmentRow[] {
-    return this.db
+    return (this.db
       .prepare('SELECT * FROM attachments WHERE usedAt IS NULL AND createdAt < ? AND id NOT IN (SELECT attachmentId FROM task_attachments)')
-      .all(before) as unknown as AttachmentRow[];
+      .all(before) as any[]).map((r) => this.abs(r));
   }
   deleteAttachment(id: number) {
     this.db.prepare('DELETE FROM attachments WHERE id = ?').run(id);

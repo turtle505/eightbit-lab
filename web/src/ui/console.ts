@@ -1,7 +1,7 @@
 // Console view: plain, table-based rendering of the same office state.
 import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
-import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, plain, providerBadge, resetText, short, usageShare } from './panels.ts';
+import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, hostBadge, plain, providerBadge, resetText, short, usageShare } from './panels.ts';
 
 const STATE_KO: Record<TaskState, string> = { todo: '할 일', doing: '진행 중', review: '검토', done: '완료' };
 const STATE_ORDER: TaskState[] = ['doing', 'review', 'todo', 'done'];
@@ -18,7 +18,7 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
   const emps = sortedEmployees(st);
   const upd = emps.map((e) => st.empUpdated.get(e.id) ?? 0);
   // ago() changes over time, so include a coarse clock tick in the memo key
-  if (!changed('c-staff', [emps, st.selected, upd, st.snap.providers, Math.floor(Date.now() / 15000)])) return;
+  if (!changed('c-staff', [emps, st.selected, upd, st.snap.providers, st.snap.hosts, Math.floor(Date.now() / 15000)])) return;
   const total = emps.reduce((a, e) => a + e.costUsd, 0);
   const rows = emps
     .map((e, i) => {
@@ -26,7 +26,7 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
       const u = st.empUpdated.get(e.id);
       return `<tr data-id="${esc(e.id)}" class="${st.selected === e.id ? 'sel' : ''}">
         <td class="num">${i + 1}</td>
-        <td><b>${esc(short(e.name))}</b><div class="muted small">${esc(e.title)}</div>${e.provider ? `<div class="small">${providerBadge(st, e, true)}</div>` : ''}</td>
+        <td><b>${esc(short(e.name))}</b><div class="muted small">${esc(e.title)}</div>${e.hostId ? `<div class="small">${hostBadge(st, e, true)}</div>` : ''}${e.provider ? `<div class="small">${providerBadge(st, e, true)}</div>` : ''}</td>
         <td><span class="badge b-${e.status}">${STATUS_KO[e.status] ?? e.status}</span> <span class="muted small" title="${e.permission === 'auto' ? '자동 모드' : '승인 모드'}">${e.permission === 'auto' ? '자동' : '승인'}</span></td>
         <td class="activity" title="${esc(e.activity)}">${esc(plain(e.activity))}</td>
         <td class="num">${task ? `#${task.id}` : '—'}</td>

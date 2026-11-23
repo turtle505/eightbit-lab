@@ -1,0 +1,33 @@
+; systemd *user* unit — 사무실 백엔드를 상시 실행한다.
+;
+;   mkdir -p ~/.config/systemd/user
+;   cp deploy/eightbit-lab.service ~/.config/systemd/user/
+;   # WorkingDirectory 를 실제 clone 위치로 고친다
+;   systemctl --user daemon-reload
+;   systemctl --user enable --now eightbit-lab
+;   journalctl --user -u eightbit-lab -f
+;
+; 로그아웃·재부팅 후에도 살아 있게 하려면 (sudo 필요, 한 번만):
+;   sudo loginctl enable-linger $USER
+;
+; 주의: 맥과 서버에서 동시에 띄우면 루틴이 두 번 실행된다. 한 곳에서만 돌릴 것.
+
+[Unit]
+Description=8-bit Lab office backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/eightbit-lab
+; claude CLI 와 node 가 PATH 에 있어야 한다 (비대화형 셸은 ~/.local/bin 을 못 잡는 경우가 많다)
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+; 세션들이 정리될 시간을 준다
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

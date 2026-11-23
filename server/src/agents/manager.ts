@@ -11,6 +11,7 @@ import type { ProviderHub } from '../providers.ts';
 import type { HostRegistry } from '../hosts.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
+import { hostname } from 'node:os';
 
 interface Work {
   text: string;
@@ -116,6 +117,7 @@ class Employee {
       deskStyle: role.deskStyle,
       permission,
       live: false,
+      hostId: role.host,
       provider: role.provider,
     };
   }
@@ -162,6 +164,13 @@ export function needsLabApproval(toolName: string, input: Record<string, unknown
   if (toolName !== 'Bash') return false;
   return REMOTE_CMD.test(String(input?.command ?? ''));
 }
+
+/**
+ * Which machine's transcript store holds a session. A session started without a `host` lives on the
+ * machine the backend runs on, so it must be tagged with that machine — otherwise moving the backend
+ * (mac → desktop) would look like "same host" and the resume would fail with "No conversation found".
+ */
+export const sessionHostId = (roleHost: string | undefined, backend = hostname()) => roleHost ?? `backend:${backend}`;
 
 /** A 🔒 task always asks; otherwise the employee's own setting. Only ever tightens. */
 export function effectivePermission(employee: PermissionSetting, requireApproval: boolean): PermissionSetting {
@@ -370,9 +379,9 @@ export class AgentManager {
     // the current work changes every turn, so the callbacks read e.current instead of closing over one Work
     const extraAllowNow = () => e.current?.extraAllow ?? [];
     // A session id only means something on the machine that recorded it.
-    const hostId = e.role.host ?? null;
+    const hostId = sessionHostId(e.role.host);
     if (e.view.sessionId && (e.sessionHost ?? null) !== hostId) {
-      this.log(e, 'system', `이전 대화는 다른 머신(${e.sessionHost ?? '이 머신'})의 기록이라 여기서는 새 세션으로 시작합니다`);
+      this.log(e, 'system', `이전 대화는 다른 머신(${e.sessionHost ?? '알 수 없음'})의 기록이라 여기서는 새 세션으로 시작합니다`);
       e.view.sessionId = null;
       this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd, hostId);
     }
@@ -577,7 +586,7 @@ export class AgentManager {
           if (e.view.sessionId !== m.session_id) {
             this.log(e, 'system', `🧠 모델: ${m.model} · ${modeKo}`);
             e.view.sessionId = m.session_id;
-            e.sessionHost = e.role.host ?? null;
+            e.sessionHost = sessionHostId(e.role.host);
             this.store.saveSession(e.role.id, m.session_id, e.view.costUsd, e.view.cwd, e.sessionHost);
           } else this.log(e, 'system', modeKo);
           if (e.wantedPermission === 'auto' && mode && mode !== 'auto')

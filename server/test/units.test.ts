@@ -956,3 +956,60 @@ describe('remote hosts', async () => {
     expect(hs[1].projectRoot).toBe('/data/proj');
   });
 });
+
+describe('portability (moving the backend to another machine)', async () => {
+  const { localExec, isLocalHost } = await import('../src/compute/adapter.ts');
+  const { SshAdapter } = await import('../src/compute/ssh.ts');
+  const { sessionHostId } = await import('../src/agents/manager.ts');
+  const { AttachmentLibrary } = await import('../src/attachments.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  it('ssh_host "local" means this machine', () => {
+    expect(isLocalHost('local')).toBe(true);
+    expect(isLocalHost('desktop')).toBe(false);
+  });
+
+  it('localExec runs the script here, with the same contract as sshExec', async () => {
+    const ok = await localExec('ignored', 'echo hi; echo oops >&2; exit 0');
+    expect(ok.code).toBe(0);
+    expect(ok.stdout.trim()).toBe('hi');
+    expect(ok.stderr.trim()).toBe('oops');
+    expect((await localExec('ignored', 'exit 3')).code).toBe(3);
+  });
+
+  it('a local adapter talks to the machine it runs on', async () => {
+    const cfg: any = { name: 'desktop', type: 'ssh', ssh_host: 'local', workdir: '~/office-jobs' };
+    const seen: string[] = [];
+    const a = new SshAdapter(cfg, async (host, script) => {
+      seen.push(host);
+      return { code: 0, stdout: 'NVIDIA Test, 0, 10, 100\n---\nload average: 0.1', stderr: '' };
+    });
+    await a.gpuStats();
+    expect(seen).toEqual(['local']); // the adapter still passes the configured host through
+  });
+
+  it('a session id is tied to the machine that recorded it, backend moves included', () => {
+    // same role, two different backend machines → different ids, so the stale session is not resumed
+    expect(sessionHostId(undefined, 'Shins-MacBook-Air.local')).not.toBe(sessionHostId(undefined, 'desktop'));
+    // a role pinned to a host keeps that host's id wherever the backend runs
+    expect(sessionHostId('desktop', 'mac')).toBe(sessionHostId('desktop', 'desktop'));
+    expect(sessionHostId('desktop', 'mac')).toBe('desktop');
+  });
+
+  it('attachment paths survive a move: stored relative, handed out absolute', async () => {
+    const oldRoot = mkdtempSync(join(tmpdir(), 'ws-old-'));
+    const store = new Store(':memory:');
+    const lib = new AttachmentLibrary(oldRoot, store);
+    const v = await lib.save('data.csv', Buffer.from('a,b\n'));
+    expect(lib.rows([v.id])[0].path.startsWith(oldRoot)).toBe(true);
+    const rel = (store.db.prepare('SELECT path FROM attachments WHERE id = ?').get(v.id) as any).path;
+    expect(rel.startsWith('/')).toBe(false); // relative in the DB
+
+    // the same DB opened on another machine, under a different workspace root
+    const newRoot = mkdtempSync(join(tmpdir(), 'ws-new-'));
+    new AttachmentLibrary(newRoot, store);
+    expect(store.getAttachments([v.id])[0].path).toBe(join(newRoot, rel));
+  });
+});
