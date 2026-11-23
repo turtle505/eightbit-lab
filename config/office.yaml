@@ -2,6 +2,10 @@
 port: 8787
 # 구독(Pro/Max) rate limit 보호: 동시에 일하는 직원 수
 maxConcurrent: 3
+# 직원 권한 모드 기본값 (role의 permissionMode, UI 직원 패널 토글로 덮어씀)
+#   auto: 분류기가 안전하다고 본 도구는 바로 실행, 애매한 것만 승인 요청 / ask: autoAllow 밖 도구는 모두 승인 요청
+# 작업 카드에 🔒(requireApproval)가 붙으면 그 작업은 항상 ask로 실행.
+permissionMode: auto
 # 기본 모델 (role에서 덮어쓸 수 있음). 비워두면 Claude Code 기본값.
 model: ""
 # 직원들이 작업할 연구 코드 repo (git). 비워두면 ./workspaces/shared 를 사용.
@@ -9,3 +13,15 @@ model: ""
 researchRepo: ""
 # worktree / 공용 작업 폴더 위치
 workspaceRoot: ./workspaces
+# 보고서 탭이 .md 파일을 모으는 추가 폴더 (기본: workspaces/<직원 폴더>/reports). 개인 경로는 office.local.yaml 에.
+# reportDirs: [../research/reports]
+# 오늘 할 일 패널: Obsidian 데일리 노트의 체크박스를 보여주고 체크/수정/추가. 개인 vault 경로는 office.local.yaml 에.
+# obsidian:
+#   vault: /path/to/vault
+#   daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"      # {ddd} = Mon, Tue, ...
+#   createCommand: ["python3", ".scripts/daily_note.py", "--vault", "{vault}"]   # "오늘 노트 만들기" 버튼 (없으면 버튼 숨김)
+# Claude 구독 대신 쓸 모델 서버 (roles.yaml 에서 provider: <id> 로 연결). 지금은 kind: ollama 만 지원.
+# ssh_host 의 Ollama(127.0.0.1:remotePort)로 SSH 터널(localPort)을 열고, Anthropic 호환 API로 Claude Code 세션을 돌린다.
+# Ollama 쪽 컨텍스트는 64k 이상 필요: OLLAMA_CONTEXT_LENGTH=65536 ollama serve. 실제 호스트는 office.local.yaml 에.
+# providers:
+#   - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }

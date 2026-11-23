@@ -1,6 +1,7 @@
 // Console view: plain, table-based rendering of the same office state.
+import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
-import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, plain, resetText, short, usageShare } from './panels.ts';
+import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, plain, providerBadge, resetText, short, usageShare } from './panels.ts';
 
 const STATE_KO: Record<TaskState, string> = { todo: '할 일', doing: '진행 중', review: '검토', done: '완료' };
 const STATE_ORDER: TaskState[] = ['doing', 'review', 'todo', 'done'];
@@ -17,7 +18,7 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
   const emps = sortedEmployees(st);
   const upd = emps.map((e) => st.empUpdated.get(e.id) ?? 0);
   // ago() changes over time, so include a coarse clock tick in the memo key
-  if (!changed('c-staff', [emps, st.selected, upd, Math.floor(Date.now() / 15000)])) return;
+  if (!changed('c-staff', [emps, st.selected, upd, st.snap.providers, Math.floor(Date.now() / 15000)])) return;
   const total = emps.reduce((a, e) => a + e.costUsd, 0);
   const rows = emps
     .map((e, i) => {
@@ -25,12 +26,12 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
       const u = st.empUpdated.get(e.id);
       return `<tr data-id="${esc(e.id)}" class="${st.selected === e.id ? 'sel' : ''}">
         <td class="num">${i + 1}</td>
-        <td><b>${esc(short(e.name))}</b><div class="muted small">${esc(e.title)}</div></td>
-        <td><span class="badge b-${e.status}">${STATUS_KO[e.status] ?? e.status}</span></td>
+        <td><b>${esc(short(e.name))}</b><div class="muted small">${esc(e.title)}</div>${e.provider ? `<div class="small">${providerBadge(st, e, true)}</div>` : ''}</td>
+        <td><span class="badge b-${e.status}">${STATUS_KO[e.status] ?? e.status}</span> <span class="muted small" title="${e.permission === 'auto' ? '자동 모드' : '승인 모드'}">${e.permission === 'auto' ? '자동' : '승인'}</span></td>
         <td class="activity" title="${esc(e.activity)}">${esc(plain(e.activity))}</td>
         <td class="num">${task ? `#${task.id}` : '—'}</td>
         <td class="num mono">${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '—'}</td>
-        <td class="num" title="API 가격 환산 ≈$${e.costUsd.toFixed(2)} / 사무실 전체 ≈$${total.toFixed(2)}">${usageShare(st, e.costUsd)}</td>
+        ${e.provider ? `<td class="num muted" title="로컬 모델 — 구독 사용 안 함">로컬</td>` : `<td class="num" title="API 가격 환산 ≈$${e.costUsd.toFixed(2)} / 사무실 전체 ≈$${total.toFixed(2)}">${usageShare(st, e.costUsd)}</td>`}
         <td class="num muted">${u ? ago(u) : '—'}</td>
         <td class="actions">${BUSY.includes(e.status) ? `<button data-act="stop">중지</button>` : ''}</td>
       </tr>`;
@@ -70,7 +71,7 @@ export function renderTaskTable(st: UIState, send: Send) {
       const open = expanded.has(t.id);
       const main = `<tr data-id="${t.id}" class="task t-${t.state}">
         <td class="num">#${t.id}</td>
-        <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${esc(t.title)}</button></td>
+        <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${t.requireApproval ? '[승인] ' : ''}${esc(t.title)}${t.attachments?.length ? ` <span class="muted">[첨부 ${t.attachments.length}]</span>` : ''}</button></td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>
         <td><select data-act="assign">${empOpts(t.assignee)}</select></td>
         <td class="num muted">${ago(t.updatedAt)}</td>
@@ -79,6 +80,7 @@ export function renderTaskTable(st: UIState, send: Send) {
       const detail = open
         ? `<tr class="detail"><td></td><td colspan="5">
             ${t.detail ? `<div class="small"><b>지시</b><pre>${esc(t.detail)}</pre></div>` : ''}
+            ${t.attachments?.length ? `<div class="small"><b>첨부</b> ${attachmentLinks(t.attachments)}</div>` : ''}
             ${t.result ? `<div class="small"><b>보고</b><pre>${esc(t.result)}</pre></div>` : '<div class="muted small">아직 보고 없음</div>'}
           </td></tr>`
         : '';
@@ -110,13 +112,16 @@ export function renderTaskTable(st: UIState, send: Send) {
 
 export function bindConsoleTaskForm(send: Send) {
   const form = $('c-task-form') as HTMLFormElement;
+  const att = bindAttach(form, $('c-task-attach'), $('c-task-chips'));
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const title = ($('c-task-title') as HTMLInputElement).value.trim();
     if (!title) return;
+    if (att.busy()) return void alert('첨부 파일을 올리는 중입니다. 잠시 후 다시 눌러 주세요.');
     const detail = ($('c-task-detail') as HTMLInputElement).value;
     const assignee = ($('c-task-assignee') as HTMLSelectElement).value || null;
-    send({ t: 'createTask', title, detail, assignee });
+    const requireApproval = ($('c-task-lock') as HTMLInputElement).checked;
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take() });
     form.reset();
   });
 }

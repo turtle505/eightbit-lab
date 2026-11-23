@@ -35,6 +35,11 @@ export function statusForTool(name: string, input: Record<string, any>): { statu
       list_tasks: '📋 작업 보드 확인 중',
       office_activity: '🗂️ 직원 활동 기록 정리 중',
       list_routines: '⏰ 루틴 확인 중',
+      list_skills: '🧩 스킬 목록 확인 중',
+      save_skill: `🧩 스킬 작성: ${clip(String(input.name ?? ''), 30)}`,
+      create_routine: `⏰ 루틴 등록: ${clip(String(input.name ?? ''), 30)}`,
+      update_routine: `⏰ 루틴 수정: ${clip(String(input.name ?? input.id ?? ''), 30)}`,
+      delete_routine: `🗑️ 루틴 삭제 요청: ${clip(String(input.name ?? input.id ?? ''), 30)}`,
       create_task: `📨 ${input.assignee ?? ''}에게 작업 전달: ${clip(String(input.title ?? ''), 30)}`,
     };
     return { status: 'typing', activity: labels[name.slice('mcp__office__'.length)] ?? '📋 사무실 업무' };

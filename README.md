@@ -24,9 +24,12 @@ npm run build && npm start   # → http://127.0.0.1:8787
 | 작업 배정 | 작업 보드에 카드 추가 → 카드를 사무실의 직원에게 드래그 (또는 카드의 드롭다운) |
 | 승인 | 직원이 손을 들고 `!` 표시 → 노란 승인 패널에서 승인/거부 |
 | 결과 확인 | 작업이 끝나면 카드가 "검토"로 이동, `보고`를 펼쳐 확인 후 "완료" |
+| 오늘 할 일 | `✅ 오늘 할 일` 패널: Obsidian 데일리 노트의 체크박스를 체크·수정(더블클릭)·추가(＋, ↳)·삭제. 노트 파일에 바로 반영되고 Obsidian에서 고친 것도 몇 초 안에 보임 (`office.local.yaml` 의 `obsidian` 설정 필요) |
+| 보고 피드 | `📨 보고` 박스: 보고서 파일이 저장·수정되거나 실행이 끝나면 채팅처럼 아래로 쌓임 (마크다운) |
+| 보고서 다시 보기 | 상단 `보고서` 탭: `workspaces/<직원>/reports/` 의 .md 파일을 폴더 트리로 열람, 안 읽은 개수 표시. `?view=reports` 로 별도 창 |
 | 중지 / 새 세션 | 직원 패널의 `중지`, `새 세션` (세션은 기본적으로 이어짐) |
-| 예약 업무 | 루틴 패널: 켜기/끄기, `지금 실행` (일정은 `config/routines.yaml`) |
-| 화면 전환 | 상단 우측 `게임 / 콘솔` 버튼 또는 <kbd>`</kbd> (마지막 화면 기억, `?view=console` 로 바로 열기) |
+| 예약 업무 | 루틴 패널: `+ 새 루틴` 등록·수정·삭제(확인 후), 켜기/끄기, `지금 실행` — 비서에게 말로 맡겨도 됨 |
+| 화면 전환 | 상단 우측 `게임 / 콘솔 / 보고서` 버튼 또는 <kbd>`</kbd> (마지막 화면 기억, `?view=console` 로 바로 열기) |
 
 **구독 사용량**: 상단바에 Claude 구독의 **세션(5시간)·주간 사용량 %**와 초기화 시각을 표시 (모델별 주간 한도가 있으면 함께). 3분마다, 직원 작업이 끝날 때, 클릭할 때 갱신. 토큰을 쓰지 않는 빈 세션으로 조회하며, SDK의 실험적 API라 바뀌면 "사용량 —"으로 표시될 수 있음. 직원별 값은 한도 %가 아니라 **사무실 전체 사용 중 비중**.
 
@@ -52,20 +55,60 @@ maxConcurrent: 4
   - `researchRepo`를 지정하면 모델/데이터 엔지니어는 그 repo의 **git worktree**(브랜치 `office/<id>`)를 각자 받아 충돌 없이 작업
   - 비워두면 모두 `workspaces/shared`에서 작업
 - `config/roles.yaml` — 직원 정의: 역할 프롬프트, 승인 없이 허용할 도구(`autoAllow`), 캐릭터 색
-- `config/routines.yaml` — 예약 루틴 (cron 5필드, 이 Mac 현지 시간, 백엔드가 켜져 있을 때만 실행)
+- `config/routines.yaml` — 예약 루틴 초기값 (cron 5필드, 이 Mac 현지 시간, 백엔드가 켜져 있을 때만 실행). 처음 실행할 때 DB로 가져오고, 이후 변경은 UI/비서로 함
   - 기본: 평일 09:00 아침 브리핑, 평일 18:00 저녁 일일 리포트 (켜짐) · 금 17:00 주간 회고, 평일 08:30 Obsidian 데일리 노트 (꺼짐)
 - `config/servers.local.yaml` — GPU 서버 (`servers.example.yaml` 복사, git 제외). 서버마다 `type: ssh | slurm`
   - `ssh_host`는 `~/.ssh/config` alias, **비밀번호 없이(키 인증) 접속돼야 함**
   - 직원은 `mcp__lab__*` 도구(list_servers, gpu_status, submit_job, job_status, tail_log, cancel_job, fetch_results)로 서버를 사용
   - job이 끝나면 제출한 직원에게 자동으로 알려 결과를 보고하게 함
 
+## 첨부 파일
+
+작업 폼의 📎(콘솔은 `첨부`)이나 직원 지시창에 파일을 고르거나 끌어다 놓으면 첨부된다 (파일당 50 MB).
+파일은 `workspaces/attachments/<날짜>/`에 저장되고, 담당 직원의 지시문 끝에 `#id 이름 (크기, 형식): 절대경로` 목록이 붙는다. 모든 직원 세션이 이 폴더를 읽을 수 있다.
+
+- csv·txt·json, 이미지(png/jpg/gif/webp), pdf는 그대로 읽는다. 로컬 모델(비서2)도 이미지를 읽는다.
+- docx·doc·rtf·odt·html은 올릴 때 macOS `textutil`로 `.txt` 변환본을 옆에 만들어 경로를 같이 준다. xlsx는 직원이 pandas/openpyxl로 읽는다.
+- 팀장은 받은 첨부를 `create_task`의 `attachments: [id]`로 담당자에게 넘긴다. 작업 카드의 📎 링크로 원본을 열 수 있다.
+- 작업이나 지시에 붙지 않은 업로드는 24시간 뒤 지워진다.
+
+## 권한: 자동 모드 / 승인 받기
+
+- 직원은 기본으로 **🤖 자동 모드**로 일한다. 모델 분류기가 안전하다고 본 도구는 바로 실행하고, 애매한 것만 승인 카드로 올라온다.
+  직원 패널 제목줄의 `🤖 자동` / `✋ 승인` 버튼으로 직원마다 바꿀 수 있다 (다음 지시부터 적용). 기본값은 `office.yaml`의 `permissionMode`.
+- 작업 카드에 **🔒 승인 받기**를 체크하면, 담당자가 자동 모드여도 그 작업은 `autoAllow` 밖 도구마다 승인을 받는다.
+  팀장은 삭제·덮어쓰기, git push, GPU job 취소·대량 제출, 외부 전송이 들어간 작업을 위임할 때 `requireApproval: true`로 넘긴다.
+
 ## 비서 직원 (Hana)
 
 매니저 책상 옆 리셉션 자리. `mcp__office__*` 도구로 사무실 전체를 본다:
-`office_status`(직원·job·서버 현황), `list_tasks`, `office_activity`(최근 N시간 직원별 활동), `list_routines`, `create_task`(다른 직원에게 위임).
-위임(`create_task`)은 기본적으로 **매니저 승인 필요**. 리포트는 `workspaces/secretary/reports/` 에 저장된다.
+`office_status`(직원·job·서버 현황), `list_tasks`, `office_activity`(최근 N시간 직원별 활동), `list_routines`, `create_routine`/`update_routine`/`delete_routine`(루틴 관리), `create_task`(다른 직원에게 위임).
+위임과 루틴 변경은 기본적으로 **매니저 승인 필요**이고, 루틴 삭제는 승인할 때 확인 창이 한 번 더 뜬다.
+
+### 루틴 = 스킬 한 번 실행
+비서에게 "매주 금요일 5시에 ○○ 하는 루틴 만들고 싶어"라고 말하면, 비서가 몇 가지를 물어 정리한 뒤
+`list_skills` / `save_skill`로 **사무실 스킬**(`workspaces/office-skills/skills/<이름>/SKILL.md`, git 미포함)을 만들고 그 스킬을 실행하는 루틴을 등록한다.
+스킬은 모든 직원 세션에 `office:<이름>`으로 로드된다.
+스킬 프런트매터의 `office-allow`(예: `Bash(python3 "/경로/script.py"*)`)에 적힌 도구는 **그 스킬을 실행하는 루틴에서만** 승인 없이 실행된다.
+매니저가 승인한 파일 내용 그대로일 때만 적용되고, 파일이 바뀌면 루틴 패널에 `⚠️ 재승인 필요`가 뜬다. 리포트는 `workspaces/secretary/reports/` 에 저장된다.
 
 직원 세션에서는 claude.ai 연동(Gmail, Google Calendar 등)이 보이지 않는다. 쓸 수 있는 것은 로컬 플러그인 MCP(PubMed, bioRxiv 등)와 skill(daily-note 등)이다.
+
+## 비서2 (Mini) — 로컬 모델
+
+Hana가 Claude 구독으로 일한다면, 비서2는 **desktop GPU의 Ollama 모델**로 일한다 (구독 사용량을 쓰지 않음, 서버실 유리벽 옆 자리).
+현황 확인·요약·메모 같은 가벼운 일용이고, 웹 검색(WebSearch)은 없다.
+
+- `config/office.local.yaml`의 `providers`에 Ollama 서버를 적고, 직원 정의에 `provider: <id>`를 붙이면 그 직원은 로컬 모델로 실행된다.
+  ```yaml
+  providers:
+    - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
+  ```
+- 백엔드가 `ssh -L 11435:127.0.0.1:11434 desktop` 터널을 직접 열고 30초마다 상태를 확인한다. Ollama는 desktop의 127.0.0.1에만 열어 두면 된다.
+- Claude Code의 시스템 프롬프트·도구 정의만 2만 토큰이 넘으므로 **Ollama 컨텍스트를 64k 이상**으로: `OLLAMA_CONTEXT_LENGTH=65536 ollama serve`.
+- 모델은 직원 패널의 드롭다운(desktop에 설치된 모델 목록)에서 바꾼다. 선택은 DB에 저장된다.
+- provider 직원은 `maxConcurrent`(구독 동시 실행 제한)에 포함되지 않고, provider마다 한 번에 하나만 실행된다.
+- 지금은 `kind: ollama`만 지원. 다른 백엔드(예: Codex)는 `kind`를 추가하고 AgentManager에 실행기를 붙이는 식으로 확장한다.
 
 ## 구조
 

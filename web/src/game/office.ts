@@ -1,10 +1,20 @@
+import { FIGURE_DEFAULT_NAMES, type FigureKey } from '../../../shared/protocol.ts';
 import type { AgentStatus, EmployeeView, ServerView, Task } from '../../../shared/protocol.ts';
-import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, SPRITE_H, SPRITE_W, characterSprite, paintMap, type Pose } from './sprites.ts';
+import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
 export const H = 240;
 const WALL_H = 36;
 const ROOM_X = 300; // server room starts here
+/** where the (decorative) professor stands: the aisle between the right desk column and the server room */
+const PROF = { x: 262, y: 150 };
+/** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
+const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string }> = {
+  professor: { tag: { x: PROF.x, y: PROF.y + 4 }, box: { x0: PROF.x - 9, x1: PROF.x + 9, y0: PROF.y - 24, y1: PROF.y + 4 }, ask: '이름 (비우면 "교수님")' },
+  manager: { tag: { x: 150, y: 227 }, box: { x0: 141, x1: 159, y0: 186, y1: 204 }, ask: '이름 (비우면 "매니저")' },
+  // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
+  board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)' },
+};
 
 interface Spot {
   x: number;
@@ -21,12 +31,15 @@ interface Actor {
   tag: HTMLDivElement;
 }
 
-// desks 0-3: 2x2 grid; desk 4: reception desk next to the manager (secretary)
-const deskPos = (i: number) => (i === 4 ? { x: 206, y: 196 } : { x: 40 + (i % 2) * 130, y: 92 + Math.floor(i / 2) * 72 });
+// desks 0-3: 2x2 grid; desk 4: reception desk right of the manager (secretary); desk 5: left of the manager (team lead);
+// desk 6: right column by the server-room glass (secretary 2, on the local model)
+const deskPos = (i: number) =>
+  i === 4 ? { x: 206, y: 196 } : i === 5 ? { x: 40, y: 204 } : i === 6 ? { x: 234, y: 100 } : { x: 40 + (i % 2) * 130, y: 92 + Math.floor(i / 2) * 72 };
 const seatSpot = (i: number): Spot => ({ x: deskPos(i).x + 30, y: deskPos(i).y + 2 });
 const besideSpot = (i: number): Spot => ({ x: deskPos(i).x + 60, y: deskPos(i).y + 16 });
 // lounge spots along the top wall, spaced so bubbles don't collide
-const coffeeSpot = (i: number): Spot => ({ x: 62 + i * 44, y: 72 });
+// (desks past 5 reuse a lounge spot one row lower so nobody wanders into the server room)
+const coffeeSpot = (i: number): Spot => (i < 6 ? { x: 62 + i * 44, y: 72 } : { x: 84 + (i - 6) * 44, y: 80 });
 const rackPos = (i: number) => ({ x: ROOM_X + 12 + (i % 3) * 30, y: 56 + Math.floor(i / 3) * 78 });
 const rackSpot = (i: number, k: number): Spot => ({ x: rackPos(i).x + 11 + (k % 2) * 6, y: rackPos(i).y + 60 });
 
@@ -50,11 +63,14 @@ export class OfficeScene {
   selected: string | null = null;
   onSelect: (id: string | null) => void = () => {};
   onDropTask: (taskId: number, employeeId: string) => void = () => {};
+  onRenameFigure: (key: FigureKey, name: string) => void = () => {};
   private serverLabels = new Map<string, HTMLDivElement>();
   private t = 0;
   /** true while the game view is hidden: skip drawing, keep state updates */
   paused = false;
   private floor: HTMLCanvasElement;
+  private figureTags = new Map<FigureKey, HTMLDivElement>();
+  private boardText = '';
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -64,11 +80,25 @@ export class OfficeScene {
     host.prepend(this.canvas);
     this.g = this.canvas.getContext('2d')!;
     this.floor = this.paintStatic();
+    for (const key of Object.keys(FIGURES) as FigureKey[]) {
+      const tag = document.createElement('div');
+      tag.className = FIGURES[key].tag ? `nametag figure-${key}` : `figure-${key}`;
+      if (!FIGURES[key].tag) tag.hidden = true;
+      tag.textContent = FIGURE_DEFAULT_NAMES[key];
+      overlay.append(tag);
+      this.figureTags.set(key, tag);
+    }
     // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
     new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
 
     this.canvas.addEventListener('click', (ev) => {
+      const fig = this.hitFigure(ev);
+      if (fig) {
+        const name = prompt(FIGURES[fig].ask, this.figureTags.get(fig)?.textContent ?? '');
+        if (name !== null) this.onRenameFigure(fig, name);
+        return;
+      }
       const id = this.hit(ev);
       this.selected = id;
       this.onSelect(id);
@@ -99,6 +129,27 @@ export class OfficeScene {
     this.overlay.style.height = this.canvas.style.height;
   }
 
+  private hitFigure(ev: MouseEvent): FigureKey | null {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * W;
+    const y = ((ev.clientY - r.top) / r.height) * H;
+    for (const [key, f] of Object.entries(FIGURES) as [FigureKey, (typeof FIGURES)[FigureKey]][])
+      if (x >= f.box.x0 && x <= f.box.x1 && y >= f.box.y0 && y <= f.box.y1) return key;
+    return null;
+  }
+
+  setFigureNames(names: Partial<Record<FigureKey, string>>) {
+    for (const [key, name] of Object.entries(names) as [FigureKey, string][]) {
+      const tag = this.figureTags.get(key);
+      if (!tag) continue;
+      tag.textContent = name;
+      if (key === 'board') {
+        this.boardText = name;
+        tag.hidden = !name;
+      }
+    }
+  }
+
   private hit(ev: MouseEvent): string | null {
     const r = this.canvas.getBoundingClientRect();
     const x = ((ev.clientX - r.left) / r.width) * W;
@@ -116,7 +167,7 @@ export class OfficeScene {
   upsert(v: EmployeeView) {
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = coffeeSpot(v.desk);
+      const start = v.stayAtDesk ? seatSpot(v.desk) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
@@ -229,22 +280,14 @@ export class OfficeScene {
     paintMap(g, PLANT, PLANT_COLORS, 284, 40);
     paintMap(g, PLANT, PLANT_COLORS, 6, 220);
     paintMap(g, PLANT, PLANT_COLORS, 284, 220);
-    // manager desk ("you")
-    g.fillStyle = '#6d4c33';
-    g.fillRect(120, 206, 60, 16);
-    g.fillStyle = '#5a3d28';
-    g.fillRect(120, 220, 60, 3);
-    g.fillStyle = '#d9d9d9';
-    g.fillRect(140, 200, 20, 7);
-    g.fillStyle = '#e8c55a';
-    g.fillRect(166, 203, 8, 3);
+    // manager desk ("you") is drawn per frame in drawBossRug/drawBossChair/drawBossDesk (y-sorted with the actors)
     // rug under desks
     g.fillStyle = 'rgba(80,110,140,0.18)';
     g.fillRect(24, 80, 262, 150);
     return c;
   }
 
-  private drawDesk(i: number, status: AgentStatus | null) {
+  private drawDesk(i: number, status: AgentStatus | null, local = false) {
     const g = this.g;
     const { x, y } = deskPos(i);
     // desk top
@@ -272,6 +315,42 @@ export class OfficeScene {
     g.fillRect(x + 41, y + 5, 6, 1);
     g.fillStyle = '#c0504d';
     g.fillRect(x + 51, y + 3, 4, 4);
+    if (local) this.drawLocalBox(x, y, status);
+  }
+
+  /** desk of an employee on a local model: a small GPU tower under the desk, LED blinks while working */
+  private drawLocalBox(x: number, y: number, status: AgentStatus | null) {
+    const g = this.g;
+    g.fillStyle = '#23262d';
+    g.fillRect(x + 44, y + 9, 10, 13);
+    g.fillStyle = '#3a3f4a';
+    g.fillRect(x + 45, y + 10, 8, 1);
+    const busy = status != null && status in MONITOR_GLOW;
+    g.fillStyle = busy && Math.floor(this.t / 8) % 2 ? '#6dff8e' : '#2e8b57';
+    g.fillRect(x + 46, y + 13, 2, 2);
+    g.fillStyle = '#76b900';
+    g.fillRect(x + 46, y + 18, 6, 1);
+  }
+
+  // ---- team lead's desk: a regular desk plus a simple office chair and a small brass nameplate (kept modest
+  // so the manager's desk next to it stays the showpiece)
+  private drawLeadChair(i: number) {
+    const g = this.g;
+    const s = seatSpot(i);
+    g.fillStyle = '#2f3440';
+    g.fillRect(s.x - 6, s.y - 15, 12, 13);
+    g.fillStyle = '#3d4352';
+    g.fillRect(s.x - 5, s.y - 14, 10, 2);
+  }
+
+  private drawLeadDesk(i: number, status: AgentStatus | null) {
+    this.drawDesk(i, status);
+    const g = this.g;
+    const { x, y } = deskPos(i);
+    g.fillStyle = '#b8892e';
+    g.fillRect(x + 24, y + 8, 12, 3);
+    g.fillStyle = '#e8c55a';
+    g.fillRect(x + 24, y + 8, 12, 1);
   }
 
   private drawRacks() {
@@ -308,6 +387,7 @@ export class OfficeScene {
 
   private drawWhiteboard() {
     const g = this.g;
+    if (this.boardText) return; // the manager's message replaces the task-count stickies
     const cols: Array<[string, string]> = [
       ['todo', '#f6d365'],
       ['doing', '#7fb2ff'],
@@ -327,6 +407,7 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
+    if (v.stayAtDesk) return seatSpot(v.desk);
     if (v.status === 'remote') {
       const m = /🖥️\s*(\S+)에/.exec(v.activity);
       let idx = m ? this.servers.findIndex((s) => s.name === m[1]) : -1;
@@ -373,20 +454,145 @@ export class OfficeScene {
       items.push({ y: a.y + (seated ? -0.5 : 0), draw: () => this.drawActor(a, seated) });
     }
     const desks = new Set([0, 1, 2, 3, ...[...this.actors.values()].map((a) => a.view.desk)]);
+    const leadDesks = new Set([...this.actors.values()].filter((a) => a.view.deskStyle === 'lead').map((a) => a.view.desk));
+    const localDesks = new Set([...this.actors.values()].filter((a) => a.view.provider).map((a) => a.view.desk));
     for (const i of desks) {
       const p = deskPos(i);
-      items.push({ y: p.y + 2, draw: () => this.drawDesk(i, deskStatus.get(i) ?? null) });
+      if (leadDesks.has(i)) {
+        items.push({ y: seatSpot(i).y - 1, draw: () => this.drawLeadChair(i) }); // behind the seated actor
+        items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(i, deskStatus.get(i) ?? null) });
+      } else items.push({ y: p.y + 2, draw: () => this.drawDesk(i, deskStatus.get(i) ?? null, localDesks.has(i)) });
     }
+    // the professor: just stands there, solemnly
+    items.push({ y: PROF.y, draw: () => this.drawProfessor() });
     // the manager (you) behind the manager desk
+    items.push({ y: -1e9 + 1, draw: () => this.drawBossRug() });
+    items.push({ y: 205, draw: () => this.drawBossChair() });
     items.push({ y: 206, draw: () => this.drawBoss() });
+    items.push({ y: 207, draw: () => this.drawBossDesk() });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
 
     this.layoutOverlay();
   }
 
+  private drawProfessor() {
+    const g = this.g;
+    // small podium
+    g.fillStyle = '#c9a227';
+    g.fillRect(PROF.x - 12, PROF.y - 2, 24, 1);
+    g.fillStyle = '#4e3020';
+    g.fillRect(PROF.x - 12, PROF.y - 1, 24, 4);
+    g.fillStyle = '#3b2418';
+    g.fillRect(PROF.x - 12, PROF.y + 3, 24, 1);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    g.fillRect(PROF.x - 5, PROF.y - 3, PROF_W - 2, 1);
+    // hair flutters in gusts: a few seconds of wind every ~7 s
+    const gust = this.t % 420 < 150;
+    const frame = gust && Math.floor(this.t / 10) % 2 ? 1 : 0;
+    g.drawImage(professorSprite(this.t % 300 < 5, frame), PROF.x - PROF_W / 2, PROF.y - 2 - PROF_H);
+  }
+
+  // ---- the manager (you): wine rug with gold border, high-back leather chair, wide walnut desk,
+  // dual monitors, brass lamp, gold nameplate, trophy
+  private drawBossRug() {
+    const g = this.g;
+    const x = 106, y = 198;
+    g.fillStyle = '#c9a227';
+    g.fillRect(x, y, 88, 46);
+    g.fillStyle = '#6b2737';
+    g.fillRect(x + 1, y + 1, 86, 44);
+    g.fillStyle = '#7d3044';
+    g.fillRect(x + 4, y + 4, 80, 38);
+    g.fillStyle = 'rgba(201,162,39,0.55)';
+    for (let k = 0; k < 9; k++) g.fillRect(x + 6 + k * 9, y + 37, 3, 1);
+  }
+
+  private drawBossChair() {
+    const g = this.g;
+    const x = 150 - 8;
+    const top = 206 - 19;
+    g.fillStyle = '#3a1712';
+    g.fillRect(x, top + 1, 16, 18);
+    g.fillRect(x + 1, top, 14, 1);
+    g.fillStyle = '#5a2a22';
+    g.fillRect(x + 2, top + 2, 12, 15);
+    g.fillStyle = '#7a3a2e';
+    g.fillRect(x + 3, top + 2, 10, 2);
+    g.fillStyle = '#3a1712'; // tufting
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) g.fillRect(x + 5 + c * 5, top + 6 + r * 5, 1, 1);
+    g.fillStyle = '#e8c55a'; // brass studs
+    g.fillRect(x, top + 2, 1, 1);
+    g.fillRect(x + 15, top + 2, 1, 1);
+  }
+
+  private drawBossDesk() {
+    const g = this.g;
+    const x = 114, y = 204; // 72 px wide, centred on the manager
+    // brass lamp on the far left with a soft warm cone
+    g.fillStyle = 'rgba(255,214,120,0.16)';
+    g.beginPath();
+    g.moveTo(x + 4, y - 9);
+    g.lineTo(x - 2, y + 8);
+    g.lineTo(x + 16, y + 8);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#b8892e';
+    g.fillRect(x + 4, y - 9, 1, 12);
+    g.fillRect(x + 2, y + 2, 5, 1);
+    g.fillStyle = '#2f6b4f';
+    g.fillRect(x + 1, y - 13, 9, 4);
+    g.fillStyle = '#e8c55a';
+    g.fillRect(x + 1, y - 10, 9, 1);
+    // dual monitors (backs)
+    for (const mx of [x + 12, x + 44]) {
+      g.fillStyle = '#23262d';
+      g.fillRect(mx, y - 11, 16, 12);
+      g.fillStyle = '#3a3f4a';
+      g.fillRect(mx + 1, y - 10, 14, 1);
+      g.fillStyle = '#23262d';
+      g.fillRect(mx + 6, y + 1, 4, 2);
+    }
+    // walnut desk top + gold moulding
+    g.fillStyle = '#4e3020';
+    g.fillRect(x, y, 72, 14);
+    g.fillStyle = '#5f3a27';
+    g.fillRect(x + 1, y + 1, 70, 2);
+    g.fillStyle = '#c9a227';
+    g.fillRect(x, y + 11, 72, 1);
+    // front panel, drawers with gold pulls
+    g.fillStyle = '#3b2418';
+    g.fillRect(x, y + 12, 72, 4);
+    g.fillRect(x + 2, y + 16, 12, 6);
+    g.fillRect(x + 58, y + 16, 12, 6);
+    g.fillStyle = '#e8c55a';
+    g.fillRect(x + 7, y + 18, 2, 1);
+    g.fillRect(x + 63, y + 18, 2, 1);
+    // gold nameplate
+    g.fillStyle = '#8a6d1c';
+    g.fillRect(x + 28, y + 6, 16, 4);
+    g.fillStyle = '#e8c55a';
+    g.fillRect(x + 28, y + 6, 16, 3);
+    g.fillStyle = '#5a4512';
+    g.fillRect(x + 31, y + 7, 10, 1);
+    // papers + fountain pen
+    g.fillStyle = '#f2f2f2';
+    g.fillRect(x + 14, y + 4, 9, 6);
+    g.fillStyle = '#d0d0d0';
+    g.fillRect(x + 15, y + 6, 7, 1);
+    g.fillStyle = '#1c1c1c';
+    g.fillRect(x + 24, y + 5, 1, 4);
+    // trophy
+    g.fillStyle = '#e8c55a';
+    g.fillRect(x + 62, y + 1, 5, 3);
+    g.fillRect(x + 64, y + 4, 1, 3);
+    g.fillRect(x + 62, y + 7, 5, 2);
+    g.fillStyle = '#fff3b0';
+    g.fillRect(x + 63, y + 1, 1, 2);
+  }
+
   private drawBoss() {
     const spr = characterSprite({ hair: '#2e2e2e', shirt: '#4a4a5a', pants: '#2b2b33', skin: '#f1c27d' }, 'stand', this.t % 240 < 6);
-    this.g.drawImage(spr, 150 - SPRITE_W / 2, 206 - SPRITE_H + 4);
+    this.g.drawImage(spr, 150 - SPRITE_W / 2, 206 - SPRITE_H + 2);
   }
 
   private drawActor(a: Actor, seated: boolean) {
@@ -440,6 +646,20 @@ export class OfficeScene {
 
   private layoutOverlay() {
     const s = this.scale;
+    for (const [key, tag] of this.figureTags) {
+      const f = FIGURES[key];
+      if (f.tag) {
+        tag.style.left = `${f.tag.x * s}px`;
+        tag.style.top = `${f.tag.y * s}px`;
+      } else {
+        // text overlay sized to the inner whiteboard
+        tag.style.left = `${(f.box.x0 + 3) * s}px`;
+        tag.style.top = `${(f.box.y0 + 2) * s}px`;
+        tag.style.width = `${(f.box.x1 - f.box.x0 - 6) * s}px`;
+        tag.style.height = `${(f.box.y1 - f.box.y0 - 4) * s}px`;
+        tag.style.fontSize = `${Math.max(12, 9 * s)}px`;
+      }
+    }
     for (const el of this.serverLabels.values()) {
       el.style.left = `${Number(el.dataset.x) * s}px`;
       el.style.top = `${Number(el.dataset.y) * s}px`;

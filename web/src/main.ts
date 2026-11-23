@@ -1,11 +1,12 @@
 import './style.css';
-import type { ClientMsg, ServerMsg, Snapshot } from '../../shared/protocol.ts';
+import { FIGURE_DEFAULT_NAMES, type ClientMsg, type ServerMsg, type Snapshot } from '../../shared/protocol.ts';
 import { OfficeScene } from './game/office.ts';
 import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, renderUsagePanel, sortedEmployees } from './ui/console.ts';
 import {
   type ViewMode,
   type UIState,
   bindNewTaskForm,
+  confirmApprove,
   renderApprovals,
   renderBoard,
   renderEmployeePanel,
@@ -14,11 +15,14 @@ import {
   renderRoutines,
 } from './ui/panels.ts';
 import { applyView, initialView } from './ui/view.ts';
+import { renderReportFeed } from './ui/feed.ts';
+import { renderTodos, todosUpdated } from './ui/todos.ts';
+import { initReports, onReportContent, renderReports, unreadReports } from './ui/reports.ts';
 
 const FEED_MAX = 300;
 
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0 } as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [] } as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
@@ -43,6 +47,7 @@ function select(id: string | null) {
 }
 scene.onSelect = select;
 scene.onDropTask = (taskId, employeeId) => send({ t: 'assignTask', taskId, employeeId });
+scene.onRenameFigure = (key, name) => send({ t: 'renameFigure', key, name });
 
 function setView(v: ViewMode) {
   state.view = v;
@@ -53,7 +58,17 @@ function setView(v: ViewMode) {
 
 function renderAll() {
   renderHeader(state, send);
+  const unread = unreadReports(state);
+  const badge = document.getElementById('reports-unread')!;
+  badge.hidden = unread === 0;
+  badge.textContent = String(unread);
+  if (state.view === 'reports') {
+    renderReports(state);
+    return;
+  }
   // shared panels (live in whichever view is active)
+  renderTodos(state, send);
+  renderReportFeed(state);
   renderApprovals(state, send);
   renderEmployeePanel(state, send);
   renderRoutines(state, send);
@@ -92,6 +107,7 @@ function onMsg(m: ServerMsg) {
       state.feed = [...(m.data.recentLogs ?? [])];
       scene.setEmployees(m.data.employees);
       scene.setServers(m.data.servers);
+      scene.setFigureNames(m.data.figureNames ?? FIGURE_DEFAULT_NAMES);
       scene.tasks = m.data.tasks;
       if (state.selected) send({ t: 'getLogs', employeeId: state.selected });
       break;
@@ -101,7 +117,8 @@ function onMsg(m: ServerMsg) {
       if (i >= 0) s.employees[i] = m.data;
       else s.employees.push(m.data);
       if (!prev || prev.status !== m.data.status || prev.activity !== m.data.activity) state.empUpdated.set(m.data.id, Date.now());
-      s.running = s.employees.filter((e) => !['idle', 'queued', 'done', 'error'].includes(e.status)).length;
+      // header shows subscription runs only; employees on a local provider don't count against maxConcurrent
+      s.running = s.employees.filter((e) => !e.provider && !['idle', 'queued', 'done', 'error'].includes(e.status)).length;
       scene.upsert(m.data);
       if (prev && prev.status !== 'done' && m.data.status === 'done') notify(`${m.data.name} 완료`, m.data.activity);
       break;
@@ -111,6 +128,13 @@ function onMsg(m: ServerMsg) {
       if (i >= 0) s.tasks[i] = m.data;
       else s.tasks.push(m.data);
       scene.tasks = s.tasks;
+      break;
+    }
+    case 'provider': {
+      s.providers ??= [];
+      const i = s.providers.findIndex((p) => p.id === m.data.id);
+      if (i >= 0) s.providers[i] = m.data;
+      else s.providers.push(m.data);
       break;
     }
     case 'taskDeleted':
@@ -142,12 +166,40 @@ function onMsg(m: ServerMsg) {
     case 'usage':
       s.usage = m.data;
       break;
+    case 'figureName':
+      s.figureNames = { ...s.figureNames, [m.key]: m.name };
+      scene.setFigureNames({ [m.key]: m.name });
+      break;
     case 'routine': {
       const i = s.routines.findIndex((r) => r.id === m.data.id);
       if (i >= 0) s.routines[i] = m.data;
       else s.routines.push(m.data);
       break;
     }
+    case 'skills':
+      s.skills = m.data;
+      break;
+    case 'reports':
+      s.reports = m.data;
+      break;
+    case 'feed': {
+      const i = s.feed.findIndex((f) => f.id === m.data.id);
+      if (i >= 0) s.feed.splice(i, 1);
+      s.feed.push(m.data); // an updated report moves back to the bottom, like a new message
+      if (s.feed.length > 200) s.feed.splice(0, s.feed.length - 200);
+      if (m.data.kind === 'report' && i < 0) notify('📄 새 보고서', m.data.title);
+      break;
+    }
+    case 'todos':
+      s.todos = m.data;
+      todosUpdated(m.data);
+      break;
+    case 'reportContent':
+      onReportContent(m.path, m.content, m.mtime);
+      break;
+    case 'routineDeleted':
+      s.routines = s.routines.filter((r) => r.id !== m.id);
+      break;
     case 'log': {
       state.feed.push(m.data);
       if (state.feed.length > FEED_MAX) state.feed.splice(0, state.feed.length - FEED_MAX);
@@ -186,6 +238,10 @@ function connect() {
   };
 }
 
+window.addEventListener('office-toast', (ev) => {
+  const d = (ev as CustomEvent<{ text: string; level?: 'info' | 'warn' | 'error' }>).detail;
+  toast(d.text, d.level ?? 'info');
+});
 document.getElementById('notify-btn')?.addEventListener('click', () => {
   if ('Notification' in window) void Notification.requestPermission().then(() => renderAll());
 });
@@ -199,7 +255,7 @@ window.addEventListener('keydown', (ev) => {
   const emps = sortedEmployees(state);
   if (ev.key === '`') {
     ev.preventDefault();
-    setView(state.view === 'game' ? 'console' : 'game');
+    setView(state.view === 'game' ? 'console' : 'game'); // reports tab is reached by its button
     return;
   }
   const n = Number(ev.key);
@@ -221,11 +277,13 @@ window.addEventListener('keydown', (ev) => {
   }
   const first = state.snap.approvals[0];
   if (first && (ev.key === 'a' || ev.key === 'd')) {
+    if (ev.key === 'a' && !confirmApprove(first, state.snap)) return;
     send({ t: 'approve', id: first.id, allow: ev.key === 'a' });
     toast(`${ev.key === 'a' ? '승인' : '거부'}: ${first.toolName}`, ev.key === 'a' ? 'info' : 'warn');
   }
 });
 
+initReports(send, () => setView('reports'));
 bindNewTaskForm(send);
 bindConsoleTaskForm(send);
 setView(state.view);

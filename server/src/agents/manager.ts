@@ -1,5 +1,5 @@
 import { query, type Query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentStatus, EmployeeView, LogLine } from '../../../shared/protocol.ts';
+import type { AgentStatus, EmployeeView, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { OfficeConfig, RoleConfig } from '../config.ts';
@@ -7,11 +7,27 @@ import type { Store } from '../db.ts';
 import { labToolsServer } from '../mcp/labTools.ts';
 import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
+import type { ProviderHub } from '../providers.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
 
 interface Work {
   text: string;
+  taskId: number | null;
+  /** extra auto-allow rules for this run only (an approved skill's office-allow) */
+  extraAllow: string[];
+  /** short title for the report feed, e.g. "⏰ 아침 브리핑" */
+  label: string;
+  /** force 'ask' for this run (task marked 🔒 by the manager or the delegating lead) */
+  requireApproval: boolean;
+}
+
+/** Emitted on the bus as 'runFinished' when a run ends (not when stopped by the manager). */
+export interface RunFinished {
+  employeeId: string;
+  label: string;
+  text: string;
+  ok: boolean;
   taskId: number | null;
 }
 
@@ -22,8 +38,10 @@ class Employee {
   abort: AbortController | null = null;
   current: Work | null = null;
   lastText = '';
+  /** mode requested for the current run (to report a fallback from auto) */
+  wantedPermission: PermissionSetting = 'ask';
 
-  constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number) {
+  constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number, permission: PermissionSetting) {
     this.view = {
       id: role.id,
       name: role.name,
@@ -36,6 +54,10 @@ class Employee {
       sessionId,
       cwd: '',
       costUsd,
+      stayAtDesk: role.stayAtDesk ?? false,
+      deskStyle: role.deskStyle,
+      permission,
+      provider: role.provider,
     };
   }
 }
@@ -48,13 +70,51 @@ export function isAutoAllowed(rules: Iterable<string>, toolName: string): boolea
   return false;
 }
 
+// anything that could chain, substitute or redirect a second command
+const SHELL_META = /[;&|`<>\n\r]|\$\(/;
+
+/**
+ * Like isAutoAllowed, plus `Bash(<prefix>*)`: a Bash command that starts with <prefix>
+ * and contains no shell metacharacters (so "<prefix> ; rm -rf ~" is not covered).
+ */
+export function matchesRule(rule: string, toolName: string, input: Record<string, unknown>): boolean {
+  const m = rule.match(/^Bash\((.+)\*\)$/s);
+  if (m) {
+    if (toolName !== 'Bash') return false;
+    const cmd = String(input?.command ?? '').trim();
+    return cmd.startsWith(m[1]) && !SHELL_META.test(cmd);
+  }
+  if (rule.includes('(')) return false; // other parenthesised forms are not supported
+  return isAutoAllowed([rule], toolName);
+}
+
+/** A 🔒 task always asks; otherwise the employee's own setting. Only ever tightens. */
+export function effectivePermission(employee: PermissionSetting, requireApproval: boolean): PermissionSetting {
+  return requireApproval ? 'ask' : employee;
+}
+
+/**
+ * Index of the next waiting employee that may start, or -1. Claude employees share the subscription limit
+ * (maxConcurrent, FIFO); employees on a provider bypass it and get one slot per provider (one GPU each).
+ */
+export function nextRunnable(waiting: { provider?: string }[], running: number, maxConcurrent: number, busyProviders: ReadonlySet<string>): number {
+  return waiting.findIndex((w) => (w.provider ? !busyProviders.has(w.provider) : running < maxConcurrent));
+}
+
 /** Runs each employee as a Claude Agent SDK session, with a global concurrency limit. */
 export class AgentManager {
   private emps = new Map<string, Employee>();
   private waiting: Employee[] = []; // FIFO of employees waiting for a slot
-  private running = 0;
+  private running = 0; // Claude (subscription) runs only
+  private busyProviders = new Set<string>();
   /** set by index.ts; needed for employees with officeTools */
   officeApi: OfficeApi | null = null;
+  /** local plugins loaded into every session (the office skills plugin); set by index.ts */
+  pluginDirs: string[] = [];
+  /** extra readable folders for every session (the attachments store); set by index.ts */
+  extraDirs: string[] = [];
+  /** non-Claude backends; set by index.ts */
+  providers: ProviderHub | null = null;
 
   constructor(
     private office: OfficeConfig,
@@ -65,7 +125,9 @@ export class AgentManager {
   ) {
     for (const r of roles) {
       const s = store.getSession(r.id);
-      this.emps.set(r.id, new Employee(r, s.sessionId, s.costUsd));
+      const e = new Employee(r, s.sessionId, s.costUsd, store.getEmployeePerm(r.id) ?? r.permissionMode ?? office.permissionMode);
+      e.view.name = store.getEmployeeName(r.id) ?? r.name;
+      this.emps.set(r.id, e);
     }
   }
 
@@ -98,9 +160,10 @@ export class AgentManager {
   }
 
   /** Give an employee an instruction. Queued if they're busy or the office is at capacity. */
-  instruct(employeeId: string, text: string, taskId: number | null = null) {
+  instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean } = {}) {
     const e = this.emp(employeeId);
-    e.inbox.push({ text, taskId });
+    const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
+    e.inbox.push({ text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval });
     this.log(e, 'user', taskId ? `[작업 #${taskId}] ${text}` : text);
     if (!e.current && !this.waiting.includes(e)) {
       this.waiting.push(e);
@@ -110,13 +173,18 @@ export class AgentManager {
   }
 
   private pump() {
-    while (this.running < this.office.maxConcurrent && this.waiting.length) {
-      const e = this.waiting.shift()!;
+    for (;;) {
+      const i = nextRunnable(this.waiting.map((w) => ({ provider: w.role.provider })), this.running, this.office.maxConcurrent, this.busyProviders);
+      if (i < 0) break;
+      const [e] = this.waiting.splice(i, 1);
       const work = e.inbox.shift();
       if (!work) continue;
-      this.running++;
+      const provider = e.role.provider;
+      if (provider) this.busyProviders.add(provider);
+      else this.running++;
       void this.run(e, work).finally(() => {
-        this.running--;
+        if (provider) this.busyProviders.delete(provider);
+        else this.running--;
         e.current = null;
         if (e.inbox.length) this.waiting.push(e);
         this.pump();
@@ -132,6 +200,26 @@ export class AgentManager {
     e.abort?.abort();
     e.q?.close();
     if (!e.current) this.set(e, 'idle', '☕ 대기 중');
+  }
+
+  /** Rename from the UI: replaces the quoted nickname in the configured name (문헌 리서처 "Ada" → 문헌 리서처 "Bo"). */
+  rename(employeeId: string, nick: string) {
+    const e = this.emp(employeeId);
+    const n = nick.replace(/["“”]/g, '').trim().slice(0, 20);
+    const name = !n ? e.role.name : /"[^"]*"/.test(e.role.name) ? e.role.name.replace(/"[^"]*"/, `"${n}"`) : n;
+    this.store.setEmployeeName(e.role.id, n ? name : null);
+    e.view.name = name;
+    bus.send({ t: 'employee', data: { ...e.view } });
+  }
+
+  /** UI toggle; applies from the next run (a running session keeps its mode) */
+  setPermission(employeeId: string, mode: PermissionSetting) {
+    const e = this.emp(employeeId);
+    if (mode !== 'auto' && mode !== 'ask') throw new Error(`잘못된 권한 모드: ${mode}`);
+    this.store.setEmployeePerm(e.role.id, mode);
+    e.view.permission = mode;
+    this.log(e, 'system', mode === 'auto' ? '🤖 자동 모드로 전환 (다음 지시부터)' : '✋ 승인 모드로 전환 (다음 지시부터)');
+    bus.send({ t: 'employee', data: { ...e.view } });
   }
 
   resetSession(employeeId: string) {
@@ -164,21 +252,42 @@ export class AgentManager {
     const autoAllow = new Set(e.role.autoAllow);
     const mcpServers: Record<string, any> = { lab: labToolsServer(e.role.id, cwd, this.registry, this.store) };
     if (e.role.officeTools && this.officeApi) mcpServers.office = officeToolsServer(e.role.id, this.officeApi);
-    const model = e.role.model || this.office.model || undefined;
+    let model = e.role.model || this.office.model || undefined;
+    let env: Record<string, string> | undefined;
+    if (e.role.provider) {
+      const link = this.providers?.get(e.role.provider);
+      const rt = link ? link.runtime() : { error: `설정에 없는 provider: ${e.role.provider} (office.local.yaml 의 providers 확인)` };
+      if ('error' in rt) {
+        this.log(e, 'error', `🖥 ${rt.error}`);
+        this.set(e, 'error', '⚠️ 로컬 모델 연결 실패');
+        return;
+      }
+      ({ model, env } = rt);
+    }
 
+    const perm = effectivePermission(e.view.permission, work.requireApproval);
+    e.wantedPermission = perm;
     const q = query({
       prompt: work.text,
       options: {
         cwd,
+        additionalDirectories: this.extraDirs,
         model,
+        env,
         abortController: abort,
         resume: e.view.sessionId ?? undefined,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: e.role.systemPrompt },
         allowedTools: [...autoAllow],
-        permissionMode: 'default',
+        permissionMode: perm === 'auto' ? 'auto' : 'default',
         mcpServers,
+        // provider employees skip the office skills plugin to save the (small) local context
+        plugins: (e.role.provider ? [] : this.pluginDirs).map((path) => ({ type: 'local' as const, path })),
         canUseTool: async (toolName, input, { signal }) => {
           if (isAutoAllowed(autoAllow, toolName)) return { behavior: 'allow', updatedInput: input };
+          if (work.extraAllow.some((r) => matchesRule(r, toolName, input))) {
+            this.log(e, 'system', `🔓 스킬 권한으로 자동 허용: ${describeToolCall(toolName, input as any)}`);
+            return { behavior: 'allow', updatedInput: input };
+          }
           const prev = { status: e.view.status, activity: e.view.activity };
           this.set(e, 'waiting_permission', `✋ 승인 필요: ${describeToolCall(toolName, input as any).slice(0, 50)}`);
           this.log(e, 'system', `승인 요청: ${describeToolCall(toolName, input as any)}`);
@@ -208,7 +317,9 @@ export class AgentManager {
       this.set(e, 'idle', '☕ 대기 중');
       return;
     }
-    if (e.view.status !== 'error') this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
+    const ok = e.view.status !== 'error';
+    if (ok) this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
+    bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null } satisfies RunFinished);
     if (work.taskId != null) {
       const t = this.store.updateTask(work.taskId, { state: 'review', result: e.lastText || null });
       if (t) bus.send({ t: 'task', data: t });
@@ -223,10 +334,15 @@ export class AgentManager {
     switch (m.type) {
       case 'system':
         if (m.subtype === 'init') {
+          const mode: string | undefined = m.permissionMode;
+          const modeKo = mode === 'auto' ? '🤖 자동 모드' : mode === 'default' ? '✋ 승인 모드' : mode ?? '?';
           if (e.view.sessionId !== m.session_id) {
+            this.log(e, 'system', `🧠 모델: ${m.model} · ${modeKo}`);
             e.view.sessionId = m.session_id;
             this.store.saveSession(e.role.id, m.session_id, e.view.costUsd, e.view.cwd);
-          }
+          } else this.log(e, 'system', modeKo);
+          if (e.wantedPermission === 'auto' && mode && mode !== 'auto')
+            this.log(e, 'system', `⚠️ 이 환경에서는 자동 모드를 쓸 수 없어 ${modeKo}로 실행합니다`);
         }
         break;
       case 'assistant': {
@@ -249,7 +365,7 @@ export class AgentManager {
         if (!m.parent_tool_use_id && e.view.status !== 'waiting_permission') this.set(e, 'thinking', '💭 결과 검토 중');
         break;
       case 'result': {
-        e.view.costUsd += m.total_cost_usd ?? 0;
+        if (!e.role.provider) e.view.costUsd += m.total_cost_usd ?? 0; // a local model's "cost" is meaningless
         this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd);
         if (m.subtype === 'success') {
           if (m.result) e.lastText = m.result;

@@ -106,6 +106,23 @@ describe('Store', () => {
     s.setJobState(j.id, 'completed');
     expect(s.activeJobs()).toHaveLength(0);
   });
+
+  it('stores employee display names', () => {
+    const s = new Store(':memory:');
+    expect(s.getEmployeeName('lit')).toBeNull();
+    s.setEmployeeName('lit', '문헌 리서처 "Bo"');
+    expect(s.getEmployeeName('lit')).toBe('문헌 리서처 "Bo"');
+    s.setEmployeeName('lit', null);
+    expect(s.getEmployeeName('lit')).toBeNull();
+  });
+
+  it('records who delegated a task', () => {
+    const s = new Store(':memory:');
+    expect(s.createTask('직접', '', null).createdBy).toBeNull();
+    const t = s.createTask('위임', '', null, 'lead');
+    expect(s.getTask(t.id)?.createdBy).toBe('lead');
+    expect(s.updateTask(t.id, { state: 'review' })?.createdBy).toBe('lead');
+  });
 });
 
 import { cronMatches, nextRun, parseCron } from '../src/cron.ts';
@@ -158,8 +175,59 @@ describe('RoutineScheduler', () => {
     expect(sch.list()[0].nextRun).toBeNull();
   });
   it('skips routines for unknown employees', () => {
-    const sch = new RoutineScheduler([{ id: 'x', name: 'X', schedule: '0 9 * * *', employee: 'ghost', prompt: '' }], new Store(':memory:'), () => {}, () => false);
+    const sch = new RoutineScheduler([{ id: 'x', name: 'X', schedule: '0 9 * * *', employee: 'ghost', prompt: 'p' }], new Store(':memory:'), () => {}, () => false);
     expect(sch.list()).toHaveLength(0);
+  });
+
+  const seed = [{ id: 'y', name: 'Y', schedule: '0 9 * * *', employee: 'sec', prompt: 'p', enabled: false }];
+  const isEmp = (id: string) => id === 'sec' || id === 'lit';
+
+  it('seeds YAML routines into the DB once; DB wins afterwards', () => {
+    const store = new Store(':memory:');
+    const a = new RoutineScheduler(seed, store, () => {}, isEmp);
+    expect(a.list().map((r) => [r.id, r.enabled])).toEqual([['y', false]]);
+    a.update('y', { name: 'Y2' });
+    const b = new RoutineScheduler(seed, store, () => {}, isEmp);
+    expect(b.list().map((r) => r.name)).toEqual(['Y2']);
+  });
+
+  it('keeps a toggle saved before the DB migration', () => {
+    const store = new Store(':memory:');
+    store.setRoutineState('y', { enabled: true });
+    expect(new RoutineScheduler(seed, store, () => {}, isEmp).list()[0].enabled).toBe(true);
+  });
+
+  it('creates, updates and fires routines without restart', () => {
+    const fired: string[] = [];
+    const sch = new RoutineScheduler([], new Store(':memory:'), (emp, prompt) => fired.push(`${emp}:${prompt.split('\n')[1]}`), isEmp);
+    const r = sch.create({ name: '점심', schedule: '0 12 * * *', employee: 'lit', prompt: 'go' });
+    expect(r.id).toMatch(/^r-/);
+    const now = new Date(2026, 10, 23, 8, 0);
+    expect(sch.view((sch as any).find(r.id), now).nextRun).toBe(new Date(2026, 10, 23, 12, 0).getTime());
+    sch.update(r.id, { schedule: '30 10 * * *', prompt: 'go2' });
+    expect(sch.view((sch as any).find(r.id), now).nextRun).toBe(new Date(2026, 10, 23, 10, 30).getTime());
+    sch.tick(new Date(2026, 10, 23, 10, 30, 3));
+    expect(fired).toEqual(['lit:go2']);
+  });
+
+  it('rejects bad cron / unknown employee / empty prompt', () => {
+    const sch = new RoutineScheduler([], new Store(':memory:'), () => {}, isEmp);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * *', employee: 'sec', prompt: 'p' })).toThrow(/cron/);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'ghost', prompt: 'p' })).toThrow(/직원/);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', prompt: ' ' })).toThrow(/prompt/);
+    expect(sch.list()).toHaveLength(0);
+    const r = sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', prompt: 'p' });
+    expect(() => sch.update(r.id, { schedule: '99 9 * * *' })).toThrow(/cron/);
+    expect(sch.list()[0].schedule).toBe('0 9 * * *');
+  });
+
+  it('deleted routines stay deleted even if still in the YAML', () => {
+    const store = new Store(':memory:');
+    const a = new RoutineScheduler(seed, store, () => {}, isEmp);
+    a.remove('y');
+    expect(a.list()).toHaveLength(0);
+    expect(new RoutineScheduler(seed, store, () => {}, isEmp).list()).toHaveLength(0);
+    expect(() => a.run('y')).toThrow();
   });
 });
 
@@ -209,5 +277,437 @@ describe('toUsageRows', () => {
       ['session', 80, 'warning'],
       ['weekly_all', 10, 'normal'],
     ]);
+  });
+});
+
+import { matchesRule } from '../src/agents/manager.ts';
+import { SkillLibrary } from '../src/skills.ts';
+import { routinePrompt } from '../src/routines.ts';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
+describe('matchesRule (skill auto-allow)', () => {
+  const rule = 'Bash(python3 "/v/.scripts/daily_note.py" --vault "/v"*)';
+  it('Bash prefix rules match only plain commands with that prefix', () => {
+    expect(matchesRule(rule, 'Bash', { command: 'python3 "/v/.scripts/daily_note.py" --vault "/v"' })).toBe(true);
+    expect(matchesRule(rule, 'Bash', { command: 'python3 "/v/.scripts/daily_note.py" --vault "/v" --dry-run' })).toBe(true);
+    expect(matchesRule(rule, 'Bash', { command: 'python3 "/v/.scripts/other.py"' })).toBe(false);
+    expect(matchesRule(rule, 'Read', { command: 'python3 "/v/.scripts/daily_note.py" --vault "/v"' })).toBe(false);
+  });
+  it('rejects chaining, substitution and redirection', () => {
+    for (const tail of [' ; rm -rf ~', ' && curl x', ' | sh', ' > /etc/x', ' $(id)', ' `id`', '\nrm x', ' & sleep 1'])
+      expect(matchesRule(rule, 'Bash', { command: `python3 "/v/.scripts/daily_note.py" --vault "/v"${tail}` })).toBe(false);
+  });
+  it('plain rules behave like isAutoAllowed; other parenthesised forms are ignored', () => {
+    expect(matchesRule('mcp__office__list_tasks', 'mcp__office__list_tasks', {})).toBe(true);
+    expect(matchesRule('mcp__lab', 'mcp__lab__submit_job', {})).toBe(true);
+    expect(matchesRule('Edit(/v/**)', 'Edit', { file_path: '/v/x' })).toBe(false);
+  });
+});
+
+describe('SkillLibrary', () => {
+  const setup = () => {
+    const store = new Store(':memory:');
+    const lib = new SkillLibrary(mkdtempSync(join(tmpdir(), 'office-skills-')), store);
+    lib.ensure();
+    return { store, lib };
+  };
+  it('writes a plugin manifest and lists saved skills as approved', () => {
+    const { lib } = setup();
+    expect(JSON.parse(readFileSync(join(lib.dir, '.claude-plugin/plugin.json'), 'utf8')).name).toBe('office');
+    const v = lib.save('daily-note', '데일리 노트', '# 본문', ['Bash(python3 x*)']);
+    expect(v).toEqual({ name: 'daily-note', description: '데일리 노트', allow: ['Bash(python3 x*)'], approved: true });
+    expect(lib.list().map((k) => k.name)).toEqual(['daily-note']);
+    expect(lib.allowFor('daily-note')).toEqual(['Bash(python3 x*)']);
+    expect(lib.has('daily-note')).toBe(true);
+    expect(lib.has('nope')).toBe(false);
+  });
+  it('an edited skill loses its auto-allow until re-approved', () => {
+    const { lib } = setup();
+    lib.save('a-skill', 'd', 'body', ['Bash(ls*)']);
+    const f = join(lib.dir, 'skills/a-skill/SKILL.md');
+    writeFileSync(f, readFileSync(f, 'utf8').replace('Bash(ls*)', 'Bash(*)'));
+    expect(lib.allowFor('a-skill')).toBeNull();
+    expect(lib.view('a-skill')!.approved).toBe(false);
+    lib.approve('a-skill');
+    expect(lib.allowFor('a-skill')).toEqual(['Bash(*)']);
+  });
+  it('rejects bad names and empty content', () => {
+    const { lib } = setup();
+    expect(() => lib.save('../evil', 'd', 'b', [])).toThrow(/이름/);
+    expect(() => lib.save('Bad Name', 'd', 'b', [])).toThrow(/이름/);
+    expect(() => lib.save('ok-name', ' ', 'b', [])).toThrow(/설명/);
+    expect(lib.allowFor('missing')).toBeNull();
+  });
+});
+
+describe('RoutineScheduler with skills', () => {
+  const isEmp = () => true;
+  it('requires an existing skill or a prompt, and builds a skill instruction', () => {
+    const fired: Array<[string, string | null]> = [];
+    const sch = new RoutineScheduler([], new Store(':memory:'), (_e, p, _n, sk) => fired.push([p, sk]), isEmp, (n) => n === 'daily-note');
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', skill: 'ghost' })).toThrow(/스킬/);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec' })).toThrow(/prompt/);
+    const r = sch.create({ name: '노트', schedule: '0 9 * * *', employee: 'sec', skill: 'daily-note' });
+    expect(r.skill).toBe('daily-note');
+    sch.run(r.id, new Date(2026, 10, 23, 9, 0));
+    expect(fired[0][1]).toBe('daily-note');
+    expect(fired[0][0]).toContain('`office:daily-note`');
+    expect(fired[0][0]).not.toContain('추가 메모');
+    sch.update(r.id, { skill: '', prompt: 'plain' });
+    expect(sch.list()[0].skill).toBeNull();
+  });
+  it('routinePrompt appends notes for skill routines and passes plain prompts through', () => {
+    const now = new Date(2026, 10, 23, 9, 0);
+    expect(routinePrompt({ name: 'n', prompt: '오늘은 짧게', skill: 's' }, now)).toMatch(/office:s[\s\S]*추가 메모: 오늘은 짧게$/);
+    expect(routinePrompt({ name: 'n', prompt: 'do it', skill: null }, now)).toMatch(/^\[루틴: n · .*\]\ndo it$/);
+  });
+  it('adds the skill column to a routines table from the previous version', () => {
+    const f = join(mkdtempSync(join(tmpdir(), 'office-db-')), 'office.db');
+    const old = new DatabaseSync(f);
+    old.exec(`CREATE TABLE routines (id TEXT PRIMARY KEY, name TEXT NOT NULL, schedule TEXT NOT NULL, employee TEXT NOT NULL,
+      prompt TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, deletedAt INTEGER);
+      INSERT INTO routines VALUES ('x', 'X', '0 9 * * *', 'sec', 'p', 1, 1, 1, NULL);`);
+    old.close();
+    const store = new Store(f);
+    expect(store.listRoutines()[0]).toMatchObject({ id: 'x', skill: null });
+  });
+});
+
+import { ReportLibrary, reportRoots } from '../src/reports.ts';
+import { mkdirSync, utimesSync } from 'node:fs';
+
+describe('ReportLibrary', () => {
+  const setup = () => {
+    const ws = mkdtempSync(join(tmpdir(), 'office-ws-'));
+    const w = (rel: string, text: string) => {
+      const p = join(ws, rel);
+      mkdirSync(join(p, '..'), { recursive: true });
+      writeFileSync(p, text);
+      return p;
+    };
+    w('secretary/reports/daily/2026-11-23-mail.md', '# 11/23 메일\n\n본문');
+    w('secretary/reports/weekly/w47.md', '본문만 있고 제목 없음');
+    w('secretary/reports/notes.txt', 'not markdown');
+    w('secretary/reports/.hidden/x.md', '# hidden');
+    w('secretary/other.md', '# outside reports');
+    w('office-skills/reports/skill.md', '# skill');
+    w('lit/reports/papers.md', '# 논문');
+    const roots = () => reportRoots(ws, [], (dir) => (dir.endsWith('secretary') ? 'sec' : null));
+    return { ws, w, lib: new ReportLibrary(roots) };
+  };
+
+  it('collects .md under <desk>/reports, with titles and employees', () => {
+    const { lib } = setup();
+    const list = lib.scan();
+    expect(list.map((r) => r.path).sort()).toEqual([
+      'lit/reports/papers.md',
+      'secretary/reports/daily/2026-11-23-mail.md',
+      'secretary/reports/weekly/w47.md',
+    ]);
+    const mail = list.find((r) => r.path.endsWith('mail.md'))!;
+    expect(mail).toMatchObject({ root: 'secretary/reports', employeeId: 'sec', title: '11/23 메일' });
+    expect(list.find((r) => r.path.endsWith('w47.md'))!.title).toBe('w47');
+    expect(list.find((r) => r.path.startsWith('lit/'))!.employeeId).toBeNull();
+  });
+
+  it('reads only listed files', () => {
+    const { lib } = setup();
+    lib.scan();
+    expect(lib.read('secretary/reports/daily/2026-11-23-mail.md').content).toContain('본문');
+    expect(() => lib.read('secretary/other.md')).toThrow();
+    expect(() => lib.read('secretary/reports/../other.md')).toThrow();
+    expect(() => lib.read('/etc/passwd')).toThrow();
+  });
+
+  it('reports new and modified files on the next scan', () => {
+    const { lib, w, ws } = setup();
+    lib.scan();
+    expect(lib.changes().any).toBe(false);
+    w('secretary/reports/daily/new.md', '# 새 보고서');
+    const touched = join(ws, 'lit/reports/papers.md');
+    utimesSync(touched, new Date(), new Date(Date.now() + 5000));
+    const c = lib.changes();
+    expect(c.changed.map((f) => f.path).sort()).toEqual(['lit/reports/papers.md', 'secretary/reports/daily/new.md']);
+    expect(c.list.find((f) => f.path.endsWith('new.md'))!.title).toBe('새 보고서');
+    expect(lib.changes().changed).toEqual([]);
+  });
+
+  it('extra report dirs get a unique label', () => {
+    const extra = mkdtempSync(join(tmpdir(), 'reports-'));
+    const roots = reportRoots(mkdtempSync(join(tmpdir(), 'empty-ws-')), [extra], () => null);
+    expect(roots).toEqual([{ label: extra.split('/').pop(), dir: extra, employeeId: null }]);
+  });
+});
+
+describe('Store feed', () => {
+  it('adds, updates, lists oldest-first and finds recent report cards by path', () => {
+    const s = new Store(':memory:');
+    const a = s.addFeed({ ts: 1000, kind: 'result', employeeId: 'sec', title: '⏰ 아침', body: '**ok**', path: null, ok: true });
+    const b = s.addFeed({ ts: 2000, kind: 'report', employeeId: 'sec', title: 'R', body: '# R', path: 'secretary/reports/r.md', ok: true });
+    expect(s.recentFeed().map((f) => f.id)).toEqual([a.id, b.id]);
+    expect(s.lastFeedForPath('secretary/reports/r.md', 1500)?.id).toBe(b.id);
+    expect(s.lastFeedForPath('secretary/reports/r.md', 2500)).toBeUndefined();
+    expect(s.updateFeed(b.id, { ts: 3000, body: '# R2' })).toMatchObject({ id: b.id, ts: 3000, body: '# R2', title: 'R' });
+    expect(s.recentFeed(1).map((f) => f.id)).toEqual([b.id]);
+  });
+});
+
+import { applyTodoOp, dailyPath, parseDaily } from '../src/obsidian.ts';
+import { TodayNote } from '../src/todos.ts';
+
+const NOTE = [
+  '#daily ', //                                    0
+  '## ⏰ Schedule / Appointments', //               1
+  '- 14:00 랩미팅', //                              2
+  '', //                                            3
+  '---', //                                         4
+  '', //                                            5
+  '## 🧬 Active Project', //                        6
+  '**[[Lab meeting]]**', //                         7
+  'lab_log:: ', //                                  8
+  '', //                                            9
+  '**[[Tau oligomer binder design]]**', //         10
+  'tau_log::', //                                  11
+  '- [ ] 전략 정하기 ↻1', //                         12
+  '- [x] backbone design 시도 ↻3', //               13
+  '', //                                           14
+  '**EGFR 논문 작성**', //                          15
+  'egfr_log::', //                                 16
+  '무조건 이번주까지..!!', //                         17
+  '- [ ] **구조 figure 만들기** ↻1', //              18
+  '\t- RFdiffusion figure 요청.', //               19
+  '\t  - Noise → backbone 과정', //                 20
+  '\t- [ ] pose 시각화', //                         21
+  '- [ ] method 다시 작성', //                       22
+  '', //                                           23
+  '**기타**', //                                    24
+  '', //                                           25
+  '', //                                           26
+  '---', //                                        27
+  '## 📚 Study', //                                28
+  '[[Study/Study|Study]]', //                      29
+  '**[[Proteins; Structure and Function]]**', //   30
+  '', //                                           31
+  '---', //                                        32
+  '## 🏢 Office board — 진행 중 작업', //            33
+  '- [ ] 무시돼야 함', //                             34
+  '',
+].join('\n');
+
+describe('Obsidian daily note', () => {
+  it('parses sections, projects, carry markers, children and descriptions', () => {
+    const secs = parseDaily(NOTE);
+    expect(secs.map((s) => s.kind)).toEqual(['schedule', 'project', 'study']);
+    expect(secs[0].projects[0].memo).toEqual(['- 14:00 랩미팅']);
+    const proj = secs[1].projects;
+    expect(proj.map((p) => p.name)).toEqual(['', 'Lab meeting', 'Tau oligomer binder design', 'EGFR 논문 작성', '기타']);
+    expect(proj[1]).toMatchObject({ link: 'Lab meeting', items: [] });
+    const tau = proj[2];
+    expect(tau.items.map((i) => [i.text, i.checked, i.carry, i.line])).toEqual([
+      ['전략 정하기', false, 1, 12],
+      ['backbone design 시도', true, 3, 13],
+    ]);
+    const egfr = proj[3];
+    expect(egfr.link).toBeNull();
+    expect(egfr.memo).toEqual(['무조건 이번주까지..!!']);
+    expect(egfr.items.map((i) => i.text)).toEqual(['**구조 figure 만들기**', 'method 다시 작성']);
+    expect(egfr.items[0].notes).toEqual([
+      { depth: 0, text: 'RFdiffusion figure 요청.' },
+      { depth: 1, text: 'Noise → backbone 과정' },
+    ]);
+    expect(egfr.items[0].children.map((c) => [c.text, c.line])).toEqual([['pose 시각화', 21]]);
+    expect(secs[2].projects.map((p) => p.name)).toEqual(['', 'Proteins; Structure and Function']);
+    expect(JSON.stringify(secs)).not.toContain('무시돼야 함');
+  });
+
+  it('toggles and edits one line, keeping indentation and ↻N', () => {
+    const t1 = applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 전략 정하기 ↻1' });
+    expect(t1.split('\n')[12]).toBe('- [x] 전략 정하기 ↻1');
+    expect(applyTodoOp(t1, { op: 'toggle', line: 12, raw: '- [x] 전략 정하기 ↻1' })).toBe(NOTE);
+    const t2 = applyTodoOp(NOTE, { op: 'edit', line: 21, raw: '\t- [ ] pose 시각화', text: ' 결합 pose\n시각화 ' });
+    expect(t2.split('\n')[21]).toBe('\t- [ ] 결합 pose 시각화');
+    const t3 = applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '구조 figure 3개' });
+    expect(t3.split('\n')[18]).toBe('- [ ] 구조 figure 3개 ↻1');
+    expect(() => applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '  ' })).toThrow(/비어/);
+  });
+
+  it('adds to the end of a block or under a parent, and deletes whole subtrees', () => {
+    const a = applyTodoOp(NOTE, { op: 'add', headerLine: 10, headerRaw: '**[[Tau oligomer binder design]]**', text: '새 할 일' }).split('\n');
+    expect(a.slice(12, 16)).toEqual(['- [ ] 전략 정하기 ↻1', '- [x] backbone design 시도 ↻3', '- [ ] 새 할 일', '']);
+    const empty = applyTodoOp(NOTE, { op: 'add', headerLine: 24, headerRaw: '**기타**', text: '메일 답장' }).split('\n');
+    expect(empty.slice(24, 27)).toEqual(['**기타**', '- [ ] 메일 답장', '']);
+    const lab = applyTodoOp(NOTE, { op: 'add', headerLine: 7, headerRaw: '**[[Lab meeting]]**', text: '발표 준비' }).split('\n');
+    expect(lab.slice(7, 10)).toEqual(['**[[Lab meeting]]**', 'lab_log:: ', '- [ ] 발표 준비']);
+    const sub = applyTodoOp(NOTE, {
+      op: 'add', headerLine: 15, headerRaw: '**EGFR 논문 작성**', text: 'surface 렌더', parentLine: 18, parentRaw: '- [ ] **구조 figure 만들기** ↻1',
+    }).split('\n');
+    expect(sub.slice(21, 24)).toEqual(['\t- [ ] pose 시각화', '\t- [ ] surface 렌더', '- [ ] method 다시 작성']);
+    const del = applyTodoOp(NOTE, { op: 'delete', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1' }).split('\n');
+    expect(del.slice(17, 20)).toEqual(['무조건 이번주까지..!!', '- [ ] method 다시 작성', '']);
+  });
+
+  it('refuses stale edits and keeps CRLF / trailing newline', () => {
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 다른 내용' })).toThrow(/바뀌었습니다/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 999, raw: 'x' })).toThrow(/바뀌었습니다/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 17, raw: '무조건 이번주까지..!!' })).toThrow(/체크박스/);
+    const crlf = NOTE.replace(/\n/g, '\r\n');
+    const out = applyTodoOp(crlf, { op: 'toggle', line: 12, raw: '- [ ] 전략 정하기 ↻1' });
+    expect(out).toBe(crlf.replace('- [ ] 전략 정하기 ↻1', '- [x] 전략 정하기 ↻1'));
+    expect(out.endsWith('\r\n')).toBe(true);
+  });
+
+  it('builds the daily path and reads/writes today\'s note', () => {
+    expect(dailyPath('Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md', new Date(2026, 10, 23))).toBe('Daily/2026/2026.11.23.Mon.md');
+    const vault = mkdtempSync(join(tmpdir(), 'vault-'));
+    const note = new TodayNote({ vault, daily: 'Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md', createCommand: [] }, () => new Date(2026, 10, 23, 9));
+    expect(note.load()).toMatchObject({ enabled: true, exists: false, relPath: 'Daily/2026/2026.11.23.Mon.md', vaultName: vault.split('/').pop(), canCreate: false });
+    mkdirSync(join(vault, 'Daily/2026'), { recursive: true });
+    writeFileSync(join(vault, 'Daily/2026/2026.11.23.Mon.md'), NOTE);
+    expect(note.poll()?.exists).toBe(true);
+    expect(note.poll()).toBeNull();
+    const after = note.apply({ op: 'toggle', line: 22, raw: '- [ ] method 다시 작성' });
+    expect(after.sections[1].projects[3].items[1].checked).toBe(true);
+    expect(readFileSync(join(vault, 'Daily/2026/2026.11.23.Mon.md'), 'utf8').split('\n')[22]).toBe('- [x] method 다시 작성');
+    expect(new TodayNote(null).load().enabled).toBe(false);
+  });
+});
+
+describe('providers (local model)', async () => {
+  const { ollamaEnv, OllamaLink } = await import('../src/providers.ts');
+  const { nextRunnable } = await import('../src/agents/manager.ts');
+  const { normalizeProviders, mergeByKey } = await import('../src/config.ts');
+
+  it('ollamaEnv keeps the base env and points every model alias at the local model', () => {
+    const env = ollamaEnv({ PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'sk-x', UNSET: undefined }, 11435, 'qwen3.5:9b');
+    expect(env.PATH).toBe('/bin');
+    expect(env.HOME).toBe('/h');
+    expect('UNSET' in env).toBe(false);
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:11435');
+    expect(env.ANTHROPIC_API_KEY).toBe('');
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('ollama');
+    for (const k of ['ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL'])
+      expect(env[k]).toBe('qwen3.5:9b');
+  });
+
+  it('nextRunnable: provider employees bypass maxConcurrent, one slot per provider', () => {
+    const w = [{}, { provider: 'desktop' }, {}];
+    expect(nextRunnable(w, 3, 3, new Set())).toBe(1); // Claude slots full → the local one still starts
+    expect(nextRunnable(w, 3, 3, new Set(['desktop']))).toBe(-1);
+    expect(nextRunnable(w, 1, 3, new Set(['desktop']))).toBe(0); // FIFO among Claude employees
+    expect(nextRunnable([{ provider: 'desktop' }, { provider: 'desktop' }], 0, 3, new Set(['desktop']))).toBe(-1);
+  });
+
+  it('providers merge by id and get defaults; invalid entries are dropped', () => {
+    const merged = mergeByKey<any>([{ id: 'desktop', ssh_host: 'a', model: 'm1' }], [{ id: 'desktop', model: 'm2' }, { id: 'bad' }], 'id');
+    const p = normalizeProviders(merged);
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ id: 'desktop', name: 'desktop', kind: 'ollama', ssh_host: 'a', remotePort: 11434, localPort: 11435, model: 'm2' });
+    expect(normalizeProviders([{ id: 'x', ssh_host: 'h', model: 'm', kind: 'codex' as any }])).toHaveLength(0);
+  });
+
+  it('model choice is validated against installed models and persisted', () => {
+    const store = new Store(':memory:');
+    const cfg = normalizeProviders([{ id: 'desktop', ssh_host: 'h', model: 'qwen3.5:9b' }])[0];
+    const link = new OllamaLink(cfg, store);
+    expect(link.view.model).toBe('qwen3.5:9b');
+    expect(link.runtime()).toHaveProperty('error'); // not connected yet
+    link.view = { ...link.view, ok: true, models: ['qwen3.5:35b-a3b', 'qwen3.5:9b'] };
+    expect(() => link.setModel('llama-not-installed')).toThrow();
+    link.setModel('qwen3.5:35b-a3b');
+    expect(store.getProviderModel('desktop')).toBe('qwen3.5:35b-a3b');
+    expect(new OllamaLink(cfg, store).view.model).toBe('qwen3.5:35b-a3b');
+    const rt = link.runtime();
+    expect(rt).toMatchObject({ model: 'qwen3.5:35b-a3b' });
+  });
+});
+
+describe('permission mode', async () => {
+  const { effectivePermission } = await import('../src/agents/manager.ts');
+  it('a 🔒 task only ever tightens', () => {
+    expect(effectivePermission('auto', false)).toBe('auto');
+    expect(effectivePermission('auto', true)).toBe('ask');
+    expect(effectivePermission('ask', false)).toBe('ask');
+    expect(effectivePermission('ask', true)).toBe('ask');
+  });
+  it('Store keeps the per-employee mode and task requireApproval', () => {
+    const s = new Store(':memory:');
+    expect(s.getEmployeePerm('lit')).toBeNull();
+    s.setEmployeePerm('lit', 'ask');
+    expect(s.getEmployeePerm('lit')).toBe('ask');
+    s.setEmployeePerm('lit', 'auto');
+    expect(s.getEmployeePerm('lit')).toBe('auto');
+    const a = s.createTask('rm old ckpts', '', null, 'lead', true);
+    const b = s.createTask('summarize', '', null);
+    expect(a.requireApproval).toBe(true);
+    expect(b.requireApproval).toBe(false);
+    expect(s.listTasks().map((t) => t.requireApproval)).toEqual([true, false]);
+    expect(s.updateTask(a.id, { state: 'doing' })!.requireApproval).toBe(true);
+  });
+});
+
+describe('attachments', async () => {
+  const { safeName, attachmentBlock, AttachmentLibrary, PENDING_TTL_MS } = await import('../src/attachments.ts');
+  const { mkdtempSync, existsSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  it('safeName keeps only a harmless basename', () => {
+    expect(safeName('../../etc/passwd')).toBe('passwd');
+    expect(safeName('C:\\Users\\me\\data.csv')).toBe('data.csv');
+    expect(safeName('..hidden')).toBe('hidden');
+    expect(safeName('a\u0000b:c?.png')).toBe('abc.png');
+    expect(safeName('')).toBe('file');
+    const long = safeName('x'.repeat(300) + '.xlsx');
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long.endsWith('.xlsx')).toBe(true);
+  });
+
+  it('saves files, links them to tasks (shared), lists them in the prompt and cleans up stale uploads', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'office-att-'));
+    const store = new Store(':memory:');
+    const lib = new AttachmentLibrary(root, store);
+    const a = await lib.save('../data.csv', Buffer.from('a,b\n1,2\n'));
+    const b = await lib.save('fig.png', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    expect(a).toMatchObject({ name: 'data.csv', size: 8, mime: 'text/csv', hasText: false });
+    const [ra] = lib.rows([a.id]);
+    expect(ra.path.startsWith(join(root, 'attachments'))).toBe(true);
+    expect(readFileSync(ra.path, 'utf8')).toBe('a,b\n1,2\n');
+
+    const t1 = store.createTask('t1', '', null);
+    const t2 = store.createTask('t2', '', null);
+    store.bindAttachments(t1.id, [a.id, b.id, 999]);
+    store.bindAttachments(t2.id, [a.id]);
+    expect(store.getTask(t1.id)!.attachments.map((x) => x.name)).toEqual(['data.csv', 'fig.png']);
+    expect(store.listTasks().find((t) => t.id === t2.id)!.attachments.map((x) => x.id)).toEqual([a.id]);
+
+    const block = attachmentBlock(store.attachmentsForTask(t1.id));
+    expect(block).toContain(`#${a.id} data.csv (8 B, text/csv): ${ra.path}`);
+    expect(attachmentBlock([])).toBe('');
+
+    const c = await lib.save('stray.txt', Buffer.from('x'));
+    const cPath = lib.rows([c.id])[0].path;
+    expect(lib.cleanup(Date.now())).toBe(0); // fresh uploads stay
+    expect(lib.cleanup(Date.now() + PENDING_TTL_MS + 1000)).toBe(1); // only the unlinked one goes
+    expect(existsSync(cPath)).toBe(false);
+    expect(lib.rows([a.id, b.id, c.id]).map((r) => r.id)).toEqual([a.id, b.id]);
+  });
+
+  it.runIf(process.platform === 'darwin')('docx gets a plain-text conversion via textutil', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { writeFileSync } = await import('node:fs');
+    const root = mkdtempSync(join(tmpdir(), 'office-att-'));
+    const src = join(root, 'src.txt');
+    writeFileSync(src, '단백질 구조 메모');
+    execFileSync('textutil', ['-convert', 'docx', '-output', join(root, 'memo.docx'), src]);
+    const store = new Store(':memory:');
+    const lib = new AttachmentLibrary(root, store);
+    const v = await lib.save('memo.docx', readFileSync(join(root, 'memo.docx')));
+    expect(v.hasText).toBe(true);
+    const r = lib.rows([v.id])[0];
+    expect(readFileSync(r.textPath!, 'utf8')).toContain('단백질 구조 메모');
+    expect(attachmentBlock([r])).toContain('본문 텍스트');
   });
 });

@@ -1,6 +1,10 @@
 # 예약 루틴 — 정해진 시간에 직원에게 지시를 보냄 (이 Mac의 현지 시간, 백엔드가 켜져 있을 때만 실행)
 # schedule: cron 5필드 "분 시 일 월 요일" (요일 0=일 … 6=토, 1-5=평일)
-# UI의 루틴 패널에서 켜기/끄기, "지금 실행" 가능. 파일 수정 후에는 백엔드 재시작.
+# 이 파일은 초기값: 백엔드가 처음 볼 때 DB(data/office.db)로 한 번 가져옴.
+# 이후 추가·수정·삭제·켜기/끄기는 UI 루틴 패널이나 비서(mcp__office__*_routine)로 하고,
+# 이미 가져온 루틴은 이 파일을 고쳐도 바뀌지 않음 (UI에서 삭제한 루틴도 다시 생기지 않음).
+# 새 id를 추가하면 다음 재시작 때 가져옴.
+# 개인 루틴(개인 vault·경로 등)은 git에 안 올라가는 config/routines.local.yaml 에 둘 것.
 routines:
   - id: morning-briefing
     name: 아침 브리핑
@@ -37,12 +41,3 @@ routines:
     prompt: |
       이번 주 회고를 작성하세요. reports/daily/ 의 이번 주 리포트와 mcp__office__list_tasks 를 바탕으로
       완료한 일, 진행 중인 실험, 막힌 점, 다음 주 우선순위 제안을 reports/weekly/<날짜>.md 로 저장하세요.
-
-  - id: obsidian-daily-note
-    name: Obsidian 데일리 노트
-    schedule: "30 8 * * 1-5"
-    employee: sec
-    enabled: false
-    prompt: |
-      anthropic-skills:daily-note 스킬을 사용해 오늘자 데일리 노트를 만들고, 직전 노트의 미완료 항목을 이월하세요.
-      그 다음 오늘 사무실 작업 보드의 진행 중 작업 목록을 노트에 덧붙이세요.

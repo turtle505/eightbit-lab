@@ -9,12 +9,13 @@
   </head>
   <body>
     <header class="topbar">
-      <h1><span class="ico">🧬 </span><span class="t-game">8-BIT LAB</span><span class="t-console">8-bit Lab <span class="muted">/ console</span></span></h1>
+      <h1><span class="ico">🧬 </span><span class="t-game">8-BIT LAB</span><span class="t-console">8-bit Lab <span class="muted">/ console</span></span><span class="t-reports">8-bit Lab <span class="muted">/ 보고서</span></span></h1>
       <div id="stats" class="stats"></div>
       <button id="notify-btn" hidden title="완료·승인 요청을 데스크톱 알림으로 받기">알림 켜기</button>
       <div class="view-toggle" role="group" aria-label="화면 전환 (단축키 `)">
         <button type="button" data-view="game" aria-pressed="true">게임</button>
         <button type="button" data-view="console" aria-pressed="false">콘솔</button>
+        <button type="button" data-view="reports" aria-pressed="false">보고서<span id="reports-unread" class="tab-badge" hidden></span></button>
       </div>
     </header>
 
@@ -25,10 +26,12 @@
           <div id="overlay" class="overlay"></div>
         </div>
         <div data-slot="approvals"><section id="approvals" class="panel approvals" hidden></section></div>
+        <div data-slot="report-feed"><section id="report-feed" class="panel report-feed"></section></div>
         <div data-slot="employee"><section id="employee" class="panel employee"></section></div>
       </section>
 
       <aside class="right">
+        <div data-slot="todos"><section id="todos" class="panel todos" hidden></section></div>
         <section class="panel">
           <h2>📋 작업 보드</h2>
           <form id="task-form" class="task-form">
@@ -36,8 +39,11 @@
             <textarea id="task-detail" rows="2" placeholder="세부 지시 (선택)"></textarea>
             <div class="row">
               <select id="task-assignee"></select>
+              <button type="button" id="task-attach" class="icon-btn attach-btn" title="파일 첨부 (폼에 끌어다 놓아도 됨)">📎</button>
+              <label class="lock-opt" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="task-lock" /> 🔒 승인</label>
               <button class="primary" type="submit">추가</button>
             </div>
+            <div id="task-chips" class="att-chips" hidden></div>
           </form>
           <div id="board" class="board"></div>
         </section>
@@ -61,10 +67,14 @@
               <input id="c-task-title" placeholder="새 작업 제목" autocomplete="off" />
               <input id="c-task-detail" placeholder="세부 지시 (선택)" autocomplete="off" />
               <select id="c-task-assignee"></select>
+              <button type="button" id="c-task-attach" class="attach-btn" title="파일 첨부 (입력줄에 끌어다 놓아도 됨)">첨부</button>
+              <label class="lock-opt" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="c-task-lock" /> 승인 받기</label>
               <button class="primary" type="submit">추가</button>
+              <div id="c-task-chips" class="att-chips" hidden></div>
             </form>
             <div id="c-tasks"></div>
           </section>
+          <div data-slot="report-feed"></div>
           <section class="panel">
             <div class="c-head"><h2>활동 피드</h2></div>
             <div id="c-feed"></div>
@@ -72,12 +82,16 @@
         </div>
         <div class="c-side">
           <section id="c-usage" class="panel usage"></section>
+          <div data-slot="todos"></div>
           <div data-slot="employee"></div>
           <div data-slot="routines"></div>
           <div data-slot="jobs"></div>
         </div>
       </div>
     </main>
+
+    <!-- ===== reports view ===== -->
+    <main id="view-reports" class="reports" hidden></main>
 
     <div id="toasts" class="toasts"></div>
     <script type="module" src="/src/main.ts"></script>

@@ -1,6 +1,7 @@
-import type { ClientMsg, LogLine, Snapshot, TaskState } from '../../../shared/protocol.ts';
+import { attachmentLinks, bindAttach } from './attach.ts';
+import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState } from '../../../shared/protocol.ts';
 
-export type ViewMode = 'game' | 'console';
+export type ViewMode = 'game' | 'console' | 'reports';
 
 export interface UIState {
   snap: Snapshot;
@@ -65,6 +66,21 @@ export function resetText(ts: number | null): string {
   return `${when} 초기화 · ${rel}`;
 }
 
+/** Provider (local model) of an employee, if it runs on one. */
+export function providerOf(st: UIState, e: EmployeeView) {
+  return e.provider ? (st.snap.providers ?? []).find((p) => p.id === e.provider) ?? null : null;
+}
+
+/** "🖥 desktop · qwen3.5:9b · 연결됨" — plain text when `plainText` (console table) */
+export function providerBadge(st: UIState, e: EmployeeView, plainText = false): string {
+  if (!e.provider) return '';
+  const p = providerOf(st, e);
+  if (!p) return `<span class="prov off" title="설정에 provider '${esc(e.provider)}' 가 없음">${plainText ? '' : '🖥 '}${esc(e.provider)} · 설정 없음</span>`;
+  const state = p.ok ? '연결됨' : '끊김';
+  const tip = p.ok ? `Ollama ${p.version ?? ''} · 설치된 모델 ${p.models.length}개` : p.error ?? '';
+  return `<span class="prov ${p.ok ? 'on' : 'off'}" title="${esc(tip)}">${esc(plainText ? plain(p.name) : p.name)} · ${esc(p.model)} · ${state}</span>`;
+}
+
 /** Each employee's share of the office's total usage (from SDK cost estimates). */
 export function usageShare(st: UIState, costUsd: number): string {
   const total = st.snap.employees.reduce((a, e) => a + e.costUsd, 0);
@@ -73,7 +89,7 @@ export function usageShare(st: UIState, costUsd: number): string {
 
 export function renderHeader(st: UIState, send?: Send) {
   const s = st.snap;
-  const busy = s.employees.filter((e) => !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
+  const busy = s.employees.filter((e) => !e.provider && !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
   const u = s.usage;
   const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
   if (!changed('header', data)) return;
@@ -113,7 +129,8 @@ export function renderApprovals(st: UIState, send: Send) {
       .map((a) => {
         const who = s.employees.find((e) => e.id === a.employeeId);
         const inp = a.input as Record<string, unknown>;
-        const main = inp.command ?? inp.file_path ?? inp.url ?? inp.query ?? '';
+        const routine = a.toolName.includes('_routine') ? s.routines.find((r) => r.id === inp.id) : undefined;
+        const main = inp.command ?? inp.file_path ?? inp.url ?? inp.query ?? (routine ? `루틴: ${routine.name} (${routine.id})` : inp.name ?? inp.id) ?? '';
         const rest = JSON.stringify(inp, null, 2);
         return `<div class="approval" data-id="${esc(a.id)}">
           <div class="approval-head"><b>${esc(who ? short(who.name) : a.employeeId)}</b> → <code>${esc(a.toolName)}</code> <span class="muted">${ago(a.createdAt)} 전</span></div>
@@ -127,7 +144,10 @@ export function renderApprovals(st: UIState, send: Send) {
   box.querySelectorAll<HTMLButtonElement>('button[data-act]').forEach((b) =>
     b.addEventListener('click', () => {
       const id = b.closest<HTMLElement>('.approval')!.dataset.id!;
-      send({ t: 'approve', id, allow: b.dataset.act === 'allow' });
+      const allow = b.dataset.act === 'allow';
+      const a = st.snap.approvals.find((x) => x.id === id);
+      if (allow && a && !confirmApprove(a, st.snap)) return;
+      send({ t: 'approve', id, allow });
     }),
   );
 }
@@ -156,8 +176,9 @@ export function renderBoard(st: UIState, send: Send) {
       .map((t) => {
         const who = emps.find((e) => e.id === t.assignee);
         return `<div class="card" draggable="true" data-id="${t.id}">
-          <div class="card-title">#${t.id} ${esc(t.title)}</div>
+          <div class="card-title">#${t.id} ${t.requireApproval ? `<span class="lock" title="승인 받기: 자동 모드여도 도구마다 매니저 승인">🔒</span> ` : ''}${esc(t.title)}</div>
           ${t.detail ? `<div class="card-detail">${esc(t.detail.slice(0, 140))}</div>` : ''}
+          ${t.attachments?.length ? `<div class="card-att">📎 ${attachmentLinks(t.attachments)}</div>` : ''}
           ${t.result ? `<details><summary>보고</summary><div class="card-result">${esc(t.result)}</div></details>` : ''}
           <div class="row">
             <select data-act="assign"><option value="">${who ? esc(short(who.name)) : '배정…'}</option>${emps
@@ -247,31 +268,36 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       panelFor = `none:${st.view}`;
       box.innerHTML =
         st.view === 'console'
-          ? `<p class="muted hint">직원 표에서 행을 클릭하거나 <kbd>1</kbd>–<kbd>5</kbd>, <kbd>j</kbd>/<kbd>k</kbd>로 선택하세요. 로그와 지시 입력이 여기에 표시됩니다.</p>`
-          : `<p class="muted hint">사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>5</kbd>를 누르세요. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.</p>`;
+          ? `<p class="muted hint">직원 표에서 행을 클릭하거나 <kbd>1</kbd>–<kbd>${st.snap.employees.length}</kbd>, <kbd>j</kbd>/<kbd>k</kbd>로 선택하세요. 로그와 지시 입력이 여기에 표시됩니다.</p>`
+          : `<p class="muted hint">사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>${st.snap.employees.length}</kbd>를 누르세요. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.</p>`;
     }
     return;
   }
-  if (panelFor !== e.id) {
-    panelFor = e.id;
+  if (panelFor !== e.id + e.name) {
+    panelFor = e.id + e.name;
     keys.delete('emp-head');
     keys.delete('emp-log');
     box.innerHTML = `
       <div id="emp-head"></div>
       <div id="emp-log" class="log"></div>
       <form id="emp-form" class="instruct">
-        <textarea id="emp-input" rows="2" placeholder="${esc(short(e.name))}에게 지시하기… (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
+        <textarea id="emp-input" rows="2" placeholder="${esc(short(e.name))}에게 지시하기… (Enter 전송, Shift+Enter 줄바꿈, 파일은 끌어다 놓기)"></textarea>
+        <div id="emp-chips" class="att-chips" hidden></div>
         <div class="row">
           <button class="primary" type="submit">지시</button>
+          <button type="button" id="emp-attach" class="icon-btn attach-btn" title="파일 첨부">📎</button>
           <button type="button" id="emp-stop">중지</button>
           <button type="button" id="emp-reset" title="대화 맥락을 비우고 새 세션으로 시작">새 세션</button>
         </div>
       </form>`;
     const input = $('emp-input') as HTMLTextAreaElement;
+    const att = bindAttach($('emp-form'), $('emp-attach'), $('emp-chips'));
     const submit = () => {
       const text = input.value.trim();
-      if (!text) return;
-      send({ t: 'instruct', employeeId: e.id, text });
+      if (att.busy()) return void alert('첨부 파일을 올리는 중입니다. 잠시 후 다시 보내 주세요.');
+      const attachmentIds = att.take();
+      if (!text && !attachmentIds.length) return;
+      send({ t: 'instruct', employeeId: e.id, text, attachmentIds });
       input.value = '';
     };
     $('emp-form').addEventListener('submit', (ev) => {
@@ -289,13 +315,38 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       if (confirm('대화 맥락을 비우고 새 세션으로 시작할까요?')) send({ t: 'resetSession', employeeId: e.id });
     });
   }
-  if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd)])) {
+  const prov = providerOf(st, e);
+  if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd), prov])) {
     $('emp-head').innerHTML = `
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
-        <b>${esc(e.name)}</b> <span class="muted">${esc(e.title)}</span>
-        <span class="status s-${e.status}">${STATUS_KO[e.status] ?? e.status}</span></div>
+        <b>${esc(e.name)}</b> <button type="button" id="emp-rename" class="icon-btn" title="이름 바꾸기">✏️</button> <span class="muted">${esc(e.title)}</span>
+        <span class="status s-${e.status}">${STATUS_KO[e.status] ?? e.status}</span>
+        <button type="button" id="emp-perm" class="perm-btn perm-${e.permission}" title="${
+          e.permission === 'auto'
+            ? '🤖 자동 모드: 분류기가 안전하다고 본 도구는 바로 실행하고, 애매한 것만 승인 요청. 클릭하면 승인 모드로 (다음 지시부터 적용)'
+            : '✋ 승인 모드: 자동 허용 목록 밖의 도구는 모두 승인 요청. 클릭하면 자동 모드로 (다음 지시부터 적용)'
+        }">${st.view === 'console' ? (e.permission === 'auto' ? '[자동]' : '[승인]') : e.permission === 'auto' ? '🤖 자동' : '✋ 승인'}</button></div>
       <div class="muted small">${esc(st.view === 'console' ? plain(e.activity) : e.activity)}</div>
-      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · 사무실 사용 비중 ${usageShare(st, e.costUsd)}</div>`;
+      ${
+        e.provider
+          ? `<div class="small emp-prov">${providerBadge(st, e, st.view === 'console')}${
+              prov?.models.length
+                ? ` <select id="emp-model" title="이 provider의 모든 직원이 쓸 모델">${prov.models
+                    .map((m) => `<option value="${esc(m)}"${m === prov.model ? ' selected' : ''}>${esc(m)}</option>`)
+                    .join('')}${prov.models.includes(prov.model) ? '' : `<option value="${esc(prov.model)}" selected disabled>${esc(prov.model)} (미설치)</option>`}</select>`
+                : ''
+            }</div>`
+          : ''
+      }
+      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ${e.provider ? '구독 사용 안 함' : `사무실 사용 비중 ${usageShare(st, e.costUsd)}`}</div>`;
+    document.getElementById('emp-model')?.addEventListener('change', (ev) => {
+      if (prov) send({ t: 'setProviderModel', providerId: prov.id, model: (ev.target as HTMLSelectElement).value });
+    });
+    $('emp-perm').addEventListener('click', () => send({ t: 'setPermission', employeeId: e.id, mode: e.permission === 'auto' ? 'ask' : 'auto' }));
+    $('emp-rename').addEventListener('click', () => {
+      const nick = prompt('새 이름 (비우면 원래 이름으로)', short(e.name));
+      if (nick !== null) send({ t: 'renameEmployee', employeeId: e.id, nick });
+    });
   }
   const lines = st.logs.get(e.id) ?? [];
   if (changed('emp-log', [e.id, lines.length, lines[lines.length - 1]?.ts])) {
@@ -313,13 +364,16 @@ export function renderEmployeePanel(st: UIState, send: Send) {
 
 export function bindNewTaskForm(send: Send) {
   const form = $('task-form') as HTMLFormElement;
+  const att = bindAttach(form, $('task-attach'), $('task-chips'));
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const title = ($('task-title') as HTMLInputElement).value.trim();
     if (!title) return;
+    if (att.busy()) return void alert('첨부 파일을 올리는 중입니다. 잠시 후 다시 눌러 주세요.');
     const detail = ($('task-detail') as HTMLTextAreaElement).value;
     const assignee = ($('task-assignee') as HTMLSelectElement).value || null;
-    send({ t: 'createTask', title, detail, assignee });
+    const requireApproval = ($('task-lock') as HTMLInputElement).checked;
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take() });
     form.reset();
   });
 }
@@ -341,32 +395,163 @@ export function describeCron(expr: string): string {
 const when = (ts: number | null) =>
   ts ? new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
+/** Routine form state survives re-renders: null = closed, '' = new, otherwise the id being edited. */
+let routineEdit: string | null = null;
+
 export function renderRoutines(st: UIState, send: Send) {
   const s = st.snap;
-  if (!changed('routines', [s.routines, s.employees.map((e) => [e.id, e.name])])) return;
   const box = $('routines');
-  const rows = s.routines
-    .map((r) => {
-      const who = s.employees.find((e) => e.id === r.employee);
-      return `<div class="routine ${r.enabled ? '' : 'off'}" data-id="${esc(r.id)}">
+  if (!box.querySelector('#routine-list')) {
+    box.innerHTML = `<div class="row space"><h2>${ico('⏰')}루틴</h2><button data-act="new" title="새 루틴 등록">+ 새 루틴</button></div>
+      <div id="routine-form"></div>
+      <div id="routine-list"></div>
+      <p class="muted small">백엔드가 켜져 있을 때만 실행됩니다. 여기서 추가·수정하거나 비서에게 말로 맡길 수 있습니다. <code>config/routines.yaml</code>은 처음 실행할 때만 불러옵니다.</p>`;
+    box.querySelector('button[data-act="new"]')!.addEventListener('click', () => {
+      routineEdit = routineEdit === '' ? null : '';
+      renderRoutineForm(st, send);
+    });
+  }
+  // the form only depends on the employee list and the routine being edited, so typing is not clobbered
+  if (changed('routine-form', [routineEdit, s.employees.map((e) => [e.id, e.name]), s.skills.map((k) => k.name), routineEdit ? s.routines.some((r) => r.id === routineEdit) : 0]))
+    renderRoutineForm(st, send);
+  if (!changed('routines', [s.routines, s.skills, s.employees.map((e) => [e.id, e.name])])) return;
+  const list = $('routine-list');
+  list.innerHTML =
+    s.routines
+      .map((r) => {
+        const who = s.employees.find((e) => e.id === r.employee);
+        const sk = r.skill ? s.skills.find((k) => k.name === r.skill) : undefined;
+        const skillLine = !r.skill
+          ? ''
+          : !sk
+            ? `<div class="small bad">${ico('🧩')}office:${esc(r.skill)} — 스킬 파일이 없습니다</div>`
+            : `<div class="small">${ico('🧩')}<code>office:${esc(sk.name)}</code> <span class="muted">${esc(sk.description)}</span>
+                ${sk.approved ? (sk.allow.length ? `<span class="muted"> · 자동 허용 ${sk.allow.length}개</span>` : '') : `<button data-act="approve-skill" data-skill="${esc(sk.name)}" class="warn-btn">⚠️ 재승인 필요</button>`}</div>`;
+        return `<div class="routine ${r.enabled ? '' : 'off'}" data-id="${esc(r.id)}">
         <div class="row space">
           <div><b>${esc(r.name)}</b> <span class="muted small">${esc(describeCron(r.schedule))} · ${esc(who ? short(who.name) : r.employee)}</span></div>
           <div class="row">
             <label class="switch"><input type="checkbox" data-act="toggle" ${r.enabled ? 'checked' : ''}/> 켜짐</label>
             <button data-act="run">지금 실행</button>
+            <button data-act="edit">수정</button>
+            <button data-act="delete" class="danger">삭제</button>
           </div>
         </div>
+        ${skillLine}
         <div class="muted small">다음 ${esc(r.enabled ? when(r.nextRun) : '꺼짐')} · 마지막 ${esc(when(r.lastRun))}</div>
       </div>`;
-    })
-    .join('');
-  box.innerHTML = `<h2>${ico('⏰')}루틴</h2>${rows || '<p class="muted">등록된 루틴이 없습니다. <code>config/routines.yaml</code>에 추가하세요.</p>'}
-    <p class="muted small">백엔드가 켜져 있을 때만 실행됩니다. 일정 변경은 <code>config/routines.yaml</code> 수정 후 재시작.</p>`;
-  box.querySelectorAll<HTMLElement>('.routine').forEach((el) => {
+      })
+      .join('') || '<p class="muted">등록된 루틴이 없습니다. <b>+ 새 루틴</b>으로 추가하세요.</p>';
+  list.querySelectorAll<HTMLElement>('.routine').forEach((el) => {
     const id = el.dataset.id!;
+    const r = s.routines.find((x) => x.id === id)!;
     el.querySelector('button[data-act="run"]')!.addEventListener('click', () => send({ t: 'runRoutine', id }));
+    el.querySelector('button[data-act="edit"]')!.addEventListener('click', () => {
+      routineEdit = id;
+      renderRoutineForm(st, send);
+    });
+    el.querySelector('button[data-act="delete"]')!.addEventListener('click', () => {
+      if (confirm(`루틴 "${r.name}"을(를) 삭제할까요?\n삭제하면 되돌릴 수 없습니다.`)) {
+        if (routineEdit === id) routineEdit = null;
+        send({ t: 'deleteRoutine', id });
+      }
+    });
+    el.querySelector<HTMLButtonElement>('button[data-act="approve-skill"]')?.addEventListener('click', (ev) => {
+      const name = (ev.currentTarget as HTMLElement).dataset.skill!;
+      const sk = s.skills.find((k) => k.name === name);
+      const rules = sk?.allow.length ? `예약 실행에서 자동 허용될 도구:\n- ${sk.allow.join('\n- ')}` : '자동 허용 도구 없음';
+      if (confirm(`스킬 office:${name}의 현재 파일 내용을 승인할까요?\n(workspaces/office-skills/skills/${name}/SKILL.md)\n\n${rules}`)) send({ t: 'approveSkill', name });
+    });
     el.querySelector<HTMLInputElement>('input[data-act="toggle"]')!.addEventListener('change', (ev) =>
       send({ t: 'toggleRoutine', id, enabled: (ev.target as HTMLInputElement).checked }),
     );
   });
+}
+
+function renderRoutineForm(st: UIState, send: Send) {
+  const s = st.snap;
+  const box = $('routine-form');
+  const editing = routineEdit ? s.routines.find((r) => r.id === routineEdit) : undefined;
+  if (routineEdit === null || (routineEdit && !editing)) {
+    routineEdit = null;
+    box.innerHTML = '';
+    return;
+  }
+  const emps = [...s.employees].sort((a, b) => a.desk - b.desk);
+  const r = editing ?? { name: '', schedule: '0 9 * * 1-5', employee: emps.find((e) => e.id === 'sec')?.id ?? emps[0]?.id ?? '', prompt: '', skill: null as string | null };
+  box.innerHTML = `<form class="routine-form">
+      <b>${editing ? `루틴 수정: ${esc(editing.name)}` : '새 루틴'}</b>
+      <input name="name" placeholder="이름 (예: 점심 전 job 점검)" value="${esc(r.name)}" autocomplete="off" required />
+      <div class="row">
+        <input name="schedule" placeholder="분 시 일 월 요일" value="${esc(r.schedule)}" autocomplete="off" required />
+        <select name="employee">${emps.map((e) => `<option value="${esc(e.id)}" ${e.id === r.employee ? 'selected' : ''}>${esc(short(e.name))} · ${esc(e.title)}</option>`).join('')}</select>
+      </div>
+      <div class="muted small" data-preview></div>
+      <select name="skill">
+        <option value="">(스킬 없음 — 지시문 직접 입력)</option>
+        ${s.skills.map((k) => `<option value="${esc(k.name)}" ${k.name === r.skill ? 'selected' : ''}>🧩 office:${esc(k.name)} — ${esc(k.description)}</option>`).join('')}
+      </select>
+      <textarea name="prompt" rows="4">${esc(r.prompt)}</textarea>
+      <div class="muted small">스킬은 비서에게 "○○ 루틴 만들고 싶어"라고 말하면 대화로 정리해서 만들어 줍니다.</div>
+      <div class="row"><button class="primary" type="submit">${editing ? '저장' : '등록'}</button><button type="button" data-act="cancel">취소</button></div>
+    </form>`;
+  const form = box.querySelector('form')!;
+  const field = (n: string) => form.elements.namedItem(n) as HTMLInputElement;
+  const preview = form.querySelector<HTMLElement>('[data-preview]')!;
+  const upd = () => {
+    const v = field('schedule').value.trim();
+    const d = describeCron(v);
+    preview.textContent = v.split(/\s+/).length !== 5 ? 'cron 5필드: 분 시 일 월 요일 (요일 0=일 … 6=토, 1-5=평일)' : d !== v ? `→ ${d}` : '분 시 일 월 요일 (요일 0=일 … 6=토)';
+  };
+  field('schedule').addEventListener('input', upd);
+  upd();
+  const promptEl = form.elements.namedItem('prompt') as HTMLTextAreaElement;
+  const updSkill = () => {
+    const hasSkill = !!field('skill').value;
+    promptEl.placeholder = hasSkill ? '추가 메모 (선택) — 스킬에 덧붙여 보낼 말' : '정해진 시간마다 직원에게 보낼 지시';
+    promptEl.rows = hasSkill ? 2 : 4;
+  };
+  field('skill').addEventListener('change', updSkill);
+  updSkill();
+  form.querySelector('button[data-act="cancel"]')!.addEventListener('click', () => {
+    routineEdit = null;
+    renderRoutineForm(st, send);
+  });
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const name = field('name').value.trim();
+    const prompt = field('prompt').value;
+    const skill = field('skill').value || null;
+    if (!name) return;
+    if (!skill && !prompt.trim()) {
+      alert('스킬을 고르거나 지시문을 입력하세요.');
+      return;
+    }
+    send({
+      t: 'saveRoutine',
+      ...(editing ? { id: editing.id } : {}),
+      name,
+      schedule: field('schedule').value.trim(),
+      employee: field('employee').value,
+      prompt,
+      skill,
+    });
+    routineEdit = null;
+    renderRoutineForm(st, send);
+  });
+}
+
+/** Approvals that remove things get a second, explicit confirmation. Returns false to abort. */
+export function confirmApprove(a: Approval, snap: Snapshot): boolean {
+  if (a.toolName === 'mcp__office__save_skill') {
+    const inp = a.input as { name?: string; allow?: string[] };
+    if (!inp.allow?.length) return true;
+    return confirm(
+      `비서가 스킬 office:${inp.name}을(를) 저장하려고 합니다.\n이 스킬을 실행하는 루틴에서는 아래 도구가 승인 없이 실행됩니다:\n\n- ${inp.allow.join('\n- ')}\n\n승인할까요?`,
+    );
+  }
+  if (a.toolName !== 'mcp__office__delete_routine') return true;
+  const id = String((a.input as Record<string, unknown>).id ?? '');
+  const r = snap.routines.find((x) => x.id === id);
+  return confirm(`비서가 루틴 "${r?.name ?? id}"을(를) 삭제하려고 합니다.\n삭제하면 되돌릴 수 없습니다. 승인할까요?`);
 }
