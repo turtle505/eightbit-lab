@@ -22,13 +22,16 @@ export const heightFor = (rows: number) => GRID_TOP + Math.max(MIN_ROWS, rows) *
 export const rowsFor = (maxSlot: number) => Math.max(MIN_ROWS, Math.floor(Math.max(0, maxSlot) / COLS) + 1);
 /** current canvas height; grows as desks are added (see OfficeScene.layout) */
 export let H = heightFor(MIN_ROWS);
-/** where the (decorative) professor stands: bottom-right, out of the desk grid */
-let PROF = { x: 356, y: 150 };
+/**
+ * Where the (decorative) professor stands: in the aisle between the last desk row and the manager,
+ * right of the manager desk. Kept clear of the grid — he used to stand on the lead's desk.
+ */
+let PROF = { x: 286, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
 /** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
 const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
 const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string; fromBottom?: boolean }> = {
-  professor: { tag: { x: 356, y: -86 }, box: { x0: 347, x1: 365, y0: -114, y1: -86 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
+  professor: { tag: { x: 286, y: -18 }, box: { x0: 277, x1: 295, y0: -46, y1: -18 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
   manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: '이름 (비우면 "매니저")', fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
   board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)' },
@@ -190,7 +193,7 @@ export class OfficeScene {
     if (rows === this.rows) return;
     this.rows = rows;
     H = heightFor(rows);
-    PROF = { x: 356, y: H - 90 };
+    PROF = { x: 286, y: H - 22 };
     this.canvas.height = H;
     this.floor = this.paintStatic();
     this.resize();
