@@ -8,7 +8,7 @@ const WALL_H = 36;
 // The office is a grid of desks that grows downward, with a fixed strip at the bottom for the
 // manager and the two reserved seats. Height follows the number of grid rows in use.
 const COLS = 3;
-const COL_X = [40, 170, 300];
+const COL_X = [24, 134, 244];
 const GRID_TOP = 92;
 const ROW_H = 72;
 const MIN_ROWS = 2;
@@ -26,12 +26,12 @@ export let H = heightFor(MIN_ROWS);
  * Where the (decorative) professor stands: in the aisle between the last desk row and the manager,
  * right of the manager desk. Kept clear of the grid — he used to stand on the lead's desk.
  */
-let PROF = { x: 286, y: 150 };
+let PROF = { x: 346, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
 /** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
 const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
 const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string; fromBottom?: boolean }> = {
-  professor: { tag: { x: 286, y: -18 }, box: { x0: 277, x1: 295, y0: -46, y1: -18 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
+  professor: { tag: { x: 346, y: -82 }, box: { x0: 337, x1: 355, y0: -110, y1: -82 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
   manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: '이름 (비우면 "매니저")', fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
   board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)' },
@@ -193,7 +193,7 @@ export class OfficeScene {
     if (rows === this.rows) return;
     this.rows = rows;
     H = heightFor(rows);
-    PROF = { x: 286, y: H - 22 };
+    PROF = { x: 346, y: H - 86 };
     this.canvas.height = H;
     this.floor = this.paintStatic();
     this.resize();
@@ -291,7 +291,7 @@ export class OfficeScene {
     g.fillRect(242, 26, 10, 2);
     g.fillRect(258, 26, 12, 2);
     // ceiling lights: a pool of warm light under each one
-    for (const lx of [80, 200, 320]) {
+    for (const lx of COL_X.map((x) => x + 30)) {
       g.fillStyle = '#6e6456';
       g.fillRect(lx - 1, 0, 2, 5);
       g.fillStyle = '#d9cfa8';
@@ -354,13 +354,15 @@ export class OfficeScene {
     // rug under the desk grid, with a border — follows the row count
     const rugY = GRID_TOP - 14;
     const rugH = this.rows * ROW_H - 10;
+    const rugX = COL_X[0] - 14;
+    const rugW = COL_X[2] + 60 + 14 - rugX;
     g.fillStyle = 'rgba(70,100,130,0.16)';
-    g.fillRect(22, rugY, W - 44, rugH);
+    g.fillRect(rugX, rugY, rugW, rugH);
     g.fillStyle = 'rgba(70,100,130,0.22)';
-    g.fillRect(22, rugY, W - 44, 2);
-    g.fillRect(22, rugY + rugH - 2, W - 44, 2);
-    g.fillRect(22, rugY, 2, rugH);
-    g.fillRect(W - 24, rugY, 2, rugH);
+    g.fillRect(rugX, rugY, rugW, 2);
+    g.fillRect(rugX, rugY + rugH - 2, rugW, 2);
+    g.fillRect(rugX, rugY, 2, rugH);
+    g.fillRect(rugX + rugW - 2, rugY, 2, rugH);
     return c;
   }
 
