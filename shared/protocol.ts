@@ -60,6 +60,9 @@ export interface HostView {
   ok: boolean;
   claudeVersion: string | null;
   projectRoot: string;
+  /** ssh/scp runs used in the last minute, and this host's budget (0 = no limit) */
+  sshUsed: number;
+  sshLimit: number;
   error: string | null;
 }
 

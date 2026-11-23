@@ -1505,3 +1505,4 @@ body .md-body h4 {
 .plog { max-height: 320px; overflow: auto; padding: 6px 10px; border-top: 1px solid var(--line); }
 .psend { padding: 6px 10px 10px; }
 .psend textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.ssh-tight { color: var(--warn); white-space: nowrap; }

@@ -1246,3 +1246,48 @@ describe('ssh rate limit', async () => {
     expect(await t.reserve('gpu1', 100)).toBe(false); // would need ~60s, deadline is 100ms
   });
 });
+
+describe('ssh budget for agent commands', async () => {
+  const { SshThrottle } = await import('../src/sshRate.ts');
+  const { sshBudgetVerdict } = await import('../src/agents/manager.ts');
+
+  it('works out which host a shell command would connect to', () => {
+    expect(SshThrottle.targetOf('ssh srv1 hostname')).toBe('srv1');
+    expect(SshThrottle.targetOf('ssh -p 10300 -o BatchMode=yes desktop ls')).toBe('desktop');
+    expect(SshThrottle.targetOf('cd /tmp && ssh srv1 ls')).toBe('srv1');
+    expect(SshThrottle.targetOf('scp a.txt gpu1:~/out/')).toBe('gpu1');
+    expect(SshThrottle.targetOf('rsync -a ./out ybshin@gpu2:~/out')).toBe('gpu2');
+    expect(SshThrottle.targetOf('ssh ybshin@srv3 "nvidia-smi"')).toBe('srv3');
+  });
+
+  it('stays out of the way when it cannot tell', () => {
+    expect(SshThrottle.targetOf('ls -al')).toBeNull();
+    expect(SshThrottle.targetOf('python3 train.py')).toBeNull();
+    expect(SshThrottle.targetOf('rsync -a ./a ./b')).toBeNull(); // local to local
+    expect(sshBudgetVerdict('ls -al', new SshThrottle(1))).toBeNull();
+  });
+
+  it('denies once the host is over budget, and says how long to wait', () => {
+    const t = new SshThrottle(2);
+    const t0 = 1_000_000;
+    expect(sshBudgetVerdict('ssh gpu1 ls', t, t0)).toBeNull(); // 1st
+    expect(sshBudgetVerdict('ssh gpu1 ls', t, t0 + 1)).toBeNull(); // 2nd
+    const over = sshBudgetVerdict('ssh gpu1 ls', t, t0 + 2);
+    expect(over).toMatchObject({ host: 'gpu1' });
+    expect(over!.waitSec).toBeGreaterThan(55);
+    expect(sshBudgetVerdict('ssh gpu2 ls', t, t0 + 2)).toBeNull(); // another host is unaffected
+  });
+
+  it('honours a per-host limit, and 0 means no limit', () => {
+    const t = new SshThrottle(5);
+    t.setLimit('srv1', 2);
+    t.setLimit('desktop', 0);
+    expect(t.limitFor('srv1')).toBe(2);
+    expect(t.limitFor('gpu9')).toBe(5); // falls back to the office default
+    const t0 = 2_000_000;
+    t.allow('srv1', t0);
+    t.allow('srv1', t0);
+    expect(t.allow('srv1', t0)).toBe(false);
+    for (let i = 0; i < 50; i++) expect(t.allow('desktop', t0)).toBe(true); // opted out
+  });
+});

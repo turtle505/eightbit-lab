@@ -81,7 +81,18 @@ export class Host {
   private home: string | null = null;
 
   constructor(readonly cfg: HostConfig) {
-    this.view = { id: cfg.id, name: cfg.name, local: cfg.ssh === 'local', ok: false, claudeVersion: null, projectRoot: cfg.projectRoot, error: '확인 중…' };
+    this.view = {
+      id: cfg.id,
+      name: cfg.name,
+      local: cfg.ssh === 'local',
+      ok: false,
+      claudeVersion: null,
+      projectRoot: cfg.projectRoot,
+      sshUsed: 0,
+      sshLimit: 0,
+      error: '확인 중…',
+    };
+    if (cfg.ssh !== 'local') sshThrottle.setLimit(cfg.ssh, cfg.sshPerMinute);
   }
 
   /** Absolute path on this host: expands a leading ~ ourselves, since quoted paths are not expanded. */
@@ -133,6 +144,7 @@ export class Host {
     if (r.code === 0 && home.trim()) this.home = home.trim();
     r.stdout = rest.join('\n');
     if (r.code === -1 && r.err.startsWith('ssh 횟수 제한')) return;
+    this.refreshUsage(false);
     const next: HostView = r.code === 0
       ? { ...this.view, ok: true, claudeVersion: r.stdout.trim().split('\n').pop() ?? '', error: null }
       : { ...this.view, ok: false, error: `claude 실행 실패: ${(r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`}` };
@@ -150,6 +162,16 @@ export class Host {
   async listProjects(): Promise<string[]> {
     const r = await this.exec(`ls -1 ${sq(this.expand(this.cfg.projectRoot))} 2>/dev/null`);
     return r.code === 0 ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean).sort() : [];
+  }
+
+  /** Keep the badge's ssh counter current; pushes only when the numbers actually move. */
+  refreshUsage(push = true) {
+    if (this.isLocal) return;
+    const sshUsed = sshThrottle.used(this.cfg.ssh);
+    const sshLimit = sshThrottle.limitFor(this.cfg.ssh);
+    if (sshUsed === this.view.sshUsed && sshLimit === this.view.sshLimit) return;
+    this.view = { ...this.view, sshUsed, sshLimit };
+    if (push) bus.send({ t: 'host', data: { ...this.view } });
   }
 
   /** Absolute working directory for a project folder on this host. */
@@ -182,7 +204,13 @@ export class HostRegistry {
     return this.hosts.get(id);
   }
   views(): HostView[] {
+    for (const h of this.hosts.values()) h.refreshUsage(false);
     return [...this.hosts.values()].map((h) => ({ ...h.view }));
+  }
+
+  /** Push the ssh counter for every host that moved (called after a budget slot is taken). */
+  refreshUsage() {
+    for (const h of this.hosts.values()) h.refreshUsage();
   }
   /** Tell each host how to see whether one of its sessions is already proving it is up. */
   bindLiveness(anyLiveOn: (hostId: string) => boolean) {

@@ -9,6 +9,7 @@ import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { ProviderHub } from '../providers.ts';
 import { sshThrottle, type HostRegistry } from '../hosts.ts';
+import { SshThrottle } from '../sshRate.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
 import { hostname } from 'node:os';
@@ -173,6 +174,18 @@ export function needsLabApproval(toolName: string, input: Record<string, unknown
  * (mac → desktop) would look like "same host" and the resume would fail with "No conversation found".
  */
 export const sessionHostId = (roleHost: string | undefined, backend = hostname()) => roleHost ?? `backend:${backend}`;
+
+/**
+ * Decide what the per-minute budget says about a shell command the agent wants to run.
+ * The slot is taken when the call is *attempted*, not when it succeeds — a denied approval still
+ * costs one. Over-counting is the safe direction here: the point is to never flood a server.
+ */
+export function sshBudgetVerdict(command: string, throttle = sshThrottle, now = Date.now()): { host: string; waitSec: number } | null {
+  const host = SshThrottle.targetOf(command);
+  if (!host) return null; // can't tell where it goes — don't block it
+  if (throttle.allow(host, now)) return null;
+  return { host, waitSec: Math.ceil(throttle.waitMs(host, now) / 1000) };
+}
 
 /** A 🔒 task always asks; otherwise the employee's own setting. Only ever tightens. */
 export function effectivePermission(employee: PermissionSetting, requireApproval: boolean): PermissionSetting {
@@ -458,13 +471,28 @@ export class AgentManager {
                   if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
                   const name = hookInput.tool_name;
                   const inp = (hookInput.tool_input ?? {}) as Record<string, unknown>;
-                  const decide = (permissionDecision: 'allow' | 'ask', permissionDecisionReason: string) => ({
+                  const decide = (permissionDecision: 'allow' | 'ask' | 'deny', permissionDecisionReason: string) => ({
                     continue: true,
                     hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision, permissionDecisionReason },
                   });
                   const whitelisted = isAutoAllowed(autoAllow, name) || extraAllowNow().some((r) => matchesRule(r, name, inp));
-                  // anything reaching a lab server asks, unless the manager named that exact tool/command
-                  if (needsLabApproval(name, inp) && !whitelisted) return decide('ask', '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.');
+                  if (needsLabApproval(name, inp)) {
+                    // Count it against the server's budget even when the manager would be asked:
+                    // a flood of approved ssh calls is exactly what gets us banned.
+                    if (name === 'Bash') {
+                      const over = sshBudgetVerdict(String(inp.command ?? ''));
+                      if (over) {
+                        this.hosts?.refreshUsage();
+                        return decide(
+                          'deny',
+                          `${over.host} 접속이 분당 한도를 넘어 막았습니다. ${over.waitSec}초 뒤에 다시 시도하거나, 여러 명령을 한 번의 접속으로 묶으세요.`,
+                        );
+                      }
+                      this.hosts?.refreshUsage();
+                    }
+                    // anything reaching a lab server asks, unless the manager named that exact tool/command
+                    if (!whitelisted) return decide('ask', '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.');
+                  }
                   if (whitelisted) return decide('allow', '매니저가 허용한 도구입니다.');
                   return { continue: true }; // auto-mode classifier, then canUseTool
                 },

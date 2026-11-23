@@ -71,8 +71,13 @@ export function hostBadge(st: UIState, e: EmployeeView, plainText = false): stri
   if (!e.hostId) return '';
   const h = (st.snap.hosts ?? []).find((x) => x.id === e.hostId);
   if (!h) return `<span class="prov off" title="설정에 host '${esc(e.hostId)}' 가 없음">${esc(e.hostId)} · 설정 없음</span>`;
-  const tip = h.ok ? `세션이 이 머신에서 실행됩니다 · claude ${h.claudeVersion ?? ''}` : h.error ?? '';
-  return `<span class="prov ${h.ok ? 'on' : 'off'}" title="${esc(tip)}">${esc(plainText ? plain(h.name) : h.name)}${h.ok ? '' : ' · 연결 안 됨'}</span>`;
+  // the ssh budget only earns screen space when it is nearly spent; otherwise it lives in the tooltip
+  const budget = h.sshLimit > 0 ? ` · 분당 ssh ${h.sshUsed}/${h.sshLimit}` : '';
+  const tight = h.sshLimit > 0 && h.sshUsed >= h.sshLimit * 0.8;
+  const tip = (h.ok ? `세션이 이 머신에서 실행됩니다 · claude ${h.claudeVersion ?? ''}` : h.error ?? '') + budget;
+  return `<span class="prov ${h.ok ? 'on' : 'off'}" title="${esc(tip)}">${esc(plainText ? plain(h.name) : h.name)}${
+    h.ok ? '' : ' · 연결 안 됨'
+  }${tight ? ` <span class="ssh-tight">⏳ ${h.sshUsed}/${h.sshLimit}</span>` : ''}</span>`;
 }
 
 /** Provider (local model) of an employee, if it runs on one. */

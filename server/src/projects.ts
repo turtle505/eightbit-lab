@@ -50,7 +50,8 @@ const prompt = (name: string, dir: string) => `당신은 "${name}" 프로젝트 
 이 폴더가 당신의 작업 공간입니다. 고치기 전에 기존 코드와 문서를 먼저 읽으세요.
 - 사실과 추측을 구분하고, 확인하지 못한 것은 "미확인"이라고 쓰세요.
 - 마지막 응답에 변경한 파일과 다음 단계를 짧게 남기세요.
-- 랩 서버에 닿는 호출(원격 job 제출·취소, ssh/scp)은 매니저 승인 카드가 뜹니다. 정상입니다.`;
+- 랩 서버에 닿는 호출(원격 job 제출·취소, ssh/scp)은 매니저 승인 카드가 뜹니다. 정상입니다.
+- 랩 서버 접속(ssh·scp·rsync)은 분당 횟수가 제한됩니다. 반복문으로 접속하지 말고 한 번의 접속에서 명령을 묶으세요.`;
 
 /**
  * Projects are folders on a host; each can hold several independent Claude Code sessions.

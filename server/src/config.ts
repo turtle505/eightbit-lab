@@ -46,6 +46,8 @@ export interface HostConfig {
   projectRoot: string;
   /** absolute path to the CLI — a non-login ssh often lacks ~/.local/bin on PATH */
   claudePath?: string;
+  /** ssh/scp runs per minute for this host; omitted = office.sshPerMinute, 0 = no limit */
+  sshPerMinute?: number;
 }
 
 export interface ProviderConfig {
@@ -191,7 +193,14 @@ export function normalizeHosts(list: Partial<HostConfig>[]): HostConfig[] {
       console.warn(`⚠️ host ${h.id ?? '(id 없음)'}: id 와 ssh 가 필요합니다 — 무시함`);
       continue;
     }
-    out.push({ id: h.id, name: h.name || h.id, ssh: h.ssh, projectRoot: h.projectRoot || '~/project', claudePath: h.claudePath });
+    out.push({
+      id: h.id,
+      name: h.name || h.id,
+      ssh: h.ssh,
+      projectRoot: h.projectRoot || '~/project',
+      claudePath: h.claudePath,
+      sshPerMinute: h.sshPerMinute,
+    });
   }
   return out;
 }
