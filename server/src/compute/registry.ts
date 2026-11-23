@@ -27,6 +27,12 @@ export class ServerRegistry {
     return [...this.views.values()];
   }
 
+  /** Is this server somewhere else? An unknown name counts as remote — the cautious answer. */
+  isRemote(name: string): boolean {
+    const a = this.adapters.get(name);
+    return a ? !isLocalHost(a.cfg.ssh_host) : true;
+  }
+
   get(name: string): ComputeAdapter {
     const a = this.adapters.get(name);
     if (!a) throw new Error(`알 수 없는 서버: ${name}. 사용 가능: ${[...this.adapters.keys()].join(', ') || '(없음 — config/servers.local.yaml 설정 필요)'}`);

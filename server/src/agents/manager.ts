@@ -158,14 +158,25 @@ const LAB_TOOLS = new Set(['mcp__lab__submit_job', 'mcp__lab__cancel_job', 'mcp_
 const REMOTE_CMD = /(?:^|[\s;&|(]|\$\()\s*(?:[\w./-]*\/)?(?:ssh|scp|rsync|sftp|sshfs)\b/;
 
 /**
- * Does this call reach a lab server? Those always get a manager approval card, even in auto mode:
- * an agent reading papers off the web should never be one classifier call away from running
- * arbitrary commands on the GPU machines.
+ * Does this call reach a lab server *somewhere else*? Those always get a manager approval card,
+ * even in auto mode: an agent reading papers off the web should never be one classifier call away
+ * from running arbitrary commands on a shared machine.
+ *
+ * A job aimed at a server whose `ssh_host` is `local` is not that — it runs on the machine the
+ * backend already sits on, over no network, and is no more dangerous than the Bash the agent can
+ * already run there. `isRemoteServer` tells us which is which (unknown server → treat as remote).
  */
-export function needsLabApproval(toolName: string, input: Record<string, unknown>): boolean {
-  if (LAB_TOOLS.has(toolName)) return true;
+export function needsLabApproval(
+  toolName: string,
+  input: Record<string, unknown>,
+  isRemoteServer: (name: string) => boolean = () => true,
+): boolean {
+  if (LAB_TOOLS.has(toolName)) {
+    const server = typeof input?.server === 'string' ? input.server : '';
+    return !server || isRemoteServer(server);
+  }
   if (toolName !== 'Bash') return false;
-  return REMOTE_CMD.test(String(input?.command ?? ''));
+  return REMOTE_CMD.test(String(input?.command ?? '')); // ssh/scp are remote by definition
 }
 
 /**
@@ -476,7 +487,7 @@ export class AgentManager {
                     hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision, permissionDecisionReason },
                   });
                   const whitelisted = isAutoAllowed(autoAllow, name) || extraAllowNow().some((r) => matchesRule(r, name, inp));
-                  if (needsLabApproval(name, inp)) {
+                  if (needsLabApproval(name, inp, (s) => this.registry.isRemote(s))) {
                     // Count it against the server's budget even when the manager would be asked:
                     // a flood of approved ssh calls is exactly what gets us banned.
                     if (name === 'Bash') {

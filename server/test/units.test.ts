@@ -717,6 +717,8 @@ describe('lab server guard', async () => {
 
   it('flags remote job tools and shell commands that open a remote session', () => {
     for (const t of ['mcp__lab__submit_job', 'mcp__lab__cancel_job', 'mcp__lab__fetch_results']) expect(needsLabApproval(t, {})).toBe(true);
+    // a job aimed at a shared server still asks, whoever is driving
+    expect(needsLabApproval('mcp__lab__submit_job', { server: 'gpu1' }, (s) => s === 'gpu1')).toBe(true);
     for (const cmd of [
       'ssh desktop hostname',
       'cd /tmp && ssh master nvidia-smi',
@@ -728,6 +730,17 @@ describe('lab server guard', async () => {
       'x=$(ssh desktop hostname)',
     ])
       expect(needsLabApproval('Bash', { command: cmd }), cmd).toBe(true);
+  });
+
+  it('does not ask for a job on the backend\'s own machine', () => {
+    // `ssh_host: local` means no network and no shared server — auto mode can judge it like any Bash
+    const localOnly = (name: string) => name !== 'desktop';
+    expect(needsLabApproval('mcp__lab__submit_job', { server: 'desktop' }, localOnly)).toBe(false);
+    expect(needsLabApproval('mcp__lab__fetch_results', { server: 'desktop' }, localOnly)).toBe(false);
+    expect(needsLabApproval('mcp__lab__submit_job', { server: 'elsewhere' }, localOnly)).toBe(true);
+    expect(needsLabApproval('mcp__lab__submit_job', {}, localOnly)).toBe(true); // no server named → cautious
+    // ssh in a shell command is remote by definition, even on a local server
+    expect(needsLabApproval('Bash', { command: 'ssh desktop hostname' }, localOnly)).toBe(true);
   });
 
   it('leaves ordinary local work alone', () => {
