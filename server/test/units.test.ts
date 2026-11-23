@@ -1189,3 +1189,30 @@ describe('schema migrations', () => {
     expect(s.setSessionDesk(row.id, true, [0, 1])).toBe(2);
   });
 });
+
+describe('ssh connection pressure', async () => {
+  const { SSH_SHORT, SSH_BASE, sshControlOpts, Host } = await import('../src/hosts.ts');
+
+  it('short, frequent commands share one master connection per host', () => {
+    const joined = SSH_SHORT.join(' ');
+    expect(joined).toContain('ControlMaster=auto');
+    expect(joined).toContain('ControlPersist=5m');
+    expect(sshControlOpts().join(' ')).toMatch(/ControlPath=\S+\/%C/); // %C keeps the socket path short
+  });
+
+  it('long-lived sessions keep their own connection', () => {
+    // one dropped TCP connection must not take every session on a host down at once
+    expect(SSH_BASE.join(' ')).not.toContain('ControlMaster');
+  });
+
+  it('skips the health check while a session already proves the host is up', async () => {
+    const h = new Host({ id: 'gpu1', name: 'gpu1', ssh: 'gpu1', projectRoot: '~/project' } as any);
+    let checks = 0;
+    (h as any).check = async () => void checks++;
+    h.hasLiveSession = () => true;
+    h.start(10);
+    await new Promise((r) => setTimeout(r, 45));
+    h.stop();
+    expect(checks).toBe(1); // only the one at startup; the timer kept quiet
+  });
+});

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { sshControlOpts } from '../hosts.ts';
 import type { GpuInfo, JobState } from '../../../shared/protocol.ts';
 import type { ServerConfig } from '../config.ts';
 
@@ -29,7 +30,10 @@ export interface Exec {
 /** Run a bash script on a remote host via ssh (script sent on stdin; BatchMode so it never hangs on a password prompt). */
 export const sshExec: Exec = (host, script, timeoutMs = 30_000) =>
   new Promise((resolve) => {
-    const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, 'bash -s'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    // polled every 20-60s, so it shares one master connection per host (see hosts.ts sshControlOpts)
+    const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...sshControlOpts(), host, 'bash -s'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {

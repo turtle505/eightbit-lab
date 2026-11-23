@@ -42,6 +42,7 @@ const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)
   if (r.host && !hosts.get(r.host)) console.warn(`⚠️ ${r.id}: host '${r.host}' 가 office(.local).yaml 의 hosts 에 없습니다`);
+hosts.bindLiveness((hostId) => agents.views().some((v) => v.hostId === hostId && v.live));
 const projects = new ProjectRegistry(store, agents, hosts);
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;

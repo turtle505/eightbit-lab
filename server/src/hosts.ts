@@ -1,9 +1,11 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import type { HostView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import { sq } from './compute/adapter.ts';
-import type { HostConfig } from './config.ts';
+import { ROOT, type HostConfig } from './config.ts';
 
 /** Shape the Agent SDK expects back from `spawnClaudeCodeProcess` (a ChildProcess satisfies it). */
 export type SpawnArgs = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal?: AbortSignal };
@@ -36,6 +38,25 @@ export function remoteCommand(cfg: HostConfig, a: SpawnArgs): string {
 }
 
 export const SSH_BASE = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'];
+
+/**
+ * Short commands (health checks, folder listings, GPU polling) run many times an hour. Opening a
+ * fresh TCP connection each time trips fail2ban and sshd rate limits on shared lab servers — and
+ * being locked out of a server is painful to undo. These share one master connection per host
+ * instead: the first command opens it, the rest ride it over a local socket, and it lingers a few
+ * minutes afterwards. Long-lived sessions deliberately do NOT multiplex, so one dropped connection
+ * cannot take every session on that host down with it.
+ */
+export const CONTROL_DIR = resolve(ROOT, 'data/ssh');
+export const sshControlOpts = () => [
+  '-o', 'ControlMaster=auto',
+  // %C is a short hash of (host, port, user) — a long socket path would exceed the unix socket limit
+  '-o', `ControlPath=${CONTROL_DIR}/%C`,
+  '-o', 'ControlPersist=5m',
+];
+export const SSH_SHORT = [...SSH_BASE, ...sshControlOpts()];
+
+mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
 
 /**
  * Run the Claude Code CLI on another machine. `-T` is required: a TTY would corrupt the
@@ -76,7 +97,7 @@ export class Host {
 
   /** Run a short command on the host (local or over ssh) and return stdout. */
   private exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
-    const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_BASE, this.cfg.ssh, script]);
+    const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_SHORT, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';
       let err = '';
@@ -124,9 +145,14 @@ export class Host {
     return this.expand(dir.startsWith('/') || dir.startsWith('~') ? dir : `${this.cfg.projectRoot.replace(/\/$/, '')}/${dir}`);
   }
 
-  start(everyMs = 30_000) {
+  /** true while a session is running on this host — then its liveness is already proven */
+  hasLiveSession: () => boolean = () => false;
+
+  start(everyMs = 180_000) {
     void this.check();
-    this.timer = setInterval(() => void this.check(), everyMs);
+    this.timer = setInterval(() => {
+      if (!this.hasLiveSession()) void this.check();
+    }, everyMs);
   }
   stop() {
     if (this.timer) clearInterval(this.timer);
@@ -145,6 +171,10 @@ export class HostRegistry {
   }
   views(): HostView[] {
     return [...this.hosts.values()].map((h) => ({ ...h.view }));
+  }
+  /** Tell each host how to see whether one of its sessions is already proving it is up. */
+  bindLiveness(anyLiveOn: (hostId: string) => boolean) {
+    for (const h of this.hosts.values()) h.hasLiveSession = () => anyLiveOn(h.cfg.id);
   }
   start() {
     for (const h of this.hosts.values()) h.start();
