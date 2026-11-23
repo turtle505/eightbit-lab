@@ -167,7 +167,7 @@ export class OfficeScene {
   upsert(v: EmployeeView) {
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = v.stayAtDesk ? seatSpot(v.desk) : coffeeSpot(v.desk);
+      const start = v.stayAtDesk || v.live ? seatSpot(v.desk) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
@@ -416,7 +416,8 @@ export class OfficeScene {
     }
     if (SEATED.includes(v.status) || (v.status === 'remote' && !this.servers.length)) return seatSpot(v.desk);
     if (BESIDE.includes(v.status)) return besideSpot(v.desk);
-    return coffeeSpot(v.desk);
+    // session still open = still at the desk, ready for the next instruction; closed = off to the lounge
+    return v.live ? seatSpot(v.desk) : coffeeSpot(v.desk);
   }
 
   private tick() {

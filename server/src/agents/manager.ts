@@ -219,6 +219,11 @@ export class AgentManager {
     return e;
   }
 
+  /** waiting with the session open means sitting at the desk; closed means off to the lounge */
+  private idleActivity(e: Employee) {
+    return e.live ? '💺 자리에서 대기 중' : '☕ 대기 중';
+  }
+
   /** push the current view to the browsers (status unchanged) */
   private sendView(e: Employee) {
     e.view.live = !!e.live;
@@ -279,7 +284,7 @@ export class AgentManager {
     this.broker.cancelFor(employeeId);
     const live = e.live;
     if (!live || !e.current) {
-      if (!e.current) this.set(e, 'idle', '☕ 대기 중');
+      if (!e.current) this.set(e, 'idle', this.idleActivity(e));
       return;
     }
     this.log(e, 'system', '⏹ 중지됨');
@@ -445,7 +450,8 @@ export class AgentManager {
     live.input.close();
     live.q.close();
     if (why) this.log(e, 'system', why);
-    this.sendView(e);
+    if (!e.current && e.view.status === 'idle') this.set(e, 'idle', this.idleActivity(e));
+    else this.sendView(e);
   }
 
   /** Close sessions that were opened against this provider, so a model change takes effect. */
@@ -506,7 +512,7 @@ export class AgentManager {
     });
 
     if (live.abort.signal.aborted) {
-      this.set(e, 'idle', '☕ 대기 중');
+      this.set(e, 'idle', this.idleActivity(e));
       return;
     }
     const ok = e.view.status !== 'error';
@@ -519,7 +525,7 @@ export class AgentManager {
     this.armIdleTimer(e);
     // fall back to idle after a while so the desk doesn't look busy forever
     setTimeout(() => {
-      if (!e.current && (e.view.status === 'done' || e.view.status === 'error')) this.set(e, 'idle', '☕ 대기 중');
+      if (!e.current && (e.view.status === 'done' || e.view.status === 'error')) this.set(e, 'idle', this.idleActivity(e));
     }, 60_000);
   }
 
