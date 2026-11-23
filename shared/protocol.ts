@@ -29,6 +29,8 @@ export interface EmployeeView {
   deskStyle?: 'lead';
   /** 'auto': a classifier approves tool calls and only unclear ones become approval cards; 'ask': every non-autoAllow tool asks */
   permission: PermissionSetting;
+  /** a session is open right now (the next instruction skips process start) */
+  live: boolean;
   /** set when this employee runs on a non-Claude provider (ProviderView.id) */
   provider?: string;
 }

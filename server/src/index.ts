@@ -306,6 +306,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       break;
     case 'setProviderModel':
       providers.setModel(msg.providerId, msg.model);
+      agents.reopenProviderSessions(msg.providerId); // the model is baked into the session's env at start
       bus.send({ t: 'notice', level: 'info', text: `🖥 모델 변경: ${msg.model}` });
       break;
   }

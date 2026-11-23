@@ -12,6 +12,8 @@ const text = (s: string, isError = false) => ({ content: [{ type: 'text' as cons
 export function labToolsServer(employeeId: string, cwd: string, registry: ServerRegistry, store: Store) {
   return createSdkMcpServer({
     name: 'lab',
+    // always in the prompt: these are few, and deferring them costs a ToolSearch turn on every run
+    alwaysLoad: true,
     version: '1.0.0',
     instructions:
       'Remote GPU servers of the protein lab. Check gpu_status before submit_job. Jobs run in a fresh directory on the server; ' +

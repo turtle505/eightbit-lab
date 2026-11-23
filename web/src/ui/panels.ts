@@ -338,7 +338,9 @@ export function renderEmployeePanel(st: UIState, send: Send) {
             }</div>`
           : ''
       }
-      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ${e.provider ? '구독 사용 안 함' : `사무실 사용 비중 ${usageShare(st, e.costUsd)}`}</div>`;
+      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · <span title="${
+        e.live ? '세션이 열려 있어 다음 지시는 바로 시작합니다. 일하는 중에 보낸 지시도 즉시 전달됩니다.' : '세션이 닫혀 있습니다. 다음 지시 때 대화를 이어서 다시 엽니다 (첫 응답만 느림).'
+      }">${e.live ? '🟢 세션 열림' : '⚪ 세션 대기'}</span> ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ${e.provider ? '구독 사용 안 함' : `사무실 사용 비중 ${usageShare(st, e.costUsd)}`}</div>`;
     document.getElementById('emp-model')?.addEventListener('change', (ev) => {
       if (prov) send({ t: 'setProviderModel', providerId: prov.id, model: (ev.target as HTMLSelectElement).value });
     });

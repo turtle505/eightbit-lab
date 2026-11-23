@@ -763,3 +763,131 @@ describe('allowedOrigin (browser-only surface)', async () => {
       expect(allowedOrigin(o || undefined, 8787), JSON.stringify(o)).toBe(o === '' ? true : false);
   });
 });
+
+describe('live sessions', async () => {
+  const { AgentManager } = await import('../src/agents/manager.ts');
+  const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  /** a stand-in for one Claude Code session: records the prompts pushed in, answers each with a `result` */
+  function fakeSdk() {
+    const calls: { resume?: string; permissionMode?: string; model?: string }[] = [];
+    const prompts: string[] = [];
+    const modeChanges: string[] = [];
+    let cost = 0;
+    const sessions: any[] = [];
+    const queryFn: any = ({ prompt, options }: any) => {
+      calls.push({ resume: options.resume, permissionMode: options.permissionMode, model: options.model });
+      const out: any[] = [];
+      let wake: any = null; // assigned from the iterator below; `any` keeps TS from narrowing it to null here
+      let closed = false;
+      const emit = (m: any) => {
+        out.push(m);
+        wake?.();
+      };
+      void (async () => {
+        for await (const m of prompt as AsyncIterable<any>) {
+          prompts.push(String(m.message.content));
+          emit({ type: 'system', subtype: 'init', session_id: 'sess-1', model: options.model ?? 'claude', permissionMode: options.permissionMode });
+          emit({ type: 'assistant', message: { content: [{ type: 'text', text: `ok:${prompts.length}` }] } });
+          cost += 0.01;
+          emit({ type: 'result', subtype: 'success', result: `ok:${prompts.length}`, num_turns: 1, duration_ms: 10, total_cost_usd: cost });
+        }
+        closed = true;
+        wake?.();
+      })();
+      const q = {
+        async *[Symbol.asyncIterator]() {
+          for (;;) {
+            while (out.length) yield out.shift();
+            if (closed) return;
+            await new Promise<void>((r) => (wake = r));
+            wake = null;
+          }
+        },
+        setPermissionMode: async (m: string) => void modeChanges.push(m),
+        setModel: async () => {},
+        interrupt: async () => {},
+        close: () => {
+          closed = true;
+          wake?.();
+        },
+      };
+      sessions.push(q);
+      return q;
+    };
+    return { queryFn, calls, prompts, modeChanges, sessions };
+  }
+
+  function makeManager(sdk: ReturnType<typeof fakeSdk>, over: Record<string, unknown> = {}) {
+    const root = mkdtempSync(join(tmpdir(), 'office-live-'));
+    const office: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: root, reportDirs: [], obsidian: null, providers: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787, ...over };
+    const role: any = { id: 'lit', name: 'Ada', title: 'R', desk: 0, sprite: {}, useWorktree: false, autoAllow: [], systemPrompt: '' };
+    const store = new Store(':memory:');
+    const m = new AgentManager(office, [role], store, new Broker(), { list: () => [] } as any);
+    m.queryFn = sdk.queryFn;
+    return { m, store };
+  }
+
+  const settle = async (ms = 30) => await new Promise((r) => setTimeout(r, ms));
+
+  it('reuses one session across instructions instead of starting a process each time', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk);
+    m.instruct('lit', '1+1은?');
+    await settle();
+    m.instruct('lit', '2+2는?');
+    await settle();
+    expect(sdk.calls).toHaveLength(1); // one process, two turns
+    expect(sdk.prompts).toEqual(['1+1은?', '2+2는?']);
+    expect(m.views()[0].live).toBe(true);
+    expect(m.runningCount()).toBe(0); // the idle open session holds no concurrency slot
+  });
+
+  it('bills the delta, not the cumulative session total', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk);
+    m.instruct('lit', 'a');
+    await settle();
+    m.instruct('lit', 'b');
+    await settle();
+    expect(m.views()[0].costUsd).toBeCloseTo(0.02, 5); // 0.01 + 0.01, not 0.01 + 0.02
+  });
+
+  it('a 🔒 task switches the live session to ask and back', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk);
+    m.instruct('lit', 'normal');
+    await settle();
+    m.instruct('lit', 'locked', 1, { requireApproval: true });
+    await settle();
+    m.instruct('lit', 'normal again');
+    await settle();
+    expect(sdk.calls[0].permissionMode).toBe('auto');
+    expect(sdk.modeChanges).toEqual(['default', 'auto']);
+  });
+
+  it('closes an idle session and resumes the conversation on the next instruction', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk, { sessionIdleMinutes: 0.0005 }); // ~30ms
+    m.instruct('lit', 'first');
+    await settle(120);
+    expect(m.views()[0].live).toBe(false);
+    m.instruct('lit', 'later');
+    await settle();
+    expect(sdk.calls).toHaveLength(2);
+    expect(sdk.calls[1].resume).toBe('sess-1'); // same conversation, new process
+  });
+
+  it('stop() interrupts the turn but keeps the session open', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk);
+    m.instruct('lit', 'go');
+    await settle();
+    m.stop('lit');
+    await settle();
+    expect(m.views()[0].live).toBe(true);
+  });
+});

@@ -30,7 +30,7 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
         <td><span class="badge b-${e.status}">${STATUS_KO[e.status] ?? e.status}</span> <span class="muted small" title="${e.permission === 'auto' ? '자동 모드' : '승인 모드'}">${e.permission === 'auto' ? '자동' : '승인'}</span></td>
         <td class="activity" title="${esc(e.activity)}">${esc(plain(e.activity))}</td>
         <td class="num">${task ? `#${task.id}` : '—'}</td>
-        <td class="num mono">${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '—'}</td>
+        <td class="num mono" title="${e.live ? '세션 열림 (다음 지시 바로 시작)' : '세션 대기 (다음 지시 때 이어서 엶)'}">${e.live ? '●' : '○'} ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '—'}</td>
         ${e.provider ? `<td class="num muted" title="로컬 모델 — 구독 사용 안 함">로컬</td>` : `<td class="num" title="API 가격 환산 ≈$${e.costUsd.toFixed(2)} / 사무실 전체 ≈$${total.toFixed(2)}">${usageShare(st, e.costUsd)}</td>`}
         <td class="num muted">${u ? ago(u) : '—'}</td>
         <td class="actions">${BUSY.includes(e.status) ? `<button data-act="stop">중지</button>` : ''}</td>

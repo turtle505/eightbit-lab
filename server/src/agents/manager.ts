@@ -1,4 +1,4 @@
-import { query, type Query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentStatus, EmployeeView, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
@@ -22,6 +22,57 @@ interface Work {
   requireApproval: boolean;
 }
 
+/** Push-driven async iterable: the stream of user messages a live session reads from. */
+class MessageQueue implements AsyncIterable<SDKUserMessage> {
+  private items: SDKUserMessage[] = [];
+  private wake: (() => void) | null = null;
+  private closed = false;
+
+  push(m: SDKUserMessage) {
+    this.items.push(m);
+    this.wake?.();
+  }
+  close() {
+    this.closed = true;
+    this.wake?.();
+  }
+  async *[Symbol.asyncIterator]() {
+    for (;;) {
+      while (this.items.length) yield this.items.shift()!;
+      if (this.closed) return;
+      await new Promise<void>((r) => (this.wake = r));
+      this.wake = null;
+    }
+  }
+}
+
+/**
+ * One Claude Code session kept open across instructions, so the second instruction doesn't pay for
+ * process start, session load and MCP/plugin connect again — and so the manager can push a message
+ * into a turn that is already running.
+ */
+interface LiveSession {
+  q: Query;
+  input: MessageQueue;
+  abort: AbortController;
+  cwd: string;
+  /** permission mode the session is currently in, so we only call setPermissionMode on a change */
+  perm: PermissionSetting;
+  /** provider the session was opened for (its model is baked into env at start) */
+  providerModel: string | null;
+  /** last result.total_cost_usd — it is cumulative per session, so we bill the delta */
+  lastCost: number | null;
+  /** the consume loop, so close() can await it */
+  done: Promise<void>;
+}
+
+const userMessage = (text: string): SDKUserMessage => ({
+  type: 'user',
+  message: { role: 'user', content: text },
+  parent_tool_use_id: null,
+  session_id: '',
+});
+
 /** Emitted on the bus as 'runFinished' when a run ends (not when stopped by the manager). */
 export interface RunFinished {
   employeeId: string;
@@ -34,8 +85,10 @@ export interface RunFinished {
 class Employee {
   view: EmployeeView;
   inbox: Work[] = [];
-  q: Query | null = null;
-  abort: AbortController | null = null;
+  live: LiveSession | null = null;
+  /** resolves the in-flight turn (set by run(), called from the consume loop on `result`) */
+  endTurn: (() => void) | null = null;
+  idleTimer: NodeJS.Timeout | null = null;
   current: Work | null = null;
   lastText = '';
   /** mode requested for the current run (to report a fallback from auto) */
@@ -57,6 +110,7 @@ class Employee {
       stayAtDesk: role.stayAtDesk ?? false,
       deskStyle: role.deskStyle,
       permission,
+      live: false,
       provider: role.provider,
     };
   }
@@ -127,6 +181,8 @@ export class AgentManager {
   officeApi: OfficeApi | null = null;
   /** local plugins loaded into every session (the office skills plugin); set by index.ts */
   pluginDirs: string[] = [];
+  /** swapped out in tests */
+  queryFn: typeof query = query;
   /** extra readable folders for every session (the attachments store); set by index.ts */
   extraDirs: string[] = [];
   /** non-Claude backends; set by index.ts */
@@ -163,7 +219,14 @@ export class AgentManager {
     return e;
   }
 
+  /** push the current view to the browsers (status unchanged) */
+  private sendView(e: Employee) {
+    e.view.live = !!e.live;
+    bus.send({ t: 'employee', data: { ...e.view } });
+  }
+
   private set(e: Employee, status: AgentStatus, activity?: string) {
+    e.view.live = !!e.live;
     e.view.status = status;
     if (activity !== undefined) e.view.activity = activity;
     bus.send({ t: 'employee', data: { ...e.view } });
@@ -208,14 +271,27 @@ export class AgentManager {
     }
   }
 
+  /** Stop the current turn but keep the session open, so the next instruction is still warm. */
   stop(employeeId: string) {
     const e = this.emp(employeeId);
     e.inbox = [];
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
-    e.abort?.abort();
-    e.q?.close();
-    if (!e.current) this.set(e, 'idle', '☕ 대기 중');
+    const live = e.live;
+    if (!live || !e.current) {
+      if (!e.current) this.set(e, 'idle', '☕ 대기 중');
+      return;
+    }
+    this.log(e, 'system', '⏹ 중지됨');
+    const ended = e.endTurn;
+    void live.q
+      .interrupt()
+      .catch(() => {
+        // the CLI didn't take the interrupt: drop the session rather than leave a wedged turn
+        live.abort.abort();
+        this.closeSession(e);
+      })
+      .finally(() => setTimeout(() => ended?.(), 3_000)); // if no `result` follows, release the turn anyway
   }
 
   /** Rename from the UI: replaces the quoted nickname in the configured name (문헌 리서처 "Ada" → 문헌 리서처 "Bo"). */
@@ -241,50 +317,43 @@ export class AgentManager {
   resetSession(employeeId: string) {
     const e = this.emp(employeeId);
     this.stop(employeeId);
+    this.closeSession(e);
     e.view.sessionId = null;
     this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
     this.log(e, 'system', '새 대화 세션으로 초기화됨');
     this.set(e, 'idle', '☕ 새 마음으로 대기 중');
   }
 
-  private async run(e: Employee, work: Work) {
-    e.current = work;
-    e.view.taskId = work.taskId;
-    e.lastText = '';
-    this.set(e, 'thinking', '💭 업무 파악 중');
+  /** Open (or reuse) the employee's long-lived session. Throws with a manager-readable message. */
+  private openSession(e: Employee): LiveSession {
+    if (e.live) return e.live;
 
-    let cwd: string;
-    try {
-      cwd = ensureWorkspace(this.office, e.role);
-    } catch (err) {
-      this.log(e, 'error', `작업 폴더 준비 실패: ${(err as Error).message}`);
-      this.set(e, 'error', '⚠️ 작업 폴더 준비 실패');
-      return;
-    }
+    const cwd = ensureWorkspace(this.office, e.role); // throws → caller reports
     e.view.cwd = cwd;
 
-    const abort = new AbortController();
-    e.abort = abort;
     const autoAllow = new Set(e.role.autoAllow);
     const mcpServers: Record<string, any> = { lab: labToolsServer(e.role.id, cwd, this.registry, this.store) };
     if (e.role.officeTools && this.officeApi) mcpServers.office = officeToolsServer(e.role.id, this.officeApi);
+
     let model = e.role.model || this.office.model || undefined;
     let env: Record<string, string> | undefined;
+    let providerModel: string | null = null;
     if (e.role.provider) {
       const link = this.providers?.get(e.role.provider);
       const rt = link ? link.runtime() : { error: `설정에 없는 provider: ${e.role.provider} (office.local.yaml 의 providers 확인)` };
-      if ('error' in rt) {
-        this.log(e, 'error', `🖥 ${rt.error}`);
-        this.set(e, 'error', '⚠️ 로컬 모델 연결 실패');
-        return;
-      }
+      if ('error' in rt) throw new Error(`🖥 ${rt.error}`);
       ({ model, env } = rt);
+      providerModel = rt.model;
     }
 
-    const perm = effectivePermission(e.view.permission, work.requireApproval);
-    e.wantedPermission = perm;
-    const q = query({
-      prompt: work.text,
+    // the current work changes every turn, so the callbacks read e.current instead of closing over one Work
+    const extraAllowNow = () => e.current?.extraAllow ?? [];
+    const perm = effectivePermission(e.view.permission, e.current?.requireApproval ?? false);
+    const abort = new AbortController();
+    const input = new MessageQueue();
+
+    const q = this.queryFn({
+      prompt: input,
       options: {
         cwd,
         additionalDirectories: this.extraDirs,
@@ -307,7 +376,7 @@ export class AgentManager {
                   const name = hookInput.tool_name;
                   const inp = (hookInput.tool_input ?? {}) as Record<string, unknown>;
                   if (!needsLabApproval(name, inp)) return { continue: true };
-                  if (isAutoAllowed(autoAllow, name) || work.extraAllow.some((r) => matchesRule(r, name, inp))) return { continue: true };
+                  if (isAutoAllowed(autoAllow, name) || extraAllowNow().some((r) => matchesRule(r, name, inp))) return { continue: true };
                   return {
                     continue: true,
                     hookSpecificOutput: {
@@ -326,7 +395,7 @@ export class AgentManager {
         plugins: (e.role.provider ? [] : this.pluginDirs).map((path) => ({ type: 'local' as const, path })),
         canUseTool: async (toolName, input, { signal }) => {
           if (isAutoAllowed(autoAllow, toolName)) return { behavior: 'allow', updatedInput: input };
-          if (work.extraAllow.some((r) => matchesRule(r, toolName, input))) {
+          if (extraAllowNow().some((r) => matchesRule(r, toolName, input))) {
             this.log(e, 'system', `🔓 스킬 권한으로 자동 허용: ${describeToolCall(toolName, input as any)}`);
             return { behavior: 'allow', updatedInput: input };
           }
@@ -340,22 +409,103 @@ export class AgentManager {
         },
       },
     });
-    e.q = q;
 
+    const live: LiveSession = { q, input, abort, cwd, perm, providerModel, lastCost: e.view.sessionId ? null : 0, done: Promise.resolve() };
+    e.live = live;
+    live.done = this.consume(e, live);
+    this.sendView(e);
+    return live;
+  }
+
+  /** Drain the session's messages until it ends; each `result` closes one turn. */
+  private async consume(e: Employee, live: LiveSession): Promise<void> {
     try {
-      for await (const m of q) this.handle(e, m);
+      for await (const m of live.q) this.handle(e, m);
     } catch (err) {
-      if (!abort.signal.aborted) {
+      if (!live.abort.signal.aborted) {
         this.log(e, 'error', String((err as Error).message ?? err));
         this.set(e, 'error', '⚠️ 오류 발생 (로그 확인)');
       }
     } finally {
-      e.q = null;
-      e.abort = null;
+      if (e.live === live) {
+        e.live = null;
+        this.sendView(e);
+      }
+      e.endTurn?.(); // the session died mid-turn; let run() finish up
+    }
+  }
+
+  /** Close the session (the conversation is kept: the next instruction resumes it). */
+  private closeSession(e: Employee, why?: string) {
+    const live = e.live;
+    if (!live) return;
+    e.live = null;
+    if (e.idleTimer) clearTimeout(e.idleTimer);
+    e.idleTimer = null;
+    live.input.close();
+    live.q.close();
+    if (why) this.log(e, 'system', why);
+    this.sendView(e);
+  }
+
+  /** Close sessions that were opened against this provider, so a model change takes effect. */
+  reopenProviderSessions(providerId: string) {
+    for (const e of this.emps.values()) {
+      if (e.role.provider !== providerId || !e.live) continue;
+      const wanted = this.providers?.get(providerId)?.view.model ?? null;
+      if (e.live.providerModel === wanted) continue;
+      if (e.current) continue; // mid-turn: the idle timer or the next open will pick the new model up
+      this.closeSession(e, `🖥 모델이 ${wanted}(으)로 바뀌어 세션을 다시 엽니다 (다음 지시부터)`);
+    }
+  }
+
+  private armIdleTimer(e: Employee) {
+    if (e.idleTimer) clearTimeout(e.idleTimer);
+    const ms = this.office.sessionIdleMinutes * 60_000;
+    if (ms <= 0) return;
+    e.idleTimer = setTimeout(() => {
+      if (!e.current && e.live) this.closeSession(e, `💤 ${this.office.sessionIdleMinutes}분 동안 일이 없어 세션을 닫았습니다 (다음 지시 때 이어서 엶)`);
+    }, ms);
+  }
+
+  /** Send one instruction into the employee's session and wait for that turn to finish. */
+  private async run(e: Employee, work: Work) {
+    e.current = work;
+    e.view.taskId = work.taskId;
+    e.lastText = '';
+    this.set(e, 'thinking', '💭 업무 파악 중');
+    if (e.idleTimer) clearTimeout(e.idleTimer);
+
+    let live: LiveSession;
+    try {
+      live = this.openSession(e);
+    } catch (err) {
+      this.log(e, 'error', (err as Error).message);
+      this.set(e, 'error', '⚠️ 세션을 열지 못했습니다');
+      return;
     }
 
-    if (abort.signal.aborted) {
-      this.log(e, 'system', '⏹ 중지됨');
+    const perm = effectivePermission(e.view.permission, work.requireApproval);
+    e.wantedPermission = perm;
+    if (perm !== live.perm) {
+      try {
+        await live.q.setPermissionMode(perm === 'auto' ? 'auto' : 'default');
+        live.perm = perm;
+        this.log(e, 'system', perm === 'auto' ? '🤖 자동 모드' : '✋ 승인 모드 (이 작업만)');
+      } catch (err) {
+        this.log(e, 'error', `권한 모드 전환 실패: ${(err as Error).message}`);
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      e.endTurn = () => {
+        e.endTurn = null;
+        resolve();
+      };
+      live.input.push(userMessage(work.text));
+    });
+
+    if (live.abort.signal.aborted) {
       this.set(e, 'idle', '☕ 대기 중');
       return;
     }
@@ -366,6 +516,7 @@ export class AgentManager {
       const t = this.store.updateTask(work.taskId, { state: 'review', result: e.lastText || null });
       if (t) bus.send({ t: 'task', data: t });
     }
+    this.armIdleTimer(e);
     // fall back to idle after a while so the desk doesn't look busy forever
     setTimeout(() => {
       if (!e.current && (e.view.status === 'done' || e.view.status === 'error')) this.set(e, 'idle', '☕ 대기 중');
@@ -407,7 +558,15 @@ export class AgentManager {
         if (!m.parent_tool_use_id && e.view.status !== 'waiting_permission') this.set(e, 'thinking', '💭 결과 검토 중');
         break;
       case 'result': {
-        if (!e.role.provider) e.view.costUsd += m.total_cost_usd ?? 0; // a local model's "cost" is meaningless
+        // total_cost_usd is cumulative for the session, so bill the delta. A resumed session's first
+        // result also carries the transcript's earlier turns, which were billed in an earlier app run:
+        // take it as the baseline (lastCost === null) rather than charging it all again.
+        const live = e.live;
+        const total = m.total_cost_usd ?? 0;
+        if (live) {
+          if (live.lastCost !== null && !e.role.provider) e.view.costUsd += Math.max(0, total - live.lastCost);
+          live.lastCost = total;
+        }
         this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd);
         if (m.subtype === 'success') {
           if (m.result) e.lastText = m.result;
@@ -416,6 +575,7 @@ export class AgentManager {
           this.log(e, 'error', `종료: ${m.subtype}`);
           this.set(e, 'error', `⚠️ ${m.subtype}`);
         }
+        e.endTurn?.(); // one instruction done; the session stays open for the next one
         break;
       }
       case 'rate_limit_event': {

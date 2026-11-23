@@ -6,6 +6,9 @@ maxConcurrent: 3
 #   auto: 분류기가 안전하다고 본 도구는 바로 실행, 애매한 것만 승인 요청 / ask: autoAllow 밖 도구는 모두 승인 요청
 # 작업 카드에 🔒(requireApproval)가 붙으면 그 작업은 항상 ask로 실행.
 permissionMode: auto
+# 직원 세션을 계속 열어 두는 시간 (분). 열린 세션은 다음 지시를 바로 시작하고, 일하는 중에 보낸 지시도 즉시 전달됨.
+# 이 시간 동안 일이 없으면 닫고, 다음 지시 때 대화를 이어서 다시 연다. 0이면 닫지 않음(메모리를 계속 차지).
+sessionIdleMinutes: 30
 # 기본 모델 (role에서 덮어쓸 수 있음). 비워두면 Claude Code 기본값.
 model: ""
 # 직원들이 작업할 연구 코드 repo (git). 비워두면 ./workspaces/shared 를 사용.

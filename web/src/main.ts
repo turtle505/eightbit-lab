@@ -22,7 +22,7 @@ import { initReports, onReportContent, renderReports, unreadReports } from './ui
 const FEED_MAX = 300;
 
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [] } as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [] } as unknown as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,

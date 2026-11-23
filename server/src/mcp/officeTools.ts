@@ -30,6 +30,7 @@ const routineOut = (r: RoutineView) => ({ ...r, prompt: clip(r.prompt, 300), las
 export function officeToolsServer(selfId: string, api: OfficeApi) {
   return createSdkMcpServer({
     name: 'office',
+    alwaysLoad: true,
     version: '1.0.0',
     instructions:
       'Tools to see and manage the AI office: staff status, the task board, remote jobs, servers and routines. ' +

@@ -20,6 +20,8 @@ export interface OfficeConfig {
   providers: ProviderConfig[];
   /** default permission mode of every employee ('auto' unless set) */
   permissionMode: PermissionSetting;
+  /** close an idle employee session after this many minutes (0 = never close) */
+  sessionIdleMinutes: number;
 }
 
 /**
@@ -149,6 +151,7 @@ export function loadOffice(): OfficeConfig {
         }
       : null,
     permissionMode: c.permissionMode === 'ask' ? 'ask' : 'auto',
+    sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };
 }
