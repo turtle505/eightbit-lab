@@ -1216,3 +1216,33 @@ describe('ssh connection pressure', async () => {
     expect(checks).toBe(1); // only the one at startup; the timer kept quiet
   });
 });
+
+describe('ssh rate limit', async () => {
+  const { SshThrottle } = await import('../src/sshRate.ts');
+
+  it('caps runs per host per minute and counts hosts separately', () => {
+    const t = new SshThrottle(5);
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5; i++) expect(t.allow('gpu1', t0 + i)).toBe(true);
+    expect(t.allow('gpu1', t0 + 5)).toBe(false); // over budget
+    expect(t.allow('gpu2', t0 + 5)).toBe(true); // a different server has its own budget
+    expect(t.used('gpu1', t0 + 5)).toBe(5);
+  });
+
+  it('frees slots as the window slides, and says how long to wait', () => {
+    const t = new SshThrottle(2);
+    const t0 = 1_000_000;
+    t.allow('gpu1', t0);
+    t.allow('gpu1', t0 + 30_000);
+    expect(t.allow('gpu1', t0 + 31_000)).toBe(false);
+    expect(t.waitMs('gpu1', t0 + 31_000)).toBeGreaterThan(28_000); // until the first one ages out
+    expect(t.waitMs('gpu1', t0 + 61_000)).toBe(0); // the first run has left the window
+    expect(t.allow('gpu1', t0 + 61_000)).toBe(true); // so the slot it freed is available
+  });
+
+  it('reserve() waits for a slot instead of failing, but gives up on a deadline', async () => {
+    const t = new SshThrottle(1);
+    expect(await t.reserve('gpu1', 100)).toBe(true); // free right away
+    expect(await t.reserve('gpu1', 100)).toBe(false); // would need ~60s, deadline is 100ms
+  });
+});

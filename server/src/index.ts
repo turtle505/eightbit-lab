@@ -20,7 +20,7 @@ import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
 import { cookieHeader, isAuthorized, loginPage, suggestToken, tokenMatches } from './auth.ts';
-import { HostRegistry } from './hosts.ts';
+import { HostRegistry, setSshLimit } from './hosts.ts';
 import { ProjectRegistry } from './projects.ts';
 import { mkdirSync } from 'node:fs';
 
@@ -38,6 +38,7 @@ mkdirSync(attachments.dir, { recursive: true });
 agents.extraDirs = [attachments.dir];
 const orphaned = store.reassignUnknown(roles.map((r) => r.id));
 if (orphaned) console.warn(`⚠️ 없는 직원에게 배정돼 있던 작업 ${orphaned}건을 미배정으로 되돌렸습니다`);
+setSshLimit(office.sshPerMinute);
 const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)

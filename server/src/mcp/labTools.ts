@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { isLocalHost } from '../compute/adapter.ts';
+import { sshThrottle } from '../hosts.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { Store } from '../db.ts';
 
@@ -85,6 +86,8 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
             const [cmd, args] = local
               ? ['cp', ['-r', remote_path, dest]]
               : ['scp', ['-r', '-o', 'BatchMode=yes', `${cfg.ssh_host}:${remote_path}`, dest]];
+            if (!local && !(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
+              return text(`ssh 횟수 제한 (${cfg.ssh_host}: 분당 ${sshThrottle.perMinute}회)으로 지금은 가져올 수 없습니다. 잠시 후 다시 시도하세요.`, true);
             const code = await new Promise<number>((res) => {
               const p = spawn(cmd, args, { stdio: 'ignore' });
               p.on('close', (c) => res(c ?? -1));

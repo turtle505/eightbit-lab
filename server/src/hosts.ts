@@ -6,6 +6,11 @@ import type { HostView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import { sq } from './compute/adapter.ts';
 import { ROOT, type HostConfig } from './config.ts';
+import { SshThrottle } from './sshRate.ts';
+
+/** Every ssh/scp the office starts passes through this; index.ts replaces it with the configured limit. */
+export let sshThrottle = new SshThrottle(5);
+export const setSshLimit = (perMinute: number) => (sshThrottle = new SshThrottle(perMinute));
 
 /** Shape the Agent SDK expects back from `spawnClaudeCodeProcess` (a ChildProcess satisfies it). */
 export type SpawnArgs = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal?: AbortSignal };
@@ -95,8 +100,13 @@ export class Host {
     return this.isLocal ? undefined : (a) => spawnRemote(this.cfg, a);
   }
 
-  /** Run a short command on the host (local or over ssh) and return stdout. */
-  private exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
+  /**
+   * Run a short command on the host. Over ssh this is rate limited: a skipped poll is harmless,
+   * being locked out of the server is not.
+   */
+  private async exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
+    if (!this.isLocal && !sshThrottle.allow(this.cfg.ssh))
+      return { code: -1, stdout: '', err: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.perMinute}회) — 이번 확인은 건너뜁니다` };
     const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_SHORT, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';
@@ -115,12 +125,14 @@ export class Host {
     });
   }
 
+  /** A skipped health check must not flip a working host to "down". */
   async check() {
     const claude = this.cfg.claudePath || 'claude';
     const r = await this.exec(`printf '%s\\n' "$HOME"; ${sq(claude)} --version`);
     const [home, ...rest] = r.stdout.split('\n');
     if (r.code === 0 && home.trim()) this.home = home.trim();
     r.stdout = rest.join('\n');
+    if (r.code === -1 && r.err.startsWith('ssh 횟수 제한')) return;
     const next: HostView = r.code === 0
       ? { ...this.view, ok: true, claudeVersion: r.stdout.trim().split('\n').pop() ?? '', error: null }
       : { ...this.view, ok: false, error: `claude 실행 실패: ${(r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`}` };

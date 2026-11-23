@@ -8,7 +8,7 @@ import { labToolsServer } from '../mcp/labTools.ts';
 import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { ProviderHub } from '../providers.ts';
-import type { HostRegistry } from '../hosts.ts';
+import { sshThrottle, type HostRegistry } from '../hosts.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
 import { hostname } from 'node:os';
@@ -443,7 +443,9 @@ export class AgentManager {
         abortController: abort,
         resume: e.view.sessionId ?? undefined,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: e.role.systemPrompt },
-        allowedTools: [...autoAllow],
+        // No `allowedTools`: a bare name there auto-approves before canUseTool and before the hook,
+        // which both hides the call from our guard and makes the SDK warn. The hook below is the
+        // single gate instead — it allows the whitelist itself.
         permissionMode: perm === 'auto' ? 'auto' : 'default',
         hooks: {
           // Runs before the auto-mode classifier: force a card for anything touching a lab server,
@@ -456,16 +458,15 @@ export class AgentManager {
                   if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
                   const name = hookInput.tool_name;
                   const inp = (hookInput.tool_input ?? {}) as Record<string, unknown>;
-                  if (!needsLabApproval(name, inp)) return { continue: true };
-                  if (isAutoAllowed(autoAllow, name) || extraAllowNow().some((r) => matchesRule(r, name, inp))) return { continue: true };
-                  return {
+                  const decide = (permissionDecision: 'allow' | 'ask', permissionDecisionReason: string) => ({
                     continue: true,
-                    hookSpecificOutput: {
-                      hookEventName: 'PreToolUse' as const,
-                      permissionDecision: 'ask' as const,
-                      permissionDecisionReason: '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.',
-                    },
-                  };
+                    hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision, permissionDecisionReason },
+                  });
+                  const whitelisted = isAutoAllowed(autoAllow, name) || extraAllowNow().some((r) => matchesRule(r, name, inp));
+                  // anything reaching a lab server asks, unless the manager named that exact tool/command
+                  if (needsLabApproval(name, inp) && !whitelisted) return decide('ask', '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.');
+                  if (whitelisted) return decide('allow', '매니저가 허용한 도구입니다.');
+                  return { continue: true }; // auto-mode classifier, then canUseTool
                 },
               ],
             },
@@ -557,6 +558,18 @@ export class AgentManager {
     e.lastText = '';
     this.set(e, 'thinking', '💭 업무 파악 중');
     if (e.idleTimer) clearTimeout(e.idleTimer);
+
+    // a remote session costs one ssh connection; queue behind the per-host budget rather than
+    // hammering a server that bans noisy clients
+    const remote = e.role.host ? this.hosts?.get(e.role.host) : undefined;
+    if (remote && !remote.isLocal) {
+      if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', `⏳ ${remote.view.name} 접속 차례 기다리는 중`);
+      if (!(await sshThrottle.reserve(remote.cfg.ssh, 70_000))) {
+        this.log(e, 'error', `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.perMinute}회)으로 세션을 열지 못했습니다`);
+        this.set(e, 'error', '⚠️ ssh 횟수 제한');
+        return;
+      }
+    }
 
     let live: LiveSession;
     try {

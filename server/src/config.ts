@@ -26,6 +26,8 @@ export interface OfficeConfig {
   hosts: HostConfig[];
   /** shared secret the browser/scripts must present; empty = no lock (loopback only) */
   authToken: string;
+  /** most ssh/scp runs the office starts per host per minute (shared servers ban noisy clients) */
+  sshPerMinute: number;
 }
 
 /**
@@ -176,6 +178,7 @@ export function loadOffice(): OfficeConfig {
     permissionMode: c.permissionMode === 'ask' ? 'ask' : 'auto',
     sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
     authToken: String(c.authToken ?? '').trim(),
+    sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };
