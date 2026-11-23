@@ -10,8 +10,9 @@ const BUSY = ['thinking', 'typing', 'running', 'researching', 'remote', 'waiting
 
 const hhmm = (ts: number) => new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
+/** The office staff. Project sessions are employees too, but they belong to the projects tab. */
 export function sortedEmployees(st: UIState) {
-  return [...st.snap.employees].sort((a, b) => a.desk - b.desk);
+  return st.snap.employees.filter((e) => e.kind !== 'project').sort((a, b) => a.desk - b.desk);
 }
 
 export function renderStaffTable(st: UIState, send: Send, select: (id: string | null) => void) {

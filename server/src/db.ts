@@ -4,6 +4,23 @@ import { resolve } from 'node:path';
 import { ROOT } from './config.ts';
 import { type AttachmentRow, toView } from './attachments.ts';
 import { isAbsolute, relative, resolve as resolvePath } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+export interface ProjectRow {
+  id: string;
+  hostId: string;
+  name: string;
+  dir: string;
+  createdAt: number;
+  archivedAt: number | null;
+}
+export interface ProjectSessionRow {
+  id: string;
+  projectId: string;
+  label: string;
+  createdAt: number;
+  closedAt: number | null;
+}
 import type { FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
 
 const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, attachments });
@@ -77,6 +94,12 @@ export class Store {
         employeeId TEXT PRIMARY KEY, name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS skill_approvals (
         name TEXT PRIMARY KEY, allow TEXT NOT NULL, hash TEXT NOT NULL, approvedAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY, hostId TEXT NOT NULL, name TEXT NOT NULL, dir TEXT NOT NULL,
+        createdAt INTEGER NOT NULL, archivedAt INTEGER);
+      CREATE TABLE IF NOT EXISTS project_sessions (
+        id TEXT PRIMARY KEY, projectId TEXT NOT NULL, label TEXT NOT NULL,
+        createdAt INTEGER NOT NULL, closedAt INTEGER);
       CREATE TABLE IF NOT EXISTS attachments (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, path TEXT NOT NULL, textPath TEXT,
         size INTEGER NOT NULL, mime TEXT NOT NULL, createdAt INTEGER NOT NULL, usedAt INTEGER);
@@ -163,6 +186,41 @@ export class Store {
       this.db
         .prepare('INSERT INTO employee_names (employeeId, name) VALUES (?, ?) ON CONFLICT(employeeId) DO UPDATE SET name = excluded.name')
         .run(employeeId, name);
+  }
+
+  // ---- projects: a folder on a host, with one or more live sessions in it
+  listProjects(): ProjectRow[] {
+    return this.db.prepare('SELECT * FROM projects WHERE archivedAt IS NULL ORDER BY createdAt').all() as unknown as ProjectRow[];
+  }
+  getProject(id: string): ProjectRow | undefined {
+    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as ProjectRow | undefined;
+  }
+  createProject(hostId: string, name: string, dir: string): ProjectRow {
+    const id = `pr-${randomUUID().slice(0, 8)}`;
+    this.db.prepare('INSERT INTO projects (id, hostId, name, dir, createdAt) VALUES (?, ?, ?, ?, ?)').run(id, hostId, name, dir, Date.now());
+    return this.getProject(id)!;
+  }
+  archiveProject(id: string) {
+    this.db.prepare('UPDATE projects SET archivedAt = ? WHERE id = ?').run(Date.now(), id);
+    this.db.prepare('UPDATE project_sessions SET closedAt = ? WHERE projectId = ? AND closedAt IS NULL').run(Date.now(), id);
+  }
+
+  /** open sessions, oldest first; `projectId` limits it to one project */
+  listProjectSessions(projectId?: string): ProjectSessionRow[] {
+    const sql = 'SELECT * FROM project_sessions WHERE closedAt IS NULL' + (projectId ? ' AND projectId = ?' : '') + ' ORDER BY createdAt';
+    return (projectId ? this.db.prepare(sql).all(projectId) : this.db.prepare(sql).all()) as unknown as ProjectSessionRow[];
+  }
+  /** next session for a project; the id doubles as the worker id, so it must never be reused */
+  addProjectSession(projectId: string): ProjectSessionRow {
+    const used = this.db.prepare('SELECT id FROM project_sessions WHERE projectId = ?').all(projectId) as any[];
+    const n = used.reduce((m, r) => Math.max(m, Number(String(r.id).split(':').pop()) || 0), 0) + 1;
+    const id = `p:${projectId}:${n}`;
+    this.db.prepare('INSERT INTO project_sessions (id, projectId, label, createdAt) VALUES (?, ?, ?, ?)').run(id, projectId, `세션 ${n}`, Date.now());
+    return this.db.prepare('SELECT * FROM project_sessions WHERE id = ?').get(id) as unknown as ProjectSessionRow;
+  }
+  closeProjectSession(id: string) {
+    this.db.prepare('UPDATE project_sessions SET closedAt = ? WHERE id = ?').run(Date.now(), id);
+    this.db.prepare('DELETE FROM sessions WHERE employeeId = ?').run(id);
   }
 
   // ---- attachments (files live under workspaces/attachments, see attachments.ts)

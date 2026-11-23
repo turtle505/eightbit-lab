@@ -18,11 +18,12 @@ import { applyView, initialView } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
 import { initReports, onReportContent, renderReports, unreadReports } from './ui/reports.ts';
+import { renderProjects, setHostDirs } from './ui/projects.ts';
 
 const FEED_MAX = 300;
 
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [], hosts: [] } as unknown as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [], hosts: [], projects: [] } as unknown as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
@@ -64,6 +65,10 @@ function renderAll() {
   badge.textContent = String(unread);
   if (state.view === 'reports') {
     renderReports(state);
+    return;
+  }
+  if (state.view === 'projects') {
+    renderProjects(state, send);
     return;
   }
   // shared panels (live in whichever view is active)
@@ -118,6 +123,7 @@ function onMsg(m: ServerMsg) {
       else s.employees.push(m.data);
       if (!prev || prev.status !== m.data.status || prev.activity !== m.data.activity) state.empUpdated.set(m.data.id, Date.now());
       // header shows subscription runs only; employees on a local provider don't count against maxConcurrent
+      if (s.projects?.length) s.projects = s.projects.map((p) => ({ ...p, sessions: p.sessions.map((x) => (x.id === m.data.id ? m.data : x)) }));
       s.running = s.employees.filter((e) => !e.provider && !['idle', 'queued', 'done', 'error'].includes(e.status)).length;
       scene.upsert(m.data);
       if (prev && prev.status !== 'done' && m.data.status === 'done') notify(`${m.data.name} 완료`, m.data.activity);
@@ -130,6 +136,17 @@ function onMsg(m: ServerMsg) {
       scene.tasks = s.tasks;
       break;
     }
+    case 'projects':
+      s.projects = m.data;
+      break;
+    case 'hostDirs':
+      setHostDirs(m.hostId, m.dirs);
+      break;
+    case 'employeeGone':
+      s.employees = s.employees.filter((e) => e.id !== m.id);
+      s.projects = (s.projects ?? []).map((p) => ({ ...p, sessions: p.sessions.filter((x) => x.id !== m.id) }));
+      scene.remove(m.id);
+      break;
     case 'host': {
       s.hosts ??= [];
       const i = s.hosts.findIndex((h) => h.id === m.data.id);

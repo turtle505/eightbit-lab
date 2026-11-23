@@ -1071,3 +1071,57 @@ describe('office token lock', async () => {
     expect(suggestToken()).toMatch(/^[A-Za-z0-9_-]{32}$/);
   });
 });
+
+describe('project sessions', async () => {
+  const { Host } = await import('../src/hosts.ts');
+
+  it('resolves a project folder on the host, expanding ~ ourselves', () => {
+    const h = new Host({ id: 'd', name: 'd', ssh: 'desktop', projectRoot: '~/project' } as any);
+    // every path we send is quoted, so the remote shell never expands ~ for us
+    expect(() => h.projectDir('bio2token')).toThrow(); // home not known until the health check answers
+    (h as any).home = '/home/ybshin';
+    expect(h.projectDir('bio2token')).toBe('/home/ybshin/project/bio2token');
+    expect(h.projectDir('~/elsewhere')).toBe('/home/ybshin/elsewhere');
+    expect(h.projectDir('/data/shared')).toBe('/data/shared'); // absolute stays put
+  });
+
+  it('gives each session its own id and never reuses one', () => {
+    const s = new Store(':memory:');
+    const p = s.createProject('desktop', 'bio2token', 'bio2token');
+    const a = s.addProjectSession(p.id);
+    const b = s.addProjectSession(p.id);
+    expect([a.id, b.id]).toEqual([`p:${p.id}:1`, `p:${p.id}:2`]);
+    expect(s.listProjectSessions(p.id).map((x) => x.id)).toEqual([a.id, b.id]);
+
+    s.closeProjectSession(a.id);
+    expect(s.listProjectSessions(p.id).map((x) => x.id)).toEqual([b.id]);
+    // the closed number is not handed out again, so old logs can never be mistaken for a new session
+    expect(s.addProjectSession(p.id).id).toBe(`p:${p.id}:3`);
+  });
+
+  it('closing a session drops its conversation, archiving a project closes them all', () => {
+    const s = new Store(':memory:');
+    const p = s.createProject('desktop', 'rna', 'rna');
+    const one = s.addProjectSession(p.id);
+    s.saveSession(one.id, 'sess-abc', 0.3, '/home/ybshin/project/rna', 'desktop');
+    expect(s.getSession(one.id).sessionId).toBe('sess-abc');
+    s.closeProjectSession(one.id);
+    expect(s.getSession(one.id).sessionId).toBeNull();
+
+    s.addProjectSession(p.id);
+    s.addProjectSession(p.id);
+    expect(s.listProjectSessions(p.id)).toHaveLength(2);
+    s.archiveProject(p.id);
+    expect(s.listProjectSessions(p.id)).toHaveLength(0);
+    expect(s.listProjects()).toHaveLength(0); // archived projects drop off the board
+    expect(s.getProject(p.id)?.archivedAt).toBeTruthy(); // but the row is kept
+  });
+
+  it('keeps projects on different hosts apart', () => {
+    const s = new Store(':memory:');
+    const a = s.createProject('desktop', 'same-name', 'proj');
+    const b = s.createProject('gpu1', 'same-name', 'proj');
+    expect(a.id).not.toBe(b.id);
+    expect(s.listProjects().map((p) => p.hostId).sort()).toEqual(['desktop', 'gpu1']);
+  });
+});

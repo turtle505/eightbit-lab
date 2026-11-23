@@ -33,8 +33,21 @@ export interface EmployeeView {
   live: boolean;
   /** machine this employee's sessions run on (HostView.id); unset = the machine the backend runs on */
   hostId?: string;
+  /** 'staff' sit in the office; 'project' sessions live in the projects tab */
+  kind?: 'staff' | 'project';
   /** set when this employee runs on a non-Claude provider (ProviderView.id) */
   provider?: string;
+}
+
+/** A folder on a host that sessions are opened in — one project, several independent sessions. */
+export interface ProjectView {
+  id: string;
+  hostId: string;
+  name: string;
+  /** folder, relative to the host's projectRoot unless absolute */
+  dir: string;
+  /** its sessions, in creation order */
+  sessions: EmployeeView[];
 }
 
 /** a machine the office can run Claude Code sessions on ('local' = the machine the backend runs on) */
@@ -277,6 +290,7 @@ export interface Snapshot {
   figureNames: Record<FigureKey, string>;
   providers: ProviderView[];
   hosts: HostView[];
+  projects: ProjectView[];
 }
 
 /** editable labels in the game view that are not employees: professor / manager name tags and the whiteboard text */
@@ -288,6 +302,7 @@ export const FIGURE_MAX_LEN: Record<FigureKey, number> = { professor: 20, manage
 export type ServerMsg =
   | { t: 'snapshot'; data: Snapshot }
   | { t: 'employee'; data: EmployeeView }
+  | { t: 'employeeGone'; id: string }
   | { t: 'task'; data: Task }
   | { t: 'taskDeleted'; id: number }
   | { t: 'approval'; data: Approval }
@@ -304,6 +319,8 @@ export type ServerMsg =
   | { t: 'usage'; data: UsageView }
   | { t: 'provider'; data: ProviderView }
   | { t: 'host'; data: HostView }
+  | { t: 'projects'; data: ProjectView[] }
+  | { t: 'hostDirs'; hostId: string; dirs: string[] }
   | { t: 'figureName'; key: FigureKey; name: string }
   | { t: 'log'; data: LogLine }
   | { t: 'logs'; employeeId: string; lines: LogLine[] }
@@ -338,4 +355,10 @@ export type ClientMsg =
   | { t: 'deleteRoutine'; id: string }
   | { t: 'refreshUsage' }
   /** pick the model for every employee on this provider (must be installed there) */
-  | { t: 'setProviderModel'; providerId: string; model: string };
+  | { t: 'setProviderModel'; providerId: string; model: string }
+  /** folders available on a host, for the new-project picker */
+  | { t: 'listHostDirs'; hostId: string }
+  | { t: 'createProject'; hostId: string; name: string; dir: string }
+  | { t: 'archiveProject'; id: string }
+  | { t: 'addProjectSession'; projectId: string }
+  | { t: 'closeProjectSession'; id: string };

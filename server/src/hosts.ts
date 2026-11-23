@@ -51,8 +51,18 @@ export class Host {
   view: HostView;
   private timer: NodeJS.Timeout | null = null;
 
+  /** the host's $HOME, learned at check time — we quote every path, so the remote shell never expands ~ */
+  private home: string | null = null;
+
   constructor(readonly cfg: HostConfig) {
     this.view = { id: cfg.id, name: cfg.name, local: cfg.ssh === 'local', ok: false, claudeVersion: null, projectRoot: cfg.projectRoot, error: '확인 중…' };
+  }
+
+  /** Absolute path on this host: expands a leading ~ ourselves, since quoted paths are not expanded. */
+  expand(p: string): string {
+    if (!p.startsWith('~')) return p;
+    if (!this.home) throw new Error(`${this.view.name} 의 홈 경로를 아직 모릅니다 (연결 확인 전)`);
+    return p.replace(/^~(?=\/|$)/, this.home);
   }
 
   get isLocal() {
@@ -65,7 +75,7 @@ export class Host {
   }
 
   /** Run a short command on the host (local or over ssh) and return stdout. */
-  private exec(script: string, timeoutMs = 20_000): Promise<{ code: number; out: string; err: string }> {
+  private exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
     const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_BASE, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';
@@ -75,21 +85,24 @@ export class Host {
       p.stderr?.on('data', (d) => (err += d));
       p.on('error', (e) => {
         clearTimeout(t);
-        resolve({ code: -1, out, err: String(e.message) });
+        resolve({ code: -1, stdout: out, err: String(e.message) });
       });
       p.on('close', (code) => {
         clearTimeout(t);
-        resolve({ code: code ?? -1, out, err });
+        resolve({ code: code ?? -1, stdout: out, err });
       });
     });
   }
 
   async check() {
     const claude = this.cfg.claudePath || 'claude';
-    const r = await this.exec(`${sq(claude)} --version`);
+    const r = await this.exec(`printf '%s\\n' "$HOME"; ${sq(claude)} --version`);
+    const [home, ...rest] = r.stdout.split('\n');
+    if (r.code === 0 && home.trim()) this.home = home.trim();
+    r.stdout = rest.join('\n');
     const next: HostView = r.code === 0
-      ? { ...this.view, ok: true, claudeVersion: r.out.trim().split('\n').pop() ?? '', error: null }
-      : { ...this.view, ok: false, error: `claude 실행 실패: ${(r.err || r.out).trim().split('\n').pop() || `exit ${r.code}`}` };
+      ? { ...this.view, ok: true, claudeVersion: r.stdout.trim().split('\n').pop() ?? '', error: null }
+      : { ...this.view, ok: false, error: `claude 실행 실패: ${(r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`}` };
     const changed = JSON.stringify(next) !== JSON.stringify(this.view);
     this.view = next;
     if (changed) bus.send({ t: 'host', data: { ...next } });
@@ -97,13 +110,18 @@ export class Host {
 
   /** Does this directory exist on the host? (the backend can't stat a remote path) */
   async dirExists(dir: string): Promise<boolean> {
-    return (await this.exec(`test -d ${sq(dir)}`)).code === 0;
+    return (await this.exec(`test -d ${sq(this.expand(dir))}`)).code === 0;
   }
 
   /** Immediate subdirectories of the host's projectRoot, for the project picker. */
   async listProjects(): Promise<string[]> {
-    const r = await this.exec(`ls -1 ${sq(this.cfg.projectRoot)} 2>/dev/null`);
-    return r.code === 0 ? r.out.split('\n').map((s) => s.trim()).filter(Boolean).sort() : [];
+    const r = await this.exec(`ls -1 ${sq(this.expand(this.cfg.projectRoot))} 2>/dev/null`);
+    return r.code === 0 ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean).sort() : [];
+  }
+
+  /** Absolute working directory for a project folder on this host. */
+  projectDir(dir: string): string {
+    return this.expand(dir.startsWith('/') || dir.startsWith('~') ? dir : `${this.cfg.projectRoot.replace(/\/$/, '')}/${dir}`);
   }
 
   start(everyMs = 30_000) {

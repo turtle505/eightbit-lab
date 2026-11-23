@@ -164,7 +164,17 @@ export class OfficeScene {
     for (const v of list) this.upsert(v);
   }
 
+  /** Take an actor out of the office (a project session closing, or a role removed). */
+  remove(id: string) {
+    const a = this.actors.get(id);
+    if (!a) return;
+    a.bubble.remove();
+    a.tag.remove();
+    this.actors.delete(id);
+  }
+
   upsert(v: EmployeeView) {
+    if (v.kind === 'project') return; // project sessions live in the projects tab, not at a desk
     let a = this.actors.get(v.id);
     if (!a) {
       const start = v.stayAtDesk || v.live ? seatSpot(v.desk) : coffeeSpot(v.desk);

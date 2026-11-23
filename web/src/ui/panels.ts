@@ -1,7 +1,7 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState } from '../../../shared/protocol.ts';
 
-export type ViewMode = 'game' | 'console' | 'reports';
+export type ViewMode = 'game' | 'console' | 'reports' | 'projects';
 
 export interface UIState {
   snap: Snapshot;

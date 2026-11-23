@@ -91,6 +91,8 @@ export interface RoleConfig {
   permissionMode?: PermissionSetting;
   /** machine this employee's sessions run on (office.hosts id); omitted = local */
   host?: string;
+  /** 'project' employees are created at runtime for a project folder, not read from roles.yaml */
+  kind?: 'staff' | 'project';
   /** run on this provider (office.providers id) instead of the Claude subscription */
   provider?: string;
 }

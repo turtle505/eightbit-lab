@@ -4,7 +4,7 @@ import type { ViewMode } from './panels.ts';
 const KEY = 'eightbit-lab:view';
 /** Panels that exist once and move into whichever view is active. */
 const SHARED = ['approvals', 'employee', 'routines', 'jobs', 'report-feed', 'todos'];
-const VIEWS: ViewMode[] = ['game', 'console', 'reports'];
+const VIEWS: ViewMode[] = ['game', 'console', 'reports', 'projects'];
 const isView = (v: unknown): v is ViewMode => VIEWS.includes(v as ViewMode);
 
 export function initialView(): ViewMode {
@@ -22,11 +22,12 @@ export function initialView(): ViewMode {
 export function applyView(view: ViewMode) {
   // the reports browser reuses the console's plain styling
   document.body.classList.toggle('view-console', view !== 'game');
-  document.body.classList.toggle('view-reports', view === 'reports');
+  document.body.classList.toggle('view-reports', view === 'reports' || view === 'projects');
   document.body.classList.toggle('view-game', view === 'game');
   for (const v of VIEWS) document.getElementById(`view-${v}`)!.hidden = v !== view;
   // shared panels stay where they were while reading reports (that view has no slots)
-  const root = view === 'reports' ? null : document.getElementById(`view-${view}`)!;
+  // reports and projects are full-width browsers with no shared-panel slots
+  const root = view === 'reports' || view === 'projects' ? null : document.getElementById(`view-${view}`)!;
   if (root)
     for (const id of SHARED) {
       const el = document.getElementById(id);
@@ -34,7 +35,8 @@ export function applyView(view: ViewMode) {
       if (el && slot && el.parentElement !== slot) slot.append(el);
     }
   document.querySelectorAll<HTMLButtonElement>('.view-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-  document.title = view === 'console' ? '8-bit Lab · Console' : view === 'reports' ? '8-bit Lab · 보고서' : '8-bit Lab';
+  document.title =
+    view === 'console' ? '8-bit Lab · Console' : view === 'reports' ? '8-bit Lab · 보고서' : view === 'projects' ? '8-bit Lab · 프로젝트' : '8-bit Lab';
   try {
     // a separate ?view=reports window should not change what the main window opens with
     if (new URLSearchParams(location.search).get('view') !== 'reports') localStorage.setItem(KEY, view);

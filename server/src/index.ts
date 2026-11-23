@@ -21,6 +21,7 @@ import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './atta
 import { allowedOrigin } from './origin.ts';
 import { cookieHeader, isAuthorized, loginPage, suggestToken, tokenMatches } from './auth.ts';
 import { HostRegistry } from './hosts.ts';
+import { ProjectRegistry } from './projects.ts';
 import { mkdirSync } from 'node:fs';
 
 const office = loadOffice();
@@ -41,6 +42,7 @@ const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)
   if (r.host && !hosts.get(r.host)) console.warn(`⚠️ ${r.id}: host '${r.host}' 가 office(.local).yaml 의 hosts 에 없습니다`);
+const projects = new ProjectRegistry(store, agents, hosts);
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;
 for (const r of roles)
@@ -166,6 +168,7 @@ function snapshot(): Snapshot {
     figureNames: figureNames(),
     providers: providers.views(),
     hosts: hosts.views(),
+    projects: projects.views(),
   };
 }
 
@@ -313,6 +316,31 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'refreshUsage':
       void usage.refresh();
       break;
+    case 'listHostDirs': {
+      const h = hosts.get(msg.hostId);
+      if (!h) break;
+      void h.listProjects().then((dirs) => reply({ t: 'hostDirs', hostId: msg.hostId, dirs }));
+      break;
+    }
+    case 'createProject':
+      projects
+        .create(msg.hostId, msg.name, msg.dir)
+        .then((p) => {
+          projects.send();
+          bus.send({ t: 'notice', level: 'info', text: `📂 프로젝트 추가: ${p.name}` });
+        })
+        .catch((e) => reply({ t: 'notice', level: 'error', text: String((e as Error).message) }));
+      break;
+    case 'archiveProject':
+      projects.archive(msg.id);
+      bus.send({ t: 'notice', level: 'info', text: '📂 프로젝트를 보관했습니다' });
+      break;
+    case 'addProjectSession':
+      projects.addSession(msg.projectId);
+      break;
+    case 'closeProjectSession':
+      projects.closeSession(msg.id);
+      break;
     case 'setProviderModel':
       providers.setModel(msg.providerId, msg.model);
       agents.reopenProviderSessions(msg.providerId); // the model is baked into the session's env at start
@@ -440,6 +468,8 @@ http.listen(office.port, '127.0.0.1', () => {
   usage.start();
   providers.start();
   hosts.start();
+  // sessions are restored once the hosts have answered, so their home dirs are known
+  setTimeout(() => projects.restore(), 4_000);
   setInterval(pollReports, 5_000);
   setInterval(pollTodos, 3_000);
   attachments.cleanup();

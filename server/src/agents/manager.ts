@@ -118,6 +118,7 @@ class Employee {
       permission,
       live: false,
       hostId: role.host,
+      kind: role.kind ?? 'staff',
       provider: role.provider,
     };
   }
@@ -222,6 +223,33 @@ export class AgentManager {
 
   views(): EmployeeView[] {
     return [...this.emps.values()].map((e) => e.view);
+  }
+
+  /**
+   * Add an employee at runtime (a project session). The role is synthesised, not read from
+   * roles.yaml, but everything downstream — live sessions, approvals, logs, feed — keys off the id.
+   */
+  addWorker(role: RoleConfig): EmployeeView {
+    const existing = this.emps.get(role.id);
+    if (existing) return existing.view;
+    const s = this.store.getSession(role.id);
+    const e = new Employee(role, s.sessionId, s.costUsd, this.store.getEmployeePerm(role.id) ?? role.permissionMode ?? this.office.permissionMode);
+    e.sessionHost = s.hostId;
+    e.view.name = this.store.getEmployeeName(role.id) ?? role.name;
+    this.emps.set(role.id, e);
+    this.sendView(e);
+    return e.view;
+  }
+
+  /** Remove a runtime employee: stop the turn, close the session, drop it from the office. */
+  removeWorker(id: string) {
+    const e = this.emps.get(id);
+    if (!e) return;
+    this.stop(id);
+    this.closeSession(e);
+    this.emps.delete(id);
+    this.waiting = this.waiting.filter((w) => w !== e);
+    bus.send({ t: 'employeeGone', id });
   }
   runningCount() {
     return this.running;

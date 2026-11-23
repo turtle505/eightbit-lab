@@ -16,6 +16,7 @@
         <button type="button" data-view="game" aria-pressed="true">게임</button>
         <button type="button" data-view="console" aria-pressed="false">콘솔</button>
         <button type="button" data-view="reports" aria-pressed="false">보고서<span id="reports-unread" class="tab-badge" hidden></span></button>
+        <button type="button" data-view="projects" aria-pressed="false">프로젝트</button>
       </div>
     </header>
 
@@ -92,6 +93,7 @@
 
     <!-- ===== reports view ===== -->
     <main id="view-reports" class="reports" hidden></main>
+    <main id="view-projects" class="reports" hidden><div id="projects" class="projects"></div></main>
 
     <div id="toasts" class="toasts"></div>
     <script type="module" src="/src/main.ts"></script>
