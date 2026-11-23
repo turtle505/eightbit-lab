@@ -711,3 +711,55 @@ describe('attachments', async () => {
     expect(attachmentBlock([r])).toContain('본문 텍스트');
   });
 });
+
+describe('lab server guard', async () => {
+  const { needsLabApproval } = await import('../src/agents/manager.ts');
+
+  it('flags remote job tools and shell commands that open a remote session', () => {
+    for (const t of ['mcp__lab__submit_job', 'mcp__lab__cancel_job', 'mcp__lab__fetch_results']) expect(needsLabApproval(t, {})).toBe(true);
+    for (const cmd of [
+      'ssh desktop hostname',
+      'cd /tmp && ssh master nvidia-smi',
+      '/usr/bin/ssh desktop ls',
+      'scp a.txt desktop:~/',
+      'rsync -a ./out desktop:~/out',
+      'sftp desktop',
+      'echo hi; ssh desktop rm -rf data',
+      'x=$(ssh desktop hostname)',
+    ])
+      expect(needsLabApproval('Bash', { command: cmd }), cmd).toBe(true);
+  });
+
+  it('leaves ordinary local work alone', () => {
+    for (const t of ['mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log', 'mcp__lab__list_servers', 'Read', 'Write', 'WebFetch'])
+      expect(needsLabApproval(t, { command: 'ssh desktop ls' })).toBe(false); // non-Bash: the command field is irrelevant
+    for (const cmd of ['ls workspaces | wc -l', 'python3 train.py', 'git status', 'cat pushups.txt', 'grep -r sshd /etc'])
+      expect(needsLabApproval('Bash', { command: cmd }), cmd).toBe(false);
+    expect(needsLabApproval('Bash', {})).toBe(false);
+  });
+});
+
+describe('allowedOrigin (browser-only surface)', async () => {
+  const { allowedOrigin } = await import('../src/origin.ts');
+
+  it('allows only the office itself and the vite dev server on loopback', () => {
+    for (const o of ['http://localhost:8787', 'http://127.0.0.1:8787', 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://[::1]:5173'])
+      expect(allowedOrigin(o, 8787), o).toBe(true);
+    expect(allowedOrigin(undefined, 8787)).toBe(true); // curl / local script; the loopback bind is the guard
+  });
+
+  it('refuses other sites, other ports and odd schemes', () => {
+    for (const o of [
+      'https://evil.example',
+      'http://evil.example:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1',
+      'http://127.0.0.1.evil.example:8787',
+      'file://',
+      'null',
+      'not a url',
+      '',
+    ])
+      expect(allowedOrigin(o || undefined, 8787), JSON.stringify(o)).toBe(o === '' ? true : false);
+  });
+});

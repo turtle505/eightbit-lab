@@ -88,6 +88,22 @@ export function matchesRule(rule: string, toolName: string, input: Record<string
   return isAutoAllowed([rule], toolName);
 }
 
+/** Tools that reach a lab server: remote job control, or a shell command that opens an ssh/scp session. */
+const LAB_TOOLS = new Set(['mcp__lab__submit_job', 'mcp__lab__cancel_job', 'mcp__lab__fetch_results']);
+// a command word (start, after a separator, or inside $( ), with or without a path), slightly over-broad on purpose
+const REMOTE_CMD = /(?:^|[\s;&|(]|\$\()\s*(?:[\w./-]*\/)?(?:ssh|scp|rsync|sftp|sshfs)\b/;
+
+/**
+ * Does this call reach a lab server? Those always get a manager approval card, even in auto mode:
+ * an agent reading papers off the web should never be one classifier call away from running
+ * arbitrary commands on the GPU machines.
+ */
+export function needsLabApproval(toolName: string, input: Record<string, unknown>): boolean {
+  if (LAB_TOOLS.has(toolName)) return true;
+  if (toolName !== 'Bash') return false;
+  return REMOTE_CMD.test(String(input?.command ?? ''));
+}
+
 /** A 🔒 task always asks; otherwise the employee's own setting. Only ever tightens. */
 export function effectivePermission(employee: PermissionSetting, requireApproval: boolean): PermissionSetting {
   return requireApproval ? 'ask' : employee;
@@ -279,6 +295,32 @@ export class AgentManager {
         systemPrompt: { type: 'preset', preset: 'claude_code', append: e.role.systemPrompt },
         allowedTools: [...autoAllow],
         permissionMode: perm === 'auto' ? 'auto' : 'default',
+        hooks: {
+          // Runs before the auto-mode classifier: force a card for anything touching a lab server,
+          // unless the manager put that exact tool/command in autoAllow or an approved skill's office-allow.
+          PreToolUse: [
+            {
+              onFailure: 'block',
+              hooks: [
+                async (hookInput) => {
+                  if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
+                  const name = hookInput.tool_name;
+                  const inp = (hookInput.tool_input ?? {}) as Record<string, unknown>;
+                  if (!needsLabApproval(name, inp)) return { continue: true };
+                  if (isAutoAllowed(autoAllow, name) || work.extraAllow.some((r) => matchesRule(r, name, inp))) return { continue: true };
+                  return {
+                    continue: true,
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse' as const,
+                      permissionDecision: 'ask' as const,
+                      permissionDecisionReason: '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.',
+                    },
+                  };
+                },
+              ],
+            },
+          ],
+        },
         mcpServers,
         // provider employees skip the office skills plugin to save the (small) local context
         plugins: (e.role.provider ? [] : this.pluginDirs).map((path) => ({ type: 'local' as const, path })),

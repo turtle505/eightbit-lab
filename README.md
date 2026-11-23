@@ -62,6 +62,11 @@ maxConcurrent: 4
   - 직원은 `mcp__lab__*` 도구(list_servers, gpu_status, submit_job, job_status, tail_log, cancel_job, fetch_results)로 서버를 사용
   - job이 끝나면 제출한 직원에게 자동으로 알려 결과를 보고하게 함
 
+## 접속 범위
+
+백엔드는 `127.0.0.1`에만 바인딩되고, 브라우저에서 오는 요청은 **Origin이 사무실 자신이나 vite 개발 서버(5173)일 때만** 받는다 (WebSocket과 `/api` 모두).
+WebSocket은 CORS가 적용되지 않아서, 이 검사가 없으면 매니저가 열어 둔 아무 웹페이지나 `ws://127.0.0.1:8787/ws`에 붙어 직원에게 지시하거나 승인을 대신 누를 수 있다.
+
 ## 첨부 파일
 
 작업 폼의 📎(콘솔은 `첨부`)이나 직원 지시창에 파일을 고르거나 끌어다 놓으면 첨부된다 (파일당 50 MB).
@@ -76,6 +81,9 @@ maxConcurrent: 4
 
 - 직원은 기본으로 **🤖 자동 모드**로 일한다. 모델 분류기가 안전하다고 본 도구는 바로 실행하고, 애매한 것만 승인 카드로 올라온다.
   직원 패널 제목줄의 `🤖 자동` / `✋ 승인` 버튼으로 직원마다 바꿀 수 있다 (다음 지시부터 적용). 기본값은 `office.yaml`의 `permissionMode`.
+- **랩 서버에 닿는 호출은 자동 모드에서도 항상 승인 카드가 뜬다** (`submit_job`/`cancel_job`/`fetch_results`, 그리고 `ssh`·`scp`·`rsync`·`sftp`가 든 Bash 명령).
+  직원이 웹·논문을 읽다가 숨은 지시에 넘어가더라도, 분류기 한 번으로 GPU 서버에서 명령이 실행되지는 않게 하기 위함이다.
+  읽기 전용(`gpu_status`, `job_status`, `tail_log`)은 그대로 자동이고, `autoAllow`나 승인된 스킬의 `office-allow`에 정확히 적어 두면 예외가 된다.
 - 작업 카드에 **🔒 승인 받기**를 체크하면, 담당자가 자동 모드여도 그 작업은 `autoAllow` 밖 도구마다 승인을 받는다.
   팀장은 삭제·덮어쓰기, git push, GPU job 취소·대량 제출, 외부 전송이 들어간 작업을 위임할 때 `requireApproval: true`로 넘긴다.
 

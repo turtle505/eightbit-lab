@@ -18,6 +18,7 @@ import type { FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
+import { allowedOrigin } from './origin.ts';
 import { mkdirSync } from 'node:fs';
 
 const office = loadOffice();
@@ -313,16 +314,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
 // ---- static files (production build) + websocket
 const DIST = resolve(ROOT, 'dist');
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml' };
-/** browser-only API: reject cross-site requests (another page could otherwise POST to localhost) */
-function sameOrigin(req: import('node:http').IncomingMessage): boolean {
-  const o = req.headers.origin;
-  if (!o) return true; // same-origin GET / curl
-  try {
-    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(o).hostname);
-  } catch {
-    return false;
-  }
-}
+const sameOrigin = (req: import('node:http').IncomingMessage) => allowedOrigin(req.headers.origin, office.port);
 
 function handleApi(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL) {
   const json = (code: number, body: unknown) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
@@ -381,7 +373,15 @@ const http = createServer((req, res) => {
   createReadStream(p).pipe(res);
 });
 
-const wss = new WebSocketServer({ server: http, path: '/ws' });
+const wss = new WebSocketServer({
+  server: http,
+  path: '/ws',
+  verifyClient: ({ origin, req }, done) => {
+    if (allowedOrigin(origin, office.port)) return done(true);
+    console.warn(`⛔ 다른 사이트에서 온 WebSocket 연결 거부: ${origin} (${req.socket.remoteAddress})`);
+    done(false, 403, 'cross-origin websocket refused');
+  },
+});
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ t: 'snapshot', data: snapshot() } satisfies ServerMsg));
   ws.on('message', (raw) => {
