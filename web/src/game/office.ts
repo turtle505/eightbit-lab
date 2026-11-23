@@ -64,7 +64,8 @@ export class OfficeScene {
     host.prepend(this.canvas);
     this.g = this.canvas.getContext('2d')!;
     this.floor = this.paintStatic();
-    new ResizeObserver(() => this.resize()).observe(host);
+    // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
+    new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
 
     this.canvas.addEventListener('click', (ev) => {

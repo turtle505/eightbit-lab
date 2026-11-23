@@ -906,3 +906,55 @@ button.link:hover {
 .ctable.feed td:not(.txt) {
   white-space: nowrap;
 }
+
+/* ================= subscription usage meters ================= */
+.pill.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 1px 10px;
+  box-shadow: none;
+}
+.mbar {
+  display: inline-block;
+  width: 44px;
+  height: 6px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+}
+.mbar i,
+.ubar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.sev-warning .mbar i,
+.sev-warning .ubar i {
+  background: var(--warn);
+}
+.sev-critical .mbar i,
+.sev-critical .ubar i {
+  background: var(--bad);
+}
+.pill.meter.sev-warning {
+  border-color: var(--warn);
+}
+.pill.meter.sev-critical {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.urow {
+  margin-bottom: 10px;
+}
+.ubar {
+  height: 8px;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  margin: 3px 0 2px;
+}
+.usage .c-head button {
+  padding: 1px 8px;
+  font-size: 12px;
+}

@@ -180,3 +180,34 @@ describe('mergeByKey (.local.yaml overrides)', () => {
     expect(base[1].prompt).toBe('base'); // base not mutated
   });
 });
+
+import { toUsageRows } from '../src/usage.ts';
+
+describe('toUsageRows', () => {
+  it('uses the server limits[] rows (session, weekly, model-scoped)', () => {
+    const rows = toUsageRows({
+      subscription_type: 'team',
+      rate_limits_available: true,
+      rate_limits: {
+        limits: [
+          { kind: 'session', group: 'session', percent: 5, severity: 'normal', resets_at: '2026-11-23T10:40:00+00:00', scope: null },
+          { kind: 'weekly_all', group: 'weekly', percent: 41.6, severity: 'warning', resets_at: '2026-11-28T16:00:00+00:00', scope: null },
+          { kind: 'weekly_scoped', group: 'weekly', percent: 1, severity: 'normal', resets_at: null, scope: { model: { display_name: 'Fable' } } },
+        ],
+      },
+    });
+    expect(rows.map((r) => [r.kind, r.label, r.percent, r.severity])).toEqual([
+      ['session', '세션 (5시간)', 5, 'normal'],
+      ['weekly_all', '주간 (전체)', 42, 'warning'],
+      ['weekly_scoped', '주간 · Fable', 1, 'normal'],
+    ]);
+    expect(rows[0].resetsAt).toBe(Date.parse('2026-11-23T10:40:00+00:00'));
+  });
+  it('falls back to five_hour / seven_day when limits[] is missing', () => {
+    const rows = toUsageRows({ rate_limits: { five_hour: { utilization: 80, resets_at: null }, seven_day: { utilization: 10, resets_at: null } } });
+    expect(rows.map((r) => [r.kind, r.percent, r.severity])).toEqual([
+      ['session', 80, 'warning'],
+      ['weekly_all', 10, 'normal'],
+    ]);
+  });
+});

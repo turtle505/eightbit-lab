@@ -10,6 +10,7 @@ import { ROOT, loadOffice, loadRoles, loadRoutines, loadServers } from './config
 import { Store } from './db.ts';
 import { PermissionBroker } from './permissions/broker.ts';
 import { RoutineScheduler } from './routines.ts';
+import { UsageMonitor } from './usage.ts';
 
 const office = loadOffice();
 const roles = loadRoles();
@@ -17,6 +18,11 @@ const store = new Store();
 const broker = new PermissionBroker();
 const registry = new ServerRegistry(loadServers(), store);
 const agents = new AgentManager(office, roles, store, broker, registry);
+const usage = new UsageMonitor(ROOT);
+// refresh subscription usage shortly after an employee finishes a run
+bus.on('msg', (m: ServerMsg) => {
+  if (m.t === 'employee' && (m.data.status === 'done' || m.data.status === 'error')) usage.poke();
+});
 
 function assignTask(taskId: number, employeeId: string) {
   if (!agents.has(employeeId)) return;
@@ -62,6 +68,7 @@ function snapshot(): Snapshot {
     servers: registry.list(),
     routines: routines.list(),
     recentLogs: store.logsSince(0, 200),
+    usage: usage.view,
     running: agents.runningCount(),
     maxConcurrent: office.maxConcurrent,
   };
@@ -128,6 +135,9 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'toggleRoutine':
       routines.setEnabled(msg.id, msg.enabled);
       break;
+    case 'refreshUsage':
+      void usage.refresh();
+      break;
   }
 }
 
@@ -166,5 +176,6 @@ http.listen(office.port, '127.0.0.1', () => {
   console.log(`🧬 8-bit Lab backend: http://127.0.0.1:${office.port}  (employees: ${roles.length}, servers: ${registry.list().length}, maxConcurrent: ${office.maxConcurrent})`);
   registry.start();
   routines.start();
+  usage.start();
   console.log(`⏰ routines: ${routines.list().map((r) => `${r.name}(${r.schedule}${r.enabled ? '' : ', off'})`).join(', ') || '(none)'}`);
 });

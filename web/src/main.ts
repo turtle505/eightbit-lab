@@ -1,7 +1,7 @@
 import './style.css';
 import type { ClientMsg, ServerMsg, Snapshot } from '../../shared/protocol.ts';
 import { OfficeScene } from './game/office.ts';
-import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, sortedEmployees } from './ui/console.ts';
+import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, renderUsagePanel, sortedEmployees } from './ui/console.ts';
 import {
   type ViewMode,
   type UIState,
@@ -18,7 +18,7 @@ import { applyView, initialView } from './ui/view.ts';
 const FEED_MAX = 300;
 
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], recentLogs: [], running: 0, maxConcurrent: 0 } as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0 } as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
@@ -52,7 +52,7 @@ function setView(v: ViewMode) {
 }
 
 function renderAll() {
-  renderHeader(state);
+  renderHeader(state, send);
   // shared panels (live in whichever view is active)
   renderApprovals(state, send);
   renderEmployeePanel(state, send);
@@ -64,6 +64,7 @@ function renderAll() {
     renderStaffTable(state, send, select);
     renderTaskTable(state, send);
     renderFeed(state);
+    renderUsagePanel(state, send);
   }
 }
 
@@ -138,6 +139,9 @@ function onMsg(m: ServerMsg) {
       scene.setServers(s.servers);
       break;
     }
+    case 'usage':
+      s.usage = m.data;
+      break;
     case 'routine': {
       const i = s.routines.findIndex((r) => r.id === m.data.id);
       if (i >= 0) s.routines[i] = m.data;
@@ -226,3 +230,5 @@ bindNewTaskForm(send);
 bindConsoleTaskForm(send);
 setView(state.view);
 connect();
+// keep relative times ("n분 후 초기화", "갱신") fresh
+setInterval(renderAll, 30_000);

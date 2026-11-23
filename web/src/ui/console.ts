@@ -1,6 +1,6 @@
 // Console view: plain, table-based rendering of the same office state.
 import type { TaskState } from '../../../shared/protocol.ts';
-import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, plain, short } from './panels.ts';
+import { $, STATUS_KO, type Send, type UIState, ago, changed, esc, plain, resetText, short, usageShare } from './panels.ts';
 
 const STATE_KO: Record<TaskState, string> = { todo: '할 일', doing: '진행 중', review: '검토', done: '완료' };
 const STATE_ORDER: TaskState[] = ['doing', 'review', 'todo', 'done'];
@@ -18,6 +18,7 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
   const upd = emps.map((e) => st.empUpdated.get(e.id) ?? 0);
   // ago() changes over time, so include a coarse clock tick in the memo key
   if (!changed('c-staff', [emps, st.selected, upd, Math.floor(Date.now() / 15000)])) return;
+  const total = emps.reduce((a, e) => a + e.costUsd, 0);
   const rows = emps
     .map((e, i) => {
       const task = e.taskId ? st.snap.tasks.find((t) => t.id === e.taskId) : null;
@@ -29,14 +30,14 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
         <td class="activity" title="${esc(e.activity)}">${esc(plain(e.activity))}</td>
         <td class="num">${task ? `#${task.id}` : '—'}</td>
         <td class="num mono">${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '—'}</td>
-        <td class="num">$${e.costUsd.toFixed(2)}</td>
+        <td class="num" title="API 가격 환산 ≈$${e.costUsd.toFixed(2)} / 사무실 전체 ≈$${total.toFixed(2)}">${usageShare(st, e.costUsd)}</td>
         <td class="num muted">${u ? ago(u) : '—'}</td>
         <td class="actions">${BUSY.includes(e.status) ? `<button data-act="stop">중지</button>` : ''}</td>
       </tr>`;
     })
     .join('');
   $('c-staff').innerHTML = `<table class="ctable staff">
-    <thead><tr><th class="num">#</th><th>직원</th><th>상태</th><th>현재 활동</th><th class="num">작업</th><th class="num">세션</th><th class="num">누적</th><th class="num">갱신</th><th></th></tr></thead>
+    <thead><tr><th class="num">#</th><th>직원</th><th>상태</th><th>현재 활동</th><th class="num">작업</th><th class="num">세션</th><th class="num" title="사무실 전체 사용량 중 이 직원의 비중">비중</th><th class="num">갱신</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   $('c-staff').querySelectorAll<HTMLTableRowElement>('tbody tr').forEach((tr) => {
     const id = tr.dataset.id!;
@@ -145,4 +146,25 @@ export function renderFeed(st: UIState) {
     feedFilter = (ev.target as HTMLSelectElement).value;
     renderFeed(st);
   });
+}
+
+export function renderUsagePanel(st: UIState, send: Send) {
+  const u = st.snap.usage;
+  if (!changed('c-usage', [u, Math.floor(Date.now() / 60000)])) return;
+  const rows = u?.available
+    ? u.rows
+        .map(
+          (r) => `<div class="urow sev-${esc(r.severity)}">
+            <div class="row space"><span>${esc(r.label)}</span><b class="mono">${r.percent}%</b></div>
+            <div class="ubar"><i style="width:${Math.min(100, r.percent)}%"></i></div>
+            <div class="muted small">${esc(resetText(r.resetsAt))}</div>
+          </div>`,
+        )
+        .join('')
+    : `<p class="muted small">${esc(u?.note || '확인 중')}</p>`;
+  $('c-usage').innerHTML = `<div class="c-head"><h2>구독 사용량${u?.plan ? ` <span class="muted small">${esc(u.plan)}</span>` : ''}</h2>
+      <button type="button" id="c-usage-refresh">새로고침</button></div>
+    ${rows}
+    <p class="muted small">${u?.fetchedAt ? `${ago(u.fetchedAt)} 전 조회 · 3분마다, 직원 작업이 끝날 때 갱신` : ''}${u?.available && u.note ? ` · ${esc(u.note)}` : ''}</p>`;
+  $('c-usage-refresh').addEventListener('click', () => send({ t: 'refreshUsage' }));
 }

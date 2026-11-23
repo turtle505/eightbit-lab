@@ -96,6 +96,23 @@ export interface RoutineView {
   nextRun: number | null;
 }
 
+/** One subscription usage meter (e.g. 5-hour session, weekly), as reported by claude.ai. */
+export interface UsageRow {
+  kind: string; // 'session' | 'weekly_all' | 'weekly_scoped' | ...
+  label: string; // Korean display label
+  percent: number; // 0-100
+  resetsAt: number | null; // epoch ms
+  severity: string; // 'normal' | 'warning' | 'critical'
+}
+
+export interface UsageView {
+  available: boolean;
+  plan: string | null;
+  rows: UsageRow[];
+  fetchedAt: number | null;
+  note: string; // why unavailable / last error
+}
+
 export interface Snapshot {
   employees: EmployeeView[];
   tasks: Task[];
@@ -105,6 +122,7 @@ export interface Snapshot {
   routines: RoutineView[];
   /** latest log lines across all employees (activity feed) */
   recentLogs: LogLine[];
+  usage: UsageView;
   running: number;
   maxConcurrent: number;
 }
@@ -120,6 +138,7 @@ export type ServerMsg =
   | { t: 'job'; data: Job }
   | { t: 'server'; data: ServerView }
   | { t: 'routine'; data: RoutineView }
+  | { t: 'usage'; data: UsageView }
   | { t: 'log'; data: LogLine }
   | { t: 'logs'; employeeId: string; lines: LogLine[] }
   | { t: 'notice'; level: 'info' | 'warn' | 'error'; text: string };
@@ -138,4 +157,5 @@ export type ClientMsg =
   | { t: 'cancelJob'; jobId: number }
   | { t: 'refreshServers' }
   | { t: 'runRoutine'; id: string }
-  | { t: 'toggleRoutine'; id: string; enabled: boolean };
+  | { t: 'toggleRoutine'; id: string; enabled: boolean }
+  | { t: 'refreshUsage' };

@@ -51,17 +51,50 @@ export const STATUS_KO: Record<string, string> = {
   error: '오류',
 };
 
-export function renderHeader(st: UIState) {
+const DOW_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
+
+/** "19:40 초기화" today/within a day, else "11/29(토) 01:00 초기화". */
+export function resetText(ts: number | null): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const left = ts - Date.now();
+  if (left <= 0) return '곧 초기화';
+  const rel = left < 3600_000 ? `${Math.max(1, Math.round(left / 60_000))}분 후` : left < 86400_000 ? `${Math.round(left / 3600_000)}시간 후` : `${Math.round(left / 86400_000)}일 후`;
+  const when = left < 86400_000 ? hm : `${d.getMonth() + 1}/${d.getDate()}(${DOW_SHORT[d.getDay()]}) ${hm}`;
+  return `${when} 초기화 · ${rel}`;
+}
+
+/** Each employee's share of the office's total usage (from SDK cost estimates). */
+export function usageShare(st: UIState, costUsd: number): string {
+  const total = st.snap.employees.reduce((a, e) => a + e.costUsd, 0);
+  return total > 0 ? `${Math.round((costUsd / total) * 100)}%` : '—';
+}
+
+export function renderHeader(st: UIState, send?: Send) {
   const s = st.snap;
   const busy = s.employees.filter((e) => !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
-  const cost = s.employees.reduce((a, e) => a + e.costUsd, 0);
-  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, cost.toFixed(2), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
+  const u = s.usage;
+  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
   if (!changed('header', data)) return;
+  // headline meters: session + overall weekly; model-scoped weekly rows go in the tooltip
+  const main = u?.rows.filter((r) => r.kind === 'session' || r.kind === 'weekly_all') ?? [];
+  const extra = u?.rows.filter((r) => !main.includes(r)) ?? [];
+  const tip = (u?.rows ?? []).map((r) => `${r.label}: ${r.percent}% ${resetText(r.resetsAt)}`).join('\n') + (u?.plan ? `\n플랜: ${u.plan}` : '') + '\n(클릭하면 새로고침)';
+  const meters = u?.available && main.length
+    ? main
+        .map(
+          (r) => `<button type="button" class="pill meter sev-${esc(r.severity)}" data-usage title="${esc(tip)}">
+            ${r.kind === 'session' ? '세션' : '주간'} <b>${r.percent}%</b><span class="mbar"><i style="width:${Math.min(100, r.percent)}%"></i></span><span class="muted">${esc(resetText(r.resetsAt).split(' · ')[0])}</span></button>`,
+        )
+        .join('') + (extra.length ? `<span class="pill muted" title="${esc(tip)}">${extra.map((r) => `${esc(r.label.replace(/^주간 · /, ''))} ${r.percent}%`).join(' · ')}</span>` : '')
+    : `<button type="button" class="pill" data-usage title="${esc(u?.note || '')}">사용량 ${u?.fetchedAt ? '—' : '확인 중'}</button>`;
   $('stats').innerHTML = `
     <span class="pill ${st.connected ? 'ok' : 'bad'}">${st.connected ? '● 연결됨' : '○ 연결 끊김'}</span>
     <span class="pill">근무 중 <b>${busy}</b>/${s.maxConcurrent}</span>
     <span class="pill ${s.approvals.length ? 'warn' : ''}">승인 대기 <b>${s.approvals.length}</b></span>
-    <span class="pill" title="Agent SDK가 보고한 추정 비용 (구독 사용량 참고용)">누적 사용량 ≈ $${cost.toFixed(2)}</span>`;
+    ${meters}`;
+  if (send) $('stats').querySelectorAll('[data-usage]').forEach((b) => b.addEventListener('click', () => send({ t: 'refreshUsage' })));
   const nb = document.getElementById('notify-btn');
   if (nb) nb.hidden = !('Notification' in window) || Notification.permission !== 'default';
 }
@@ -256,13 +289,13 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       if (confirm('대화 맥락을 비우고 새 세션으로 시작할까요?')) send({ t: 'resetSession', employeeId: e.id });
     });
   }
-  if (changed('emp-head', [e, st.view])) {
+  if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd)])) {
     $('emp-head').innerHTML = `
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
         <b>${esc(e.name)}</b> <span class="muted">${esc(e.title)}</span>
         <span class="status s-${e.status}">${STATUS_KO[e.status] ?? e.status}</span></div>
       <div class="muted small">${esc(st.view === 'console' ? plain(e.activity) : e.activity)}</div>
-      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ≈$${e.costUsd.toFixed(2)}</div>`;
+      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · 사무실 사용 비중 ${usageShare(st, e.costUsd)}</div>`;
   }
   const lines = st.logs.get(e.id) ?? [];
   if (changed('emp-log', [e.id, lines.length, lines[lines.length - 1]?.ts])) {
