@@ -9,18 +9,23 @@
   </head>
   <body>
     <header class="topbar">
-      <h1>🧬 8-BIT LAB</h1>
+      <h1><span class="ico">🧬 </span><span class="t-game">8-BIT LAB</span><span class="t-console">8-bit Lab <span class="muted">/ console</span></span></h1>
       <div id="stats" class="stats"></div>
-      <button id="notify-btn" hidden title="완료·승인 요청을 데스크톱 알림으로 받기">🔔 알림 켜기</button>
+      <button id="notify-btn" hidden title="완료·승인 요청을 데스크톱 알림으로 받기">알림 켜기</button>
+      <div class="view-toggle" role="group" aria-label="화면 전환 (단축키 `)">
+        <button type="button" data-view="game" aria-pressed="true">게임</button>
+        <button type="button" data-view="console" aria-pressed="false">콘솔</button>
+      </div>
     </header>
 
-    <main class="layout">
+    <!-- ===== game view ===== -->
+    <main id="view-game" class="layout">
       <section class="left">
         <div id="office" class="office">
           <div id="overlay" class="overlay"></div>
         </div>
-        <section id="approvals" class="panel approvals" hidden></section>
-        <section id="employee" class="panel employee"></section>
+        <div data-slot="approvals"><section id="approvals" class="panel approvals" hidden></section></div>
+        <div data-slot="employee"><section id="employee" class="panel employee"></section></div>
       </section>
 
       <aside class="right">
@@ -36,10 +41,43 @@
           </form>
           <div id="board" class="board"></div>
         </section>
-        <section id="routines" class="panel"></section>
-        <section id="jobs" class="panel"></section>
+        <div data-slot="routines"><section id="routines" class="panel"></section></div>
+        <div data-slot="jobs"><section id="jobs" class="panel"></section></div>
       </aside>
     </main>
+
+    <!-- ===== console view ===== -->
+    <main id="view-console" class="console" hidden>
+      <div data-slot="approvals"></div>
+      <div class="c-grid">
+        <div class="c-main">
+          <section class="panel">
+            <div class="c-head"><h2>직원</h2><span class="muted small"><kbd>1</kbd>–<kbd>5</kbd> 선택 · <kbd>j</kbd>/<kbd>k</kbd> 이동 · <kbd>/</kbd> 지시 · <kbd>Esc</kbd> 해제 · <kbd>`</kbd> 화면 전환</span></div>
+            <div id="c-staff"></div>
+          </section>
+          <section class="panel">
+            <div class="c-head"><h2>작업</h2></div>
+            <form id="c-task-form" class="c-task-form">
+              <input id="c-task-title" placeholder="새 작업 제목" autocomplete="off" />
+              <input id="c-task-detail" placeholder="세부 지시 (선택)" autocomplete="off" />
+              <select id="c-task-assignee"></select>
+              <button class="primary" type="submit">추가</button>
+            </form>
+            <div id="c-tasks"></div>
+          </section>
+          <section class="panel">
+            <div class="c-head"><h2>활동 피드</h2></div>
+            <div id="c-feed"></div>
+          </section>
+        </div>
+        <div class="c-side">
+          <div data-slot="employee"></div>
+          <div data-slot="routines"></div>
+          <div data-slot="jobs"></div>
+        </div>
+      </div>
+    </main>
+
     <div id="toasts" class="toasts"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -52,6 +52,8 @@ export class OfficeScene {
   onDropTask: (taskId: number, employeeId: string) => void = () => {};
   private serverLabels = new Map<string, HTMLDivElement>();
   private t = 0;
+  /** true while the game view is hidden: skip drawing, keep state updates */
+  paused = false;
   private floor: HTMLCanvasElement;
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
@@ -336,6 +338,7 @@ export class OfficeScene {
   }
 
   private tick() {
+    if (this.paused) return;
     this.t++;
     const g = this.g;
     g.imageSmoothingEnabled = false;

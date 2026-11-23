@@ -1,33 +1,44 @@
 import type { ClientMsg, LogLine, Snapshot, TaskState } from '../../../shared/protocol.ts';
 
+export type ViewMode = 'game' | 'console';
+
 export interface UIState {
   snap: Snapshot;
   selected: string | null;
   logs: Map<string, LogLine[]>;
   connected: boolean;
+  view: ViewMode;
+  /** all employees' recent log lines, oldest first (console activity feed) */
+  feed: LogLine[];
+  /** last time each employee's status/activity changed */
+  empUpdated: Map<string, number>;
 }
 
-type Send = (m: ClientMsg) => void;
+export type Send = (m: ClientMsg) => void;
 
-const $ = (id: string) => document.getElementById(id)!;
-const esc = (s: unknown) =>
+export const $ = (id: string) => document.getElementById(id)!;
+export const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-const short = (name: string) => name.replace(/^.*"(.*)".*$/, '$1');
-const ago = (ts: number) => {
+export const short = (name: string) => name.replace(/^.*"(.*)".*$/, '$1');
+/** Strip emoji / pictographs (console view shows plain text). */
+export const plain = (s: string) => s.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s{2,}/g, ' ').trim();
+/** Emoji icon that the console view hides via CSS. */
+export const ico = (e: string) => `<span class="ico">${e} </span>`;
+export const ago = (ts: number) => {
   const s = Math.round((Date.now() - ts) / 1000);
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
 };
 
 // Re-render a region only when its data changed (keeps focus / open dropdowns intact).
 const keys = new Map<string, string>();
-function changed(region: string, data: unknown): boolean {
+export function changed(region: string, data: unknown): boolean {
   const k = JSON.stringify(data);
   if (keys.get(region) === k) return false;
   keys.set(region, k);
   return true;
 }
 
-const STATUS_KO: Record<string, string> = {
+export const STATUS_KO: Record<string, string> = {
   idle: '휴식',
   queued: '대기열',
   thinking: '생각 중',
@@ -57,11 +68,14 @@ export function renderHeader(st: UIState) {
 
 export function renderApprovals(st: UIState, send: Send) {
   const s = st.snap;
-  if (!changed('approvals', [s.approvals, s.employees.map((e) => e.name)])) return;
+  if (!changed('approvals', [s.approvals, s.employees.map((e) => e.name), st.view])) return;
   const box = $('approvals');
-  box.hidden = s.approvals.length === 0;
+  // game view: only shown when something is pending; console view: always shown
+  box.hidden = s.approvals.length === 0 && st.view === 'game';
+  box.classList.toggle('empty', s.approvals.length === 0);
   box.innerHTML =
-    `<h2>✋ 승인 요청</h2>` +
+    `<h2>${ico('✋')}승인 요청 <span class="muted small">${s.approvals.length}건${st.view === 'console' && s.approvals.length ? ' · 첫 건 a 승인 / d 거부' : ''}</span></h2>` +
+    (s.approvals.length ? '' : `<p class="muted small">대기 중인 승인 요청이 없습니다.</p>`) +
     s.approvals
       .map((a) => {
         const who = s.employees.find((e) => e.id === a.employeeId);
@@ -178,9 +192,9 @@ export function renderJobs(st: UIState, send: Send) {
     )
     .join('');
   $('jobs').innerHTML = `
-    <div class="row space"><h2>🖥️ 서버실</h2><button id="refresh-servers">새로고침</button></div>
+    <div class="row space"><h2>${ico('🖥️')}서버실</h2><button id="refresh-servers">새로고침</button></div>
     ${servers}
-    <h2>📦 원격 Job</h2>
+    <h2>${ico('📦')}원격 Job</h2>
     ${jobs ? `<table class="jobs"><thead><tr><th></th><th>이름</th><th>서버</th><th>제출</th><th>상태</th><th></th><th></th></tr></thead><tbody>${jobs}</tbody></table>` : '<p class="muted">아직 제출된 job이 없습니다.</p>'}`;
   $('refresh-servers').addEventListener('click', () => send({ t: 'refreshServers' }));
   $('jobs').querySelectorAll<HTMLButtonElement>('button[data-cancel]').forEach((b) =>
@@ -196,9 +210,12 @@ export function renderEmployeePanel(st: UIState, send: Send) {
   const box = $('employee');
   const e = st.snap.employees.find((x) => x.id === st.selected);
   if (!e) {
-    if (panelFor !== null) {
-      panelFor = null;
-      box.innerHTML = `<p class="muted hint">사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>5</kbd>를 누르세요. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.</p>`;
+    if (panelFor !== `none:${st.view}`) {
+      panelFor = `none:${st.view}`;
+      box.innerHTML =
+        st.view === 'console'
+          ? `<p class="muted hint">직원 표에서 행을 클릭하거나 <kbd>1</kbd>–<kbd>5</kbd>, <kbd>j</kbd>/<kbd>k</kbd>로 선택하세요. 로그와 지시 입력이 여기에 표시됩니다.</p>`
+          : `<p class="muted hint">사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>5</kbd>를 누르세요. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.</p>`;
     }
     return;
   }
@@ -239,13 +256,13 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       if (confirm('대화 맥락을 비우고 새 세션으로 시작할까요?')) send({ t: 'resetSession', employeeId: e.id });
     });
   }
-  if (changed('emp-head', e)) {
+  if (changed('emp-head', [e, st.view])) {
     $('emp-head').innerHTML = `
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
         <b>${esc(e.name)}</b> <span class="muted">${esc(e.title)}</span>
         <span class="status s-${e.status}">${STATUS_KO[e.status] ?? e.status}</span></div>
-      <div class="muted small">${esc(e.activity)}</div>
-      <div class="muted small">📁 ${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ≈$${e.costUsd.toFixed(2)}</div>`;
+      <div class="muted small">${esc(st.view === 'console' ? plain(e.activity) : e.activity)}</div>
+      <div class="muted small">${ico('📁')}${esc(e.cwd || '(아직 작업 전)')} · 세션 ${e.sessionId ? esc(e.sessionId.slice(0, 8)) : '새로 시작'} · ≈$${e.costUsd.toFixed(2)}</div>`;
   }
   const lines = st.logs.get(e.id) ?? [];
   if (changed('emp-log', [e.id, lines.length, lines[lines.length - 1]?.ts])) {
@@ -310,7 +327,7 @@ export function renderRoutines(st: UIState, send: Send) {
       </div>`;
     })
     .join('');
-  box.innerHTML = `<h2>⏰ 루틴</h2>${rows || '<p class="muted">등록된 루틴이 없습니다. <code>config/routines.yaml</code>에 추가하세요.</p>'}
+  box.innerHTML = `<h2>${ico('⏰')}루틴</h2>${rows || '<p class="muted">등록된 루틴이 없습니다. <code>config/routines.yaml</code>에 추가하세요.</p>'}
     <p class="muted small">백엔드가 켜져 있을 때만 실행됩니다. 일정 변경은 <code>config/routines.yaml</code> 수정 후 재시작.</p>`;
   box.querySelectorAll<HTMLElement>('.routine').forEach((el) => {
     const id = el.dataset.id!;

@@ -260,9 +260,15 @@ export class AgentManager {
         }
         break;
       }
-      case 'rate_limit_event' as any:
-        this.log(e, 'system', '⚠️ rate limit 이벤트');
+      case 'rate_limit_event': {
+        // subscription usage report; 'allowed' is routine and not worth logging
+        const info = m.rate_limit_info;
+        if (info.status === 'allowed') break;
+        const pct = info.utilization != null ? ` ${Math.round(info.utilization * 100)}%` : '';
+        const reset = info.resetsAt ? ` · ${new Date(info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 초기화` : '';
+        this.log(e, info.status === 'rejected' ? 'error' : 'system', `⚠️ 구독 사용량 ${info.status === 'rejected' ? '한도 도달' : '한도 근접'}${pct}${reset}`);
         break;
+      }
     }
   }
 }

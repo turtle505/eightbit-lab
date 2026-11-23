@@ -103,6 +103,8 @@ export interface Snapshot {
   jobs: Job[];
   servers: ServerView[];
   routines: RoutineView[];
+  /** latest log lines across all employees (activity feed) */
+  recentLogs: LogLine[];
   running: number;
   maxConcurrent: number;
 }

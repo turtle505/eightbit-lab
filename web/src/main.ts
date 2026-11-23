@@ -1,13 +1,30 @@
 import './style.css';
 import type { ClientMsg, ServerMsg, Snapshot } from '../../shared/protocol.ts';
 import { OfficeScene } from './game/office.ts';
-import { bindNewTaskForm, renderApprovals, renderBoard, renderEmployeePanel, renderHeader, renderJobs, renderRoutines, type UIState } from './ui/panels.ts';
+import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, sortedEmployees } from './ui/console.ts';
+import {
+  type ViewMode,
+  type UIState,
+  bindNewTaskForm,
+  renderApprovals,
+  renderBoard,
+  renderEmployeePanel,
+  renderHeader,
+  renderJobs,
+  renderRoutines,
+} from './ui/panels.ts';
+import { applyView, initialView } from './ui/view.ts';
+
+const FEED_MAX = 300;
 
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], running: 0, maxConcurrent: 0 } as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], recentLogs: [], running: 0, maxConcurrent: 0 } as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
+  view: initialView(),
+  feed: [],
+  empUpdated: new Map(),
 };
 
 let ws: WebSocket;
@@ -16,20 +33,38 @@ export function send(m: ClientMsg) {
 }
 
 const scene = new OfficeScene(document.getElementById('office')!, document.getElementById('overlay')!);
-scene.onSelect = (id) => {
+
+/** Select an employee (both views share the selection). */
+function select(id: string | null) {
   state.selected = id;
+  scene.selected = id;
   if (id) send({ t: 'getLogs', employeeId: id });
   renderAll();
-};
+}
+scene.onSelect = select;
 scene.onDropTask = (taskId, employeeId) => send({ t: 'assignTask', taskId, employeeId });
+
+function setView(v: ViewMode) {
+  state.view = v;
+  applyView(v);
+  scene.paused = v !== 'game';
+  renderAll();
+}
 
 function renderAll() {
   renderHeader(state);
+  // shared panels (live in whichever view is active)
   renderApprovals(state, send);
-  renderBoard(state, send);
-  renderJobs(state, send);
-  renderRoutines(state, send);
   renderEmployeePanel(state, send);
+  renderRoutines(state, send);
+  renderJobs(state, send);
+  if (state.view === 'game') {
+    renderBoard(state, send);
+  } else {
+    renderStaffTable(state, send, select);
+    renderTaskTable(state, send);
+    renderFeed(state);
+  }
 }
 
 function toast(text: string, level: 'info' | 'warn' | 'error' = 'info') {
@@ -53,6 +88,7 @@ function onMsg(m: ServerMsg) {
   switch (m.t) {
     case 'snapshot':
       state.snap = m.data;
+      state.feed = [...(m.data.recentLogs ?? [])];
       scene.setEmployees(m.data.employees);
       scene.setServers(m.data.servers);
       scene.tasks = m.data.tasks;
@@ -63,6 +99,7 @@ function onMsg(m: ServerMsg) {
       const prev = s.employees[i];
       if (i >= 0) s.employees[i] = m.data;
       else s.employees.push(m.data);
+      if (!prev || prev.status !== m.data.status || prev.activity !== m.data.activity) state.empUpdated.set(m.data.id, Date.now());
       s.running = s.employees.filter((e) => !['idle', 'queued', 'done', 'error'].includes(e.status)).length;
       scene.upsert(m.data);
       if (prev && prev.status !== 'done' && m.data.status === 'done') notify(`${m.data.name} 완료`, m.data.activity);
@@ -108,12 +145,15 @@ function onMsg(m: ServerMsg) {
       break;
     }
     case 'log': {
+      state.feed.push(m.data);
+      if (state.feed.length > FEED_MAX) state.feed.splice(0, state.feed.length - FEED_MAX);
       const arr = state.logs.get(m.data.employeeId);
       if (arr) {
         arr.push(m.data);
         if (arr.length > 500) arr.splice(0, arr.length - 500);
       }
-      if (m.data.employeeId !== state.selected) return; // no re-render needed
+      // game view only shows the selected employee's log; console also has the feed
+      if (state.view === 'game' && m.data.employeeId !== state.selected) return;
       break;
     }
     case 'logs':
@@ -145,21 +185,44 @@ function connect() {
 document.getElementById('notify-btn')?.addEventListener('click', () => {
   if ('Notification' in window) void Notification.requestPermission().then(() => renderAll());
 });
+document.querySelectorAll<HTMLButtonElement>('.view-toggle button').forEach((b) =>
+  b.addEventListener('click', () => setView(b.dataset.view as ViewMode)),
+);
 
 window.addEventListener('keydown', (ev) => {
-  if ((ev.target as HTMLElement).closest('input, textarea')) return;
-  const n = Number(ev.key);
-  if (n >= 1 && n <= state.snap.employees.length) {
-    const e = [...state.snap.employees].sort((a, b) => a.desk - b.desk)[n - 1];
-    scene.selected = e.id;
-    scene.onSelect(e.id);
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if ((ev.target as HTMLElement).closest('input, textarea, select')) return;
+  const emps = sortedEmployees(state);
+  if (ev.key === '`') {
+    ev.preventDefault();
+    setView(state.view === 'game' ? 'console' : 'game');
+    return;
   }
-  if (ev.key === 'Escape') {
-    scene.selected = null;
-    scene.onSelect(null);
+  const n = Number(ev.key);
+  if (n >= 1 && n <= emps.length) return select(emps[n - 1].id);
+  if (ev.key === 'Escape') return select(null);
+  if (state.view !== 'console') return;
+
+  // console-only shortcuts
+  if (ev.key === 'j' || ev.key === 'k') {
+    const i = emps.findIndex((e) => e.id === state.selected);
+    const next = i < 0 ? 0 : (i + (ev.key === 'j' ? 1 : -1) + emps.length) % emps.length;
+    return select(emps[next]?.id ?? null);
+  }
+  if (ev.key === '/') {
+    ev.preventDefault();
+    if (!state.selected && emps[0]) select(emps[0].id);
+    document.getElementById('emp-input')?.focus();
+    return;
+  }
+  const first = state.snap.approvals[0];
+  if (first && (ev.key === 'a' || ev.key === 'd')) {
+    send({ t: 'approve', id: first.id, allow: ev.key === 'a' });
+    toast(`${ev.key === 'a' ? '승인' : '거부'}: ${first.toolName}`, ev.key === 'a' ? 'info' : 'warn');
   }
 });
 
 bindNewTaskForm(send);
+bindConsoleTaskForm(send);
+setView(state.view);
 connect();
-renderAll();

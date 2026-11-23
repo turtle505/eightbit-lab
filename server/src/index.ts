@@ -61,6 +61,7 @@ function snapshot(): Snapshot {
     jobs: store.listJobs(),
     servers: registry.list(),
     routines: routines.list(),
+    recentLogs: store.logsSince(0, 200),
     running: agents.runningCount(),
     maxConcurrent: office.maxConcurrent,
   };
