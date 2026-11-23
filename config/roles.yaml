@@ -7,7 +7,7 @@
 # - sprite: 캐릭터 색상 (hair / shirt / pants)
 # - model: 이 직원만 쓸 모델 (office.model보다 우선)
 # - stayAtDesk: true면 상태와 상관없이 늘 자기 책상에 앉아 있음
-# - seat: reception | lead 면 격자 대신 고정석에 앉음. 이때 desk 는 정렬 순서로만 쓰이므로 큰 수를 준다
+# - seat: reception | lead 면 격자 대신 매니저 책상 옆 고정석에 앉음 (지금은 아무도 안 씀)
 # - deskStyle: lead면 팀장용 책상으로 그림
 # - permissionMode: auto | ask (기본 office.permissionMode). UI 직원 패널에서 바꾼 값이 우선
 # - provider: Claude 구독 대신 office.yaml providers 의 로컬 모델(Ollama)로 실행
@@ -118,8 +118,7 @@ employees:
   - id: sec
     name: 비서 "Hana"
     title: Executive Assistant
-    desk: 100          # 고정석이라 격자 번호를 쓰지 않음 (정렬 순서용으로만)
-    seat: reception
+    desk: 4
     sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3" }
     cwd: ./workspaces/secretary
     officeTools: true
@@ -157,9 +156,8 @@ employees:
   - id: exec
     name: 실행 팀장 "Linus"
     title: Lead Engineer
-    desk: 101          # 고정석 (팀장석)
-    seat: lead
-    deskStyle: lead
+    desk: 5
+    deskStyle: lead    # 격자 안에서도 팀장용 책상으로 그림 (왕관은 캐릭터에 붙음)
     sprite: { hair: "#2b1d14", shirt: "#2e6f6a", pants: "#2a2a3a", skin: "#eac086" }
     useWorktree: true
     # 실행 담당이자 팀장. 서버에서 돌리려면 office.local.yaml 의 hosts 에 머신을 적고 host: <id> 를 준다.
