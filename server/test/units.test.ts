@@ -1013,3 +1013,22 @@ describe('portability (moving the backend to another machine)', async () => {
     expect(store.getAttachments([v.id])[0].path).toBe(join(newRoot, rel));
   });
 });
+
+describe('removing a role from roles.yaml', async () => {
+  it('leaves its cards on the board instead of pointing at nobody', () => {
+    const s = new Store(':memory:');
+    const kept = s.createTask('keep', '', 'lit');
+    const gone = s.createTask('orphan', '', 'data');
+    const doing = s.createTask('orphan in flight', '', 'data');
+    s.updateTask(gone.id, { assignee: 'data', state: 'review' });
+    s.updateTask(doing.id, { assignee: 'data', state: 'doing' });
+    s.updateTask(kept.id, { assignee: 'lit', state: 'doing' });
+
+    expect(s.reassignUnknown(['lit', 'eval', 'sec', 'exec'])).toBe(2);
+    const by = Object.fromEntries(s.listTasks().map((t) => [t.id, t]));
+    expect(by[kept.id]).toMatchObject({ assignee: 'lit', state: 'doing' }); // untouched
+    expect(by[gone.id]).toMatchObject({ assignee: null, state: 'review' }); // kept its state
+    expect(by[doing.id]).toMatchObject({ assignee: null, state: 'todo' }); // pulled back out of doing
+    expect(s.reassignUnknown(['lit', 'eval', 'sec', 'exec'])).toBe(0); // idempotent
+  });
+});

@@ -34,6 +34,8 @@ agents.pluginDirs = [skills.dir];
 const attachments = new AttachmentLibrary(office.workspaceRoot, store);
 mkdirSync(attachments.dir, { recursive: true });
 agents.extraDirs = [attachments.dir];
+const orphaned = store.reassignUnknown(roles.map((r) => r.id));
+if (orphaned) console.warn(`⚠️ 없는 직원에게 배정돼 있던 작업 ${orphaned}건을 미배정으로 되돌렸습니다`);
 const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)

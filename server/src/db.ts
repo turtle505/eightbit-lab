@@ -133,6 +133,20 @@ export class Store {
       .run(n.assignee, n.state as TaskState, n.result, n.updatedAt, id);
     return n;
   }
+  /**
+   * Safety net for a role removed from roles.yaml: its cards would otherwise point at an employee
+   * who no longer exists. Unassign them (and pull them back out of 'doing') so they stay on the board.
+   */
+  reassignUnknown(validIds: string[]): number {
+    const place = validIds.map(() => '?').join(',') || "''";
+    const rows = this.db.prepare(`SELECT id FROM tasks WHERE assignee IS NOT NULL AND assignee NOT IN (${place})`).all(...validIds) as any[];
+    if (!rows.length) return 0;
+    this.db
+      .prepare(`UPDATE tasks SET assignee = NULL, state = CASE WHEN state = 'doing' THEN 'todo' ELSE state END WHERE assignee NOT IN (${place})`)
+      .run(...validIds);
+    return rows.length;
+  }
+
   deleteTask(id: number) {
     this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
     this.db.prepare('DELETE FROM task_attachments WHERE taskId = ?').run(id); // files stay (they may be linked elsewhere)
