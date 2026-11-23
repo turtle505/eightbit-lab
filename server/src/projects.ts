@@ -1,7 +1,7 @@
 import type { ProjectView } from '../../shared/protocol.ts';
 import type { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
-import type { RoleConfig } from './config.ts';
+import { commonPrompt, type RoleConfig } from './config.ts';
 import type { Store } from './db.ts';
 import type { HostRegistry } from './hosts.ts';
 
@@ -83,7 +83,7 @@ export class ProjectRegistry {
       sprite: sessionSprite(projectId, sessionId),
       useWorktree: false,
       autoAllow: [...PROJECT_AUTO_ALLOW],
-      systemPrompt: prompt(p.name, cwd),
+      systemPrompt: [commonPrompt(), prompt(p.name, cwd)].filter(Boolean).join('\n\n'),
       cwd,
       host: p.hostId,
       kind: 'project',

@@ -221,8 +221,21 @@ export function normalizeProviders(list: Partial<ProviderConfig>[]): ProviderCon
   return out;
 }
 
+/** Rules every employee gets, from the `common:` block in roles.yaml, prepended to each role prompt. */
+export function commonPrompt(): string {
+  const base = readYaml<{ common?: string }>('config/roles.yaml', {}).common ?? '';
+  const local = readYaml<{ common?: string }>('config/roles.local.yaml', {}).common;
+  return (local ?? base).trim();
+}
+
 export function loadRoles(): RoleConfig[] {
-  return readLayered<RoleConfig>('roles', 'employees', 'id').map((r) => ({ ...r, autoAllow: r.autoAllow ?? [], useWorktree: !!r.useWorktree }));
+  const common = commonPrompt();
+  return readLayered<RoleConfig>('roles', 'employees', 'id').map((r) => ({
+    ...r,
+    autoAllow: r.autoAllow ?? [],
+    useWorktree: !!r.useWorktree,
+    systemPrompt: common ? `${common}\n\n${(r.systemPrompt ?? '').trim()}` : r.systemPrompt,
+  }));
 }
 
 export function loadRoutines(): RoutineConfig[] {
