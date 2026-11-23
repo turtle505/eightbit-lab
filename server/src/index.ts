@@ -343,6 +343,9 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'closeProjectSession':
       projects.closeSession(msg.id);
       break;
+    case 'recheckHost':
+      void hosts.get(msg.hostId)?.recheck();
+      break;
     case 'setSessionInOffice':
       projects.setInOffice(msg.id, msg.inOffice);
       break;

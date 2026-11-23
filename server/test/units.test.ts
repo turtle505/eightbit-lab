@@ -1205,15 +1205,32 @@ describe('ssh connection pressure', async () => {
     expect(SSH_BASE.join(' ')).not.toContain('ControlMaster');
   });
 
-  it('skips the health check while a session already proves the host is up', async () => {
+  it('a reachable host gets checked once and then left alone', async () => {
     const h = new Host({ id: 'gpu1', name: 'gpu1', ssh: 'gpu1', projectRoot: '~/project' } as any);
     let checks = 0;
-    (h as any).check = async () => void checks++;
-    h.hasLiveSession = () => true;
-    h.start(10);
-    await new Promise((r) => setTimeout(r, 45));
+    (h as any).check = async () => {
+      checks++;
+      h.view = { ...h.view, ok: true };
+    };
+    h.start();
+    await new Promise((r) => setTimeout(r, 60));
     h.stop();
-    expect(checks).toBe(1); // only the one at startup; the timer kept quiet
+    expect(checks).toBe(1); // no polling at all while it is up — zero traffic when idle
+  });
+
+  it('an unreachable host is retried, backing off instead of knocking every few seconds', async () => {
+    const h = new Host({ id: 'gpu1', name: 'gpu1', ssh: 'gpu1', projectRoot: '~/project' } as any);
+    let checks = 0;
+    (h as any).check = async () => {
+      checks++;
+      h.view = { ...h.view, ok: false };
+    };
+    (h as any).retryMs = 10; // shrink the schedule for the test
+    h.start();
+    await new Promise((r) => setTimeout(r, 90));
+    h.stop();
+    expect(checks).toBeGreaterThan(1); // it kept trying
+    expect(checks).toBeLessThan(9); // but the gap grew each time rather than staying at 10ms
   });
 });
 

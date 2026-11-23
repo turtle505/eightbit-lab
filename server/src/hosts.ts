@@ -81,6 +81,7 @@ export function spawnRemote(cfg: HostConfig, a: SpawnArgs): SpawnedProcess {
 export class Host {
   view: HostView;
   private timer: NodeJS.Timeout | null = null;
+  private stopped = false;
 
   /** the host's $HOME, learned at check time — we quote every path, so the remote shell never expands ~ */
   private home: string | null = null;
@@ -186,16 +187,43 @@ export class Host {
 
   /** true while a session is running on this host — then its liveness is already proven */
   hasLiveSession: () => boolean = () => false;
+  private retryMs = 30_000;
 
-  start(everyMs = 180_000) {
-    void this.check();
-    this.timer = setInterval(() => {
-      if (!this.hasLiveSession()) void this.check();
-    }, everyMs);
+  /**
+   * Check once, then stop touching the host. A reachable server gets no traffic at all while idle —
+   * polling only existed to keep a badge fresh, which is not worth knocking on a machine that bans
+   * noisy clients. We re-check only when it failed (backing off), or on demand.
+   *
+   * The cost is a badge that can go stale: if the server dies we keep showing "연결됨" until
+   * something actually uses it, and then the real error is reported. Better than a confident guess.
+   */
+  start() {
+    void this.checkThenMaybeRetry();
+  }
+
+  private async checkThenMaybeRetry() {
+    if (this.stopped) return;
+    await this.check();
+    if (this.view.ok) {
+      this.retryMs = 30_000; // healthy: no timer at all
+      return;
+    }
+    // unreachable, and we need its $HOME before any session can start — keep trying, slower each time
+    this.timer = setTimeout(() => void this.checkThenMaybeRetry(), this.retryMs);
+    this.retryMs = Math.min(this.retryMs * 2, 300_000);
   }
   stop() {
-    if (this.timer) clearInterval(this.timer);
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  /** Manual re-check (the UI refresh button), and used before a session when we never got through. */
+  async recheck() {
+    this.stopped = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    await this.checkThenMaybeRetry();
   }
 }
 
@@ -217,6 +245,12 @@ export class HostRegistry {
   refreshUsage() {
     for (const h of this.hosts.values()) h.refreshUsage();
   }
+  /** Check a host we never got through to; a healthy one is left alone. */
+  async ensureChecked(id: string) {
+    const h = this.hosts.get(id);
+    if (h && !h.view.ok) await h.recheck();
+  }
+
   /** Tell each host how to see whether one of its sessions is already proving it is up. */
   bindLiveness(anyLiveOn: (hostId: string) => boolean) {
     for (const h of this.hosts.values()) h.hasLiveSession = () => anyLiveOn(h.cfg.id);

@@ -77,7 +77,8 @@ export function hostBadge(st: UIState, e: EmployeeView, plainText = false): stri
   const tip = (h.ok ? `세션이 이 머신에서 실행됩니다 · claude ${h.claudeVersion ?? ''}` : h.error ?? '') + budget;
   return `<span class="prov ${h.ok ? 'on' : 'off'}" title="${esc(tip)}">${esc(plainText ? plain(h.name) : h.name)}${
     h.ok ? '' : ' · 연결 안 됨'
-  }${tight ? ` <span class="ssh-tight">⏳ ${h.sshUsed}/${h.sshLimit}</span>` : ''}</span>`;
+  }${tight ? ` <span class="ssh-tight">⏳ ${h.sshUsed}/${h.sshLimit}</span>` : ''}</span>` +
+    (plainText ? '' : ` <button type="button" class="icon-btn host-recheck" data-host="${esc(h.id)}" title="지금 연결 확인 (평소에는 접속하지 않습니다)">↻</button>`);
 }
 
 /** Provider (local model) of an employee, if it runs on one. */
@@ -360,6 +361,9 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       if (prov) send({ t: 'setProviderModel', providerId: prov.id, model: (ev.target as HTMLSelectElement).value });
     });
     $('emp-perm').addEventListener('click', () => send({ t: 'setPermission', employeeId: e.id, mode: e.permission === 'auto' ? 'ask' : 'auto' }));
+    document.querySelectorAll<HTMLButtonElement>('#emp-head .host-recheck').forEach((b) =>
+      b.addEventListener('click', () => send({ t: 'recheckHost', hostId: b.dataset.host! })),
+    );
     $('emp-rename').addEventListener('click', () => {
       const nick = prompt('새 이름 (비우면 원래 이름으로)', short(e.name));
       if (nick !== null) send({ t: 'renameEmployee', employeeId: e.id, nick });

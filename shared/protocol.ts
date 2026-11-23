@@ -368,4 +368,6 @@ export type ClientMsg =
   | { t: 'addProjectSession'; projectId: string; label?: string }
   | { t: 'closeProjectSession'; id: string }
   /** give a session a desk in the office, or send it back to the projects tab */
-  | { t: 'setSessionInOffice'; id: string; inOffice: boolean };
+  | { t: 'setSessionInOffice'; id: string; inOffice: boolean }
+  /** check a host now (it is otherwise only checked at startup, to keep idle traffic at zero) */
+  | { t: 'recheckHost'; hostId: string };

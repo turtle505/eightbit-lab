@@ -591,6 +591,8 @@ export class AgentManager {
     // hammering a server that bans noisy clients
     const remote = e.role.host ? this.hosts?.get(e.role.host) : undefined;
     if (remote && !remote.isLocal) {
+      // the badge may be stale (we stopped polling); make sure before failing the manager
+      if (!remote.view.ok) await this.hosts?.ensureChecked(remote.cfg.id);
       if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', `⏳ ${remote.view.name} 접속 차례 기다리는 중`);
       // wait without consuming — spawnRemote takes the slot, so it is counted exactly once
       if (!(await sshThrottle.waitForSlot(remote.cfg.ssh, 70_000))) {
