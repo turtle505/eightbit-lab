@@ -18,6 +18,8 @@ export interface ProjectSessionRow {
   id: string;
   projectId: string;
   label: string;
+  /** desk slot in the office, or -1 when the session lives only in the projects tab */
+  desk: number;
   createdAt: number;
   closedAt: number | null;
 }
@@ -98,7 +100,7 @@ export class Store {
         id TEXT PRIMARY KEY, hostId TEXT NOT NULL, name TEXT NOT NULL, dir TEXT NOT NULL,
         createdAt INTEGER NOT NULL, archivedAt INTEGER);
       CREATE TABLE IF NOT EXISTS project_sessions (
-        id TEXT PRIMARY KEY, projectId TEXT NOT NULL, label TEXT NOT NULL,
+        id TEXT PRIMARY KEY, projectId TEXT NOT NULL, label TEXT NOT NULL, desk INTEGER NOT NULL DEFAULT -1,
         createdAt INTEGER NOT NULL, closedAt INTEGER);
       CREATE TABLE IF NOT EXISTS attachments (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, path TEXT NOT NULL, textPath TEXT,
@@ -210,13 +212,33 @@ export class Store {
     const sql = 'SELECT * FROM project_sessions WHERE closedAt IS NULL' + (projectId ? ' AND projectId = ?' : '') + ' ORDER BY createdAt';
     return (projectId ? this.db.prepare(sql).all(projectId) : this.db.prepare(sql).all()) as unknown as ProjectSessionRow[];
   }
-  /** next session for a project; the id doubles as the worker id, so it must never be reused */
-  addProjectSession(projectId: string): ProjectSessionRow {
+  /** Next session for a project. The id doubles as the worker id and is never reused. */
+  addProjectSession(projectId: string, label?: string): ProjectSessionRow {
     const used = this.db.prepare('SELECT id FROM project_sessions WHERE projectId = ?').all(projectId) as any[];
     const n = used.reduce((m, r) => Math.max(m, Number(String(r.id).split(':').pop()) || 0), 0) + 1;
     const id = `p:${projectId}:${n}`;
-    this.db.prepare('INSERT INTO project_sessions (id, projectId, label, createdAt) VALUES (?, ?, ?, ?)').run(id, projectId, `세션 ${n}`, Date.now());
+    this.db
+      .prepare('INSERT INTO project_sessions (id, projectId, label, desk, createdAt) VALUES (?, ?, ?, -1, ?)')
+      .run(id, projectId, label?.trim() || `세션 ${n}`, Date.now());
     return this.db.prepare('SELECT * FROM project_sessions WHERE id = ?').get(id) as unknown as ProjectSessionRow;
+  }
+
+  /**
+   * Give a session a desk in the office (lowest free slot) or take it away again. Desks are reused,
+   * so letting a session go leaves no hole. `taken` are the slots the configured staff already hold.
+   */
+  setSessionDesk(id: string, inOffice: boolean, taken: number[] = []): number {
+    let desk = -1;
+    if (inOffice) {
+      const used = new Set([
+        ...taken,
+        ...(this.db.prepare('SELECT desk FROM project_sessions WHERE closedAt IS NULL AND id != ?').all(id) as any[]).map((r) => r.desk),
+      ]);
+      desk = 0;
+      while (used.has(desk)) desk++;
+    }
+    this.db.prepare('UPDATE project_sessions SET desk = ? WHERE id = ?').run(desk, id);
+    return desk;
   }
   closeProjectSession(id: string) {
     this.db.prepare('UPDATE project_sessions SET closedAt = ? WHERE id = ?').run(Date.now(), id);

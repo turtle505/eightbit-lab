@@ -324,7 +324,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     }
     case 'createProject':
       projects
-        .create(msg.hostId, msg.name, msg.dir)
+        .create(msg.hostId, msg.name, msg.dir, msg.label)
         .then((p) => {
           projects.send();
           bus.send({ t: 'notice', level: 'info', text: `📂 프로젝트 추가: ${p.name}` });
@@ -336,10 +336,13 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       bus.send({ t: 'notice', level: 'info', text: '📂 프로젝트를 보관했습니다' });
       break;
     case 'addProjectSession':
-      projects.addSession(msg.projectId);
+      projects.addSession(msg.projectId, msg.label);
       break;
     case 'closeProjectSession':
       projects.closeSession(msg.id);
+      break;
+    case 'setSessionInOffice':
+      projects.setInOffice(msg.id, msg.inOffice);
       break;
     case 'setProviderModel':
       providers.setModel(msg.providerId, msg.model);

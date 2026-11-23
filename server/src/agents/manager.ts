@@ -114,6 +114,7 @@ class Employee {
       cwd: '',
       costUsd,
       stayAtDesk: role.stayAtDesk ?? false,
+      seat: role.seat,
       deskStyle: role.deskStyle,
       permission,
       live: false,
@@ -239,6 +240,18 @@ export class AgentManager {
     this.emps.set(role.id, e);
     this.sendView(e);
     return e.view;
+  }
+
+  /** Change how a runtime employee is presented (desk, name, look) without touching its session. */
+  updateWorker(id: string, patch: Partial<Pick<RoleConfig, 'desk' | 'name' | 'sprite' | 'title'>>) {
+    const e = this.emps.get(id);
+    if (!e) return;
+    Object.assign(e.role, patch);
+    if (patch.desk !== undefined) e.view.desk = patch.desk;
+    if (patch.sprite) e.view.sprite = patch.sprite;
+    if (patch.title) e.view.title = patch.title;
+    if (patch.name && !this.store.getEmployeeName(id)) e.view.name = patch.name;
+    this.sendView(e);
   }
 
   /** Remove a runtime employee: stop the turn, close the session, drop it from the office. */

@@ -26,6 +26,8 @@ export interface EmployeeView {
   costUsd: number;
   /** always seated at the own desk in the game view */
   stayAtDesk?: boolean;
+  /** a fixed seat instead of a slot in the desk grid */
+  seat?: 'reception' | 'lead';
   deskStyle?: 'lead';
   /** 'auto': a classifier approves tool calls and only unclear ones become approval cards; 'ask': every non-autoAllow tool asks */
   permission: PermissionSetting;
@@ -358,7 +360,9 @@ export type ClientMsg =
   | { t: 'setProviderModel'; providerId: string; model: string }
   /** folders available on a host, for the new-project picker */
   | { t: 'listHostDirs'; hostId: string }
-  | { t: 'createProject'; hostId: string; name: string; dir: string }
+  | { t: 'createProject'; hostId: string; name: string; dir: string; label?: string }
   | { t: 'archiveProject'; id: string }
-  | { t: 'addProjectSession'; projectId: string }
-  | { t: 'closeProjectSession'; id: string };
+  | { t: 'addProjectSession'; projectId: string; label?: string }
+  | { t: 'closeProjectSession'; id: string }
+  /** give a session a desk in the office, or send it back to the projects tab */
+  | { t: 'setSessionInOffice'; id: string; inOffice: boolean };

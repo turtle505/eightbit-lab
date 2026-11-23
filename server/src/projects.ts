@@ -5,6 +5,44 @@ import type { RoleConfig } from './config.ts';
 import type { Store } from './db.ts';
 import type { HostRegistry } from './hosts.ts';
 
+/** Deterministic colour from a string, so a session always looks the same. */
+const hashOf = (s: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return Math.abs(h);
+};
+const hsl = (h: number, s: number, l: number) => {
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const a = (s / 100) * Math.min(l / 100, 1 - l / 100);
+    const v = l / 100 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+};
+
+const HAIR = ['#2b1d14', '#3b2a1a', '#111111', '#5b3a29', '#6b4f2a', '#8a7a5c'];
+const SKIN = ['#f1c27d', '#e8c39e', '#eac086', '#d9a066', '#f3d2b3'];
+
+/** Shirt hue of a project: its sessions all wear this hue, in different shades. */
+export const projectHue = (projectId: string) => (hashOf(projectId) * 47) % 360;
+
+/**
+ * A session's look. The shirt hue comes from the project, so sessions of one project read as a
+ * group, while the shade and the rest come from the session id so no two look identical.
+ */
+export function sessionSprite(projectId: string, sessionId: string) {
+  const sh = hashOf(sessionId);
+  return {
+    hair: HAIR[sh % HAIR.length],
+    shirt: hsl(projectHue(projectId), 45 + (sh % 3) * 12, 42 + (sh % 4) * 7),
+    pants: ['#2f3440', '#3a3a3a', '#2a2a3a', '#3d3326'][sh % 4],
+    skin: SKIN[(sh >> 3) % SKIN.length],
+  };
+}
+
 /** Tools a project session gets without asking. Everything else goes through auto mode / approval. */
 const PROJECT_AUTO_ALLOW = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite', 'mcp__lab__list_servers', 'mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log'];
 
@@ -27,7 +65,7 @@ export class ProjectRegistry {
   ) {}
 
   /** Role for one session. Throws if its host is gone or not reachable yet. */
-  private roleFor(projectId: string, sessionId: string, label: string): RoleConfig {
+  private roleFor(projectId: string, sessionId: string, label: string, desk: number): RoleConfig {
     const p = this.store.getProject(projectId);
     if (!p) throw new Error(`없는 프로젝트: ${projectId}`);
     const host = this.hosts.get(p.hostId);
@@ -37,8 +75,8 @@ export class ProjectRegistry {
       id: sessionId,
       name: `${p.name} · ${label}`,
       title: `${host.view.name} ${p.dir}`,
-      desk: -1,
-      sprite: { hair: '#3b3b3b', shirt: '#6a7f9c', pants: '#2f3440', skin: '#e8c39e' },
+      desk,
+      sprite: sessionSprite(projectId, sessionId),
       useWorktree: false,
       autoAllow: [...PROJECT_AUTO_ALLOW],
       systemPrompt: prompt(p.name, cwd),
@@ -52,7 +90,7 @@ export class ProjectRegistry {
   restore() {
     for (const s of this.store.listProjectSessions()) {
       try {
-        this.agents.addWorker(this.roleFor(s.projectId, s.id, s.label));
+        this.agents.addWorker(this.roleFor(s.projectId, s.id, s.label, s.desk));
       } catch (e) {
         console.warn(`⚠️ 프로젝트 세션 ${s.id} 복구 실패: ${(e as Error).message}`);
       }
@@ -78,7 +116,7 @@ export class ProjectRegistry {
   }
 
   /** Create a project and open its first session. The folder must already exist on the host. */
-  async create(hostId: string, name: string, dir: string) {
+  async create(hostId: string, name: string, dir: string, label?: string) {
     const host = this.hosts.get(hostId);
     if (!host) throw new Error(`설정에 없는 host: ${hostId}`);
     if (!host.view.ok) throw new Error(`${host.view.name} 에 연결할 수 없습니다: ${host.view.error ?? ''}`);
@@ -86,15 +124,27 @@ export class ProjectRegistry {
     if (!clean || clean.includes('..')) throw new Error('폴더 경로가 올바르지 않습니다');
     if (!(await host.dirExists(host.projectDir(clean)))) throw new Error(`${host.view.name} 에 ${clean} 폴더가 없습니다`);
     const p = this.store.createProject(hostId, name.trim() || clean, clean);
-    this.addSession(p.id);
+    this.addSession(p.id, label);
     return p;
   }
 
-  addSession(projectId: string) {
-    const s = this.store.addProjectSession(projectId);
-    this.agents.addWorker(this.roleFor(projectId, s.id, s.label));
+  addSession(projectId: string, label?: string) {
+    const s = this.store.addProjectSession(projectId, label);
+    this.agents.addWorker(this.roleFor(projectId, s.id, s.label, s.desk));
     this.send();
     return s;
+  }
+
+  /** Give a session a desk in the office, or send it back to the projects tab. */
+  setInOffice(id: string, inOffice: boolean) {
+    const desk = this.store.setSessionDesk(id, inOffice, this.staffDesks());
+    this.agents.updateWorker(id, { desk });
+    this.send();
+  }
+
+  /** Desk slots the configured staff hold (employees with a fixed seat don't take one). */
+  private staffDesks(): number[] {
+    return this.agents.views().filter((v) => v.kind !== 'project' && !v.seat).map((v) => v.desk);
   }
 
   closeSession(id: string) {

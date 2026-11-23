@@ -1125,3 +1125,45 @@ describe('project sessions', async () => {
     expect(s.listProjects().map((p) => p.hostId).sort()).toEqual(['desktop', 'gpu1']);
   });
 });
+
+describe('office seating', async () => {
+  const { heightFor, rowsFor } = await import('../../web/src/game/office.ts');
+  const { sessionSprite, projectHue } = await import('../src/projects.ts');
+
+  it('the room keeps its original size until the grid needs a third row', () => {
+    expect(rowsFor(-1)).toBe(2); // nobody in the grid
+    expect(rowsFor(5)).toBe(2); // 3 columns × 2 rows = slots 0..5
+    expect(rowsFor(6)).toBe(3);
+    expect(rowsFor(11)).toBe(4);
+    expect(heightFor(2)).toBe(240); // unchanged from before the server room came out
+    expect(heightFor(3)).toBe(312);
+  });
+
+  it('a session only takes a desk once it is let into the office, and gives it back', () => {
+    const s = new Store(':memory:');
+    const p = s.createProject('desktop', 'rna', 'rna');
+    const a = s.addProjectSession(p.id, '학습');
+    const b = s.addProjectSession(p.id);
+    expect([a.desk, b.desk]).toEqual([-1, -1]); // tab only
+    expect(a.label).toBe('학습');
+    expect(b.label).toBe('세션 2');
+
+    const staff = [0, 1]; // lit and eval hold these grid slots
+    expect(s.setSessionDesk(a.id, true, staff)).toBe(2);
+    expect(s.setSessionDesk(b.id, true, staff)).toBe(3);
+    expect(s.setSessionDesk(a.id, false, staff)).toBe(-1); // sent back to the tab
+    // the freed desk is handed to the next session rather than drifting upward
+    const c = s.addProjectSession(p.id);
+    expect(s.setSessionDesk(c.id, true, staff)).toBe(2);
+  });
+
+  it('a session always looks the same, and project-mates share a shirt', () => {
+    const one = sessionSprite('pr-aaa', 'p:pr-aaa:1');
+    expect(sessionSprite('pr-aaa', 'p:pr-aaa:1')).toEqual(one); // deterministic
+    // project-mates share the hue but not the shade, so you can still tell them apart
+    expect(projectHue('pr-aaa')).toBe(projectHue('pr-aaa'));
+    expect(projectHue('pr-bbb')).not.toBe(projectHue('pr-aaa'));
+    expect(sessionSprite('pr-aaa', 'p:pr-aaa:2').shirt).not.toBe(one.shirt);
+    for (const v of Object.values(one)) expect(v).toMatch(/^#[0-9a-f]{6}$/);
+  });
+});

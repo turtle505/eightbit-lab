@@ -86,6 +86,8 @@ export interface RoleConfig {
   /** always sit at the own desk (never walks to the coffee spot or the server racks) */
   stayAtDesk?: boolean;
   /** 'lead' draws the executive desk */
+  /** a fixed seat instead of a slot in the desk grid */
+  seat?: 'reception' | 'lead';
   deskStyle?: 'lead';
   /** overrides office.permissionMode for this employee */
   permissionMode?: PermissionSetting;

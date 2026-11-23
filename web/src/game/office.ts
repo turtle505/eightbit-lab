@@ -3,15 +3,29 @@ import type { AgentStatus, EmployeeView, ServerView, Task } from '../../../share
 import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
-export const H = 240;
 const WALL_H = 36;
-const ROOM_X = 300; // server room starts here
-/** where the (decorative) professor stands: the aisle between the right desk column and the server room */
-const PROF = { x: 262, y: 150 };
+
+// The office is a grid of desks that grows downward, with a fixed strip at the bottom for the
+// manager and the two reserved seats. Height follows the number of grid rows in use.
+const COLS = 3;
+const COL_X = [40, 170, 300];
+const GRID_TOP = 92;
+const ROW_H = 72;
+const MIN_ROWS = 2;
+/** canvas height for a given number of grid rows (2 rows = the original 240) */
+export const heightFor = (rows: number) => GRID_TOP + Math.max(MIN_ROWS, rows) * ROW_H + 4;
+/** rows needed to seat the highest grid slot in use */
+export const rowsFor = (maxSlot: number) => Math.max(MIN_ROWS, Math.floor(Math.max(0, maxSlot) / COLS) + 1);
+/** current canvas height; grows as desks are added (see OfficeScene.layout) */
+export let H = heightFor(MIN_ROWS);
+/** where the (decorative) professor stands: bottom-right, out of the desk grid */
+let PROF = { x: 356, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
-const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string }> = {
-  professor: { tag: { x: PROF.x, y: PROF.y + 4 }, box: { x0: PROF.x - 9, x1: PROF.x + 9, y0: PROF.y - 24, y1: PROF.y + 4 }, ask: '이름 (비우면 "교수님")' },
-  manager: { tag: { x: 150, y: 227 }, box: { x0: 141, x1: 159, y0: 186, y1: 204 }, ask: '이름 (비우면 "매니저")' },
+/** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
+const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
+const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string; fromBottom?: boolean }> = {
+  professor: { tag: { x: 356, y: -86 }, box: { x0: 347, x1: 365, y0: -114, y1: -86 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
+  manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: '이름 (비우면 "매니저")', fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
   board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)' },
 };
@@ -31,17 +45,14 @@ interface Actor {
   tag: HTMLDivElement;
 }
 
-// desks 0-3: 2x2 grid; desk 4: reception desk right of the manager (secretary); desk 5: left of the manager (team lead);
-// desk 6: right column by the server-room glass (secretary 2, on the local model)
-const deskPos = (i: number) =>
-  i === 4 ? { x: 206, y: 196 } : i === 5 ? { x: 40, y: 204 } : i === 6 ? { x: 234, y: 100 } : { x: 40 + (i % 2) * 130, y: 92 + Math.floor(i / 2) * 72 };
-const seatSpot = (i: number): Spot => ({ x: deskPos(i).x + 30, y: deskPos(i).y + 2 });
-const besideSpot = (i: number): Spot => ({ x: deskPos(i).x + 60, y: deskPos(i).y + 16 });
-// lounge spots along the top wall, spaced so bubbles don't collide
-// (desks past 5 reuse a lounge spot one row lower so nobody wanders into the server room)
-const coffeeSpot = (i: number): Spot => (i < 6 ? { x: 62 + i * 44, y: 72 } : { x: 84 + (i - 6) * 44, y: 80 });
-const rackPos = (i: number) => ({ x: ROOM_X + 12 + (i % 3) * 30, y: 56 + Math.floor(i / 3) * 78 });
-const rackSpot = (i: number, k: number): Spot => ({ x: rackPos(i).x + 11 + (k % 2) * 6, y: rackPos(i).y + 60 });
+/** Reserved seats sit in the bottom strip; every other desk is a slot in the grid. */
+const seatPos = (seat: 'reception' | 'lead') => (seat === 'reception' ? { x: 206, y: H - 44 } : { x: 40, y: H - 36 });
+const deskPos = (i: number, seat?: 'reception' | 'lead') =>
+  seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
+const seatSpot = (i: number, seat?: 'reception' | 'lead'): Spot => ({ x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 });
+const besideSpot = (i: number, seat?: 'reception' | 'lead'): Spot => ({ x: deskPos(i, seat).x + 60, y: deskPos(i, seat).y + 16 });
+// lounge spots along the top wall, spaced so bubbles don't collide; it wraps to a second line
+const coffeeSpot = (i: number): Spot => ({ x: 62 + (i % 7) * 46, y: 68 + Math.floor(i / 7) * 10 });
 
 const MONITOR_GLOW: Partial<Record<AgentStatus, string>> = {
   typing: '#7fb2ff',
@@ -64,11 +75,12 @@ export class OfficeScene {
   onSelect: (id: string | null) => void = () => {};
   onDropTask: (taskId: number, employeeId: string) => void = () => {};
   onRenameFigure: (key: FigureKey, name: string) => void = () => {};
-  private serverLabels = new Map<string, HTMLDivElement>();
   private t = 0;
   /** true while the game view is hidden: skip drawing, keep state updates */
   paused = false;
   private floor: HTMLCanvasElement;
+  /** grid rows currently drawn; grows as desks are handed out */
+  private rows = MIN_ROWS;
   private figureTags = new Map<FigureKey, HTMLDivElement>();
   private boardText = '';
 
@@ -134,7 +146,7 @@ export class OfficeScene {
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
     for (const [key, f] of Object.entries(FIGURES) as [FigureKey, (typeof FIGURES)[FigureKey]][])
-      if (x >= f.box.x0 && x <= f.box.x1 && y >= f.box.y0 && y <= f.box.y1) return key;
+      if (x >= f.box.x0 && x <= f.box.x1 && y >= figAt(f, f.box.y0) && y <= figAt(f, f.box.y1)) return key;
     return null;
   }
 
@@ -164,6 +176,22 @@ export class OfficeScene {
     for (const v of list) this.upsert(v);
   }
 
+  /**
+   * Resize the room to the desks in use. The canvas, the bottom strip (manager, reserved seats)
+   * and the static layer all follow the row count, so adding a session just makes the office taller.
+   */
+  private layout() {
+    const maxSlot = Math.max(-1, ...[...this.actors.values()].filter((a) => !a.view.seat).map((a) => a.view.desk));
+    const rows = rowsFor(maxSlot);
+    if (rows === this.rows) return;
+    this.rows = rows;
+    H = heightFor(rows);
+    PROF = { x: 356, y: H - 90 };
+    this.canvas.height = H;
+    this.floor = this.paintStatic();
+    this.resize();
+  }
+
   /** Take an actor out of the office (a project session closing, or a role removed). */
   remove(id: string) {
     const a = this.actors.get(id);
@@ -171,13 +199,14 @@ export class OfficeScene {
     a.bubble.remove();
     a.tag.remove();
     this.actors.delete(id);
+    this.layout();
   }
 
   upsert(v: EmployeeView) {
-    if (v.kind === 'project') return; // project sessions live in the projects tab, not at a desk
+    if (v.desk < 0) return; // a session that has not been given a desk lives in the projects tab only
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = v.stayAtDesk || v.live ? seatSpot(v.desk) : coffeeSpot(v.desk);
+      const start = v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
@@ -187,29 +216,16 @@ export class OfficeScene {
       this.actors.set(v.id, a);
     }
     a.view = v;
+    this.layout();
     a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
     a.bubble.title = v.activity;
     a.bubble.dataset.status = v.status;
     a.tag.textContent = v.name.replace(/^.*"(.*)".*$/, '$1');
   }
 
+  /** GPU servers are shown in the jobs panel now, not drawn in the office. */
   setServers(list: ServerView[]) {
     this.servers = list;
-    list.forEach((s, i) => {
-      let el = this.serverLabels.get(s.name);
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'rack-label';
-        this.overlay.append(el);
-        this.serverLabels.set(s.name, el);
-      }
-      const p = rackPos(i);
-      el.textContent = s.name;
-      el.title = `${s.type} · ${s.online ? 'online' : 'offline'}\n${s.note}\n${s.gpus.map((g) => `GPU${g.index} ${g.util}% ${g.memUsed}/${g.memTotal}MiB`).join('\n')}`;
-      el.dataset.x = String(p.x + 11);
-      el.dataset.y = String(p.y + 47);
-      el.dataset.online = String(s.online);
-    });
   }
 
   // ---------- static background
@@ -218,34 +234,19 @@ export class OfficeScene {
     c.width = W;
     c.height = H;
     const g = c.getContext('2d')!;
-    // floor
+    // floor — the whole room is office now that the server racks are gone
     for (let y = WALL_H; y < H; y += 8)
-      for (let x = 0; x < ROOM_X; x += 16) {
-        g.fillStyle = ((x / 16 + y / 8) % 2 === 0) ? '#b98a5a' : '#b0814f';
+      for (let x = 0; x < W; x += 16) {
+        g.fillStyle = (x / 16 + y / 8) % 2 === 0 ? '#b98a5a' : '#b0814f';
         g.fillRect(x + ((y / 8) % 2) * 8 - 8, y, 16, 8);
       }
     g.fillStyle = '#9c6d40';
-    for (let y = WALL_H; y < H; y += 8) g.fillRect(0, y, ROOM_X, 1);
-    // server room floor
-    for (let y = WALL_H; y < H; y += 10)
-      for (let x = ROOM_X; x < W; x += 10) {
-        g.fillStyle = ((x + y) / 10) % 2 === 0 ? '#3b4252' : '#363c4a';
-        g.fillRect(x, y, 10, 10);
-      }
-    // walls
+    for (let y = WALL_H; y < H; y += 8) g.fillRect(0, y, W, 1);
+    // wall
     g.fillStyle = '#e3d9c6';
-    g.fillRect(0, 0, ROOM_X, WALL_H);
+    g.fillRect(0, 0, W, WALL_H);
     g.fillStyle = '#c9bca4';
-    g.fillRect(0, WALL_H - 4, ROOM_X, 4);
-    g.fillStyle = '#4c566a';
-    g.fillRect(ROOM_X, 0, W - ROOM_X, WALL_H);
-    g.fillStyle = '#3b4252';
-    g.fillRect(ROOM_X, WALL_H - 4, W - ROOM_X, 4);
-    // glass divider
-    g.fillStyle = 'rgba(170,210,240,0.55)';
-    g.fillRect(ROOM_X - 3, WALL_H, 3, H - WALL_H);
-    g.fillStyle = '#5e6a7a';
-    g.fillRect(ROOM_X - 3, WALL_H, 3, 2);
+    g.fillRect(0, WALL_H - 4, W, 4);
     // window
     g.fillStyle = '#6b5a45';
     g.fillRect(14, 5, 44, 24);
@@ -272,11 +273,14 @@ export class OfficeScene {
     g.fillStyle = '#7bc4ff';
     g.fillRect(242, 26, 10, 2);
     g.fillRect(258, 26, 12, 2);
-    // server room sign
-    g.fillStyle = '#88c0d0';
-    g.fillRect(ROOM_X + 30, 10, 40, 12);
+    // clock on the far right of the wall
+    g.fillStyle = '#8c8c8c';
+    g.fillRect(330, 8, 18, 18);
+    g.fillStyle = '#fbfbf7';
+    g.fillRect(332, 10, 14, 14);
     g.fillStyle = '#2e3440';
-    g.fillRect(ROOM_X + 33, 13, 34, 6);
+    g.fillRect(338, 13, 1, 5);
+    g.fillRect(338, 17, 4, 1);
     // counter + coffee machine
     g.fillStyle = '#7a5537';
     g.fillRect(6, 44, 40, 14);
@@ -287,19 +291,19 @@ export class OfficeScene {
     g.fillRect(28, 40, 4, 4);
     g.fillRect(34, 40, 4, 4);
     // plants
-    paintMap(g, PLANT, PLANT_COLORS, 284, 40);
-    paintMap(g, PLANT, PLANT_COLORS, 6, 220);
-    paintMap(g, PLANT, PLANT_COLORS, 284, 220);
+    paintMap(g, PLANT, PLANT_COLORS, 370, 44);
+    paintMap(g, PLANT, PLANT_COLORS, 6, H - 20);
+    paintMap(g, PLANT, PLANT_COLORS, 370, H - 20);
     // manager desk ("you") is drawn per frame in drawBossRug/drawBossChair/drawBossDesk (y-sorted with the actors)
     // rug under desks
     g.fillStyle = 'rgba(80,110,140,0.18)';
-    g.fillRect(24, 80, 262, 150);
+    g.fillRect(24, 80, 340, H - 90);
     return c;
   }
 
-  private drawDesk(i: number, status: AgentStatus | null, local = false) {
+  private drawDesk(i: number, status: AgentStatus | null, local = false, seat?: 'reception' | 'lead') {
     const g = this.g;
-    const { x, y } = deskPos(i);
+    const { x, y } = deskPos(i, seat);
     // desk top
     g.fillStyle = '#8b5e3c';
     g.fillRect(x, y, 60, 14);
@@ -344,56 +348,25 @@ export class OfficeScene {
 
   // ---- team lead's desk: a regular desk plus a simple office chair and a small brass nameplate (kept modest
   // so the manager's desk next to it stays the showpiece)
-  private drawLeadChair(i: number) {
+  private drawLeadChair(i: number, seat?: 'reception' | 'lead') {
     const g = this.g;
-    const s = seatSpot(i);
+    const s = seatSpot(i, seat);
     g.fillStyle = '#2f3440';
     g.fillRect(s.x - 6, s.y - 15, 12, 13);
     g.fillStyle = '#3d4352';
     g.fillRect(s.x - 5, s.y - 14, 10, 2);
   }
 
-  private drawLeadDesk(i: number, status: AgentStatus | null) {
-    this.drawDesk(i, status);
+  private drawLeadDesk(i: number, status: AgentStatus | null, seat?: 'reception' | 'lead') {
+    this.drawDesk(i, status, false, seat);
     const g = this.g;
-    const { x, y } = deskPos(i);
+    const { x, y } = deskPos(i, seat);
     g.fillStyle = '#b8892e';
     g.fillRect(x + 24, y + 8, 12, 3);
     g.fillStyle = '#e8c55a';
     g.fillRect(x + 24, y + 8, 12, 1);
   }
 
-  private drawRacks() {
-    const g = this.g;
-    const list = this.servers.length ? this.servers : [];
-    list.forEach((s, i) => {
-      const { x, y } = rackPos(i);
-      g.fillStyle = '#1f232b';
-      g.fillRect(x, y, 22, 46);
-      g.fillStyle = '#2b303b';
-      for (let k = 0; k < 6; k++) g.fillRect(x + 2, y + 3 + k * 7, 18, 5);
-      // LEDs: one per GPU (util → color), or status lights for slurm/offline
-      const leds = s.gpus.length ? s.gpus.map((gp) => gp.util) : [s.online ? -1 : -2];
-      leds.slice(0, 12).forEach((u, k) => {
-        const blink = Math.floor(this.t / (u > 50 ? 4 : 12) + k) % 2 === 0;
-        g.fillStyle = u === -2 ? '#bf616a' : u === -1 ? '#a3be8c' : u > 80 ? '#ff6b6b' : u > 30 ? '#ebcb8b' : '#a3be8c';
-        if (u >= 0 && u > 5 && !blink) g.fillStyle = '#4c566a';
-        g.fillRect(x + 4 + (k % 4) * 4, y + 4 + Math.floor(k / 4) * 7, 2, 2);
-      });
-      // memory bar
-      const mem = s.gpus.reduce((a, b) => a + b.memUsed, 0) / Math.max(1, s.gpus.reduce((a, b) => a + b.memTotal, 0));
-      g.fillStyle = '#4c566a';
-      g.fillRect(x + 2, y + 42, 18, 2);
-      g.fillStyle = '#88c0d0';
-      g.fillRect(x + 2, y + 42, Math.round(18 * mem), 2);
-    });
-    if (!list.length) {
-      g.fillStyle = '#4c566a';
-      g.fillRect(ROOM_X + 20, 80, 60, 40);
-      g.fillStyle = '#d8dee9';
-      g.fillRect(ROOM_X + 46, 96, 8, 8);
-    }
-  }
 
   private drawWhiteboard() {
     const g = this.g;
@@ -417,17 +390,12 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
-    if (v.stayAtDesk) return seatSpot(v.desk);
-    if (v.status === 'remote') {
-      const m = /🖥️\s*(\S+)에/.exec(v.activity);
-      let idx = m ? this.servers.findIndex((s) => s.name === m[1]) : -1;
-      if (idx < 0) idx = 0;
-      if (this.servers.length) return rackSpot(idx, v.desk);
-    }
-    if (SEATED.includes(v.status) || (v.status === 'remote' && !this.servers.length)) return seatSpot(v.desk);
-    if (BESIDE.includes(v.status)) return besideSpot(v.desk);
+    if (v.stayAtDesk) return seatSpot(v.desk, v.seat);
+    // the server room is gone from the drawing; remote work just shows in the bubble
+    if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
+    if (BESIDE.includes(v.status)) return besideSpot(v.desk, v.seat);
     // session still open = still at the desk, ready for the next instruction; closed = off to the lounge
-    return v.live ? seatSpot(v.desk) : coffeeSpot(v.desk);
+    return v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
   }
 
   private tick() {
@@ -437,7 +405,6 @@ export class OfficeScene {
     g.imageSmoothingEnabled = false;
     g.drawImage(this.floor, 0, 0);
     this.drawWhiteboard();
-    this.drawRacks();
 
     // move actors
     for (const a of this.actors.values()) {
@@ -457,30 +424,39 @@ export class OfficeScene {
     // draw desks and actors sorted by y (desks drawn after seated actor so they occlude legs)
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
-    const deskStatus = new Map<number, AgentStatus>();
+    // one desk per (seat, slot): a reserved seat and a grid slot can share a number
+    type Desk = { i: number; seat?: 'reception' | 'lead'; lead: boolean; local: boolean; status: AgentStatus | null };
+    const desks = new Map<string, Desk>();
+    const key = (i: number, seat?: string) => `${seat ?? ''}#${i}`;
+    for (let i = 0; i < this.rows * 3; i++) desks.set(key(i), { i, lead: false, local: false, status: null }); // empty grid
+
     for (const a of this.actors.values()) {
-      const seat = seatSpot(a.view.desk);
-      const seated = a.x === seat.x && a.y === seat.y;
-      if (seated) deskStatus.set(a.view.desk, a.view.status);
+      const v = a.view;
+      const spot = seatSpot(v.desk, v.seat);
+      const seated = a.x === spot.x && a.y === spot.y;
       items.push({ y: a.y + (seated ? -0.5 : 0), draw: () => this.drawActor(a, seated) });
+      desks.set(key(v.desk, v.seat), {
+        i: v.desk,
+        seat: v.seat,
+        lead: v.deskStyle === 'lead',
+        local: !!v.provider,
+        status: seated ? v.status : null,
+      });
     }
-    const desks = new Set([0, 1, 2, 3, ...[...this.actors.values()].map((a) => a.view.desk)]);
-    const leadDesks = new Set([...this.actors.values()].filter((a) => a.view.deskStyle === 'lead').map((a) => a.view.desk));
-    const localDesks = new Set([...this.actors.values()].filter((a) => a.view.provider).map((a) => a.view.desk));
-    for (const i of desks) {
-      const p = deskPos(i);
-      if (leadDesks.has(i)) {
-        items.push({ y: seatSpot(i).y - 1, draw: () => this.drawLeadChair(i) }); // behind the seated actor
-        items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(i, deskStatus.get(i) ?? null) });
-      } else items.push({ y: p.y + 2, draw: () => this.drawDesk(i, deskStatus.get(i) ?? null, localDesks.has(i)) });
+    for (const d of desks.values()) {
+      const p = deskPos(d.i, d.seat);
+      if (d.lead) {
+        items.push({ y: seatSpot(d.i, d.seat).y - 1, draw: () => this.drawLeadChair(d.i, d.seat) }); // behind the seated actor
+        items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(d.i, d.status, d.seat) });
+      } else items.push({ y: p.y + 2, draw: () => this.drawDesk(d.i, d.status, d.local, d.seat) });
     }
     // the professor: just stands there, solemnly
     items.push({ y: PROF.y, draw: () => this.drawProfessor() });
     // the manager (you) behind the manager desk
     items.push({ y: -1e9 + 1, draw: () => this.drawBossRug() });
-    items.push({ y: 205, draw: () => this.drawBossChair() });
-    items.push({ y: 206, draw: () => this.drawBoss() });
-    items.push({ y: 207, draw: () => this.drawBossDesk() });
+    items.push({ y: H - 35, draw: () => this.drawBossChair() });
+    items.push({ y: H - 34, draw: () => this.drawBoss() });
+    items.push({ y: H - 33, draw: () => this.drawBossDesk() });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
 
     this.layoutOverlay();
@@ -507,7 +483,7 @@ export class OfficeScene {
   // dual monitors, brass lamp, gold nameplate, trophy
   private drawBossRug() {
     const g = this.g;
-    const x = 106, y = 198;
+    const x = 106, y = H - 42;
     g.fillStyle = '#c9a227';
     g.fillRect(x, y, 88, 46);
     g.fillStyle = '#6b2737';
@@ -538,7 +514,7 @@ export class OfficeScene {
 
   private drawBossDesk() {
     const g = this.g;
-    const x = 114, y = 204; // 72 px wide, centred on the manager
+    const x = 114, y = H - 36; // 72 px wide, centred on the manager
     // brass lamp on the far left with a soft warm cone
     g.fillStyle = 'rgba(255,214,120,0.16)';
     g.beginPath();
@@ -661,19 +637,15 @@ export class OfficeScene {
       const f = FIGURES[key];
       if (f.tag) {
         tag.style.left = `${f.tag.x * s}px`;
-        tag.style.top = `${f.tag.y * s}px`;
+        tag.style.top = `${figAt(f, f.tag.y) * s}px`;
       } else {
         // text overlay sized to the inner whiteboard
         tag.style.left = `${(f.box.x0 + 3) * s}px`;
-        tag.style.top = `${(f.box.y0 + 2) * s}px`;
+        tag.style.top = `${(figAt(f, f.box.y0) + 2) * s}px`;
         tag.style.width = `${(f.box.x1 - f.box.x0 - 6) * s}px`;
         tag.style.height = `${(f.box.y1 - f.box.y0 - 4) * s}px`;
         tag.style.fontSize = `${Math.max(12, 9 * s)}px`;
       }
-    }
-    for (const el of this.serverLabels.values()) {
-      el.style.left = `${Number(el.dataset.x) * s}px`;
-      el.style.top = `${Number(el.dataset.y) * s}px`;
     }
     for (const a of this.actors.values()) {
       a.bubble.style.left = `${a.x * s}px`;

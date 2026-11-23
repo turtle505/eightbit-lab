@@ -7,6 +7,7 @@
 # - sprite: 캐릭터 색상 (hair / shirt / pants)
 # - model: 이 직원만 쓸 모델 (office.model보다 우선)
 # - stayAtDesk: true면 상태와 상관없이 늘 자기 책상에 앉아 있음
+# - seat: reception | lead 면 격자 대신 고정석에 앉음 (desk 번호는 자리 다툼 방지용으로만 쓰임)
 # - deskStyle: lead면 팀장용 책상으로 그림
 # - permissionMode: auto | ask (기본 office.permissionMode). UI 직원 패널에서 바꾼 값이 우선
 # - provider: Claude 구독 대신 office.yaml providers 의 로컬 모델(Ollama)로 실행
@@ -46,6 +47,7 @@ employees:
     name: 비서 "Hana"
     title: Executive Assistant
     desk: 4
+    seat: reception
     sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3" }
     cwd: ./workspaces/secretary
     officeTools: true
@@ -84,6 +86,7 @@ employees:
     name: 실행 팀장 "Linus"
     title: Lead Engineer
     desk: 5
+    seat: lead
     deskStyle: lead
     sprite: { hair: "#2b1d14", shirt: "#2e6f6a", pants: "#2a2a3a", skin: "#eac086" }
     useWorktree: true

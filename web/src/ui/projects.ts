@@ -22,6 +22,7 @@ function sessionCard(st: UIState, s: EmployeeView): string {
       <span class="badge b-${s.status}">${STATUS_KO[s.status] ?? s.status}</span>
       <span class="muted small">${s.live ? '🟢' : '⚪'}</span>
       <span class="muted small last">${esc(plain(last?.text ?? '아직 지시 없음').slice(0, 70))}</span>
+      <button type="button" data-act="office" title="${s.desk >= 0 ? '사무실에서 빼기 (세션은 유지)' : '사무실에 책상을 주고 캐릭터로 띄우기'}">${s.desk >= 0 ? '🪑 사무실' : '사무실에 들이기'}</button>
       ${BUSY.includes(s.status) ? '<button type="button" data-act="stop">중지</button>' : ''}
       <button type="button" data-act="close" title="이 세션 닫기">✕</button>
     </div>
@@ -64,6 +65,7 @@ export function renderProjects(st: UIState, send: Send) {
       <input id="pnew-dir" list="pnew-dirs" placeholder="폴더 (예: bio2token)" autocomplete="off" />
       <datalist id="pnew-dirs"></datalist>
       <input id="pnew-name" placeholder="이름 (비우면 폴더 이름)" autocomplete="off" />
+      <input id="pnew-label" placeholder="첫 세션 이름 (선택)" autocomplete="off" />
       <button class="primary" type="submit">프로젝트 추가</button>
     </form>
     ${projects.length ? projects.map((p) => projectCard(st, p)).join('') : '<p class="muted hint">프로젝트가 없습니다. 위에서 호스트와 폴더를 골라 추가하세요. 프로젝트마다 세션을 여러 개 띄울 수 있습니다.</p>'}`;
@@ -81,14 +83,23 @@ export function renderProjects(st: UIState, send: Send) {
     ev.preventDefault();
     const dir = ($('pnew-dir') as HTMLInputElement).value.trim();
     if (!dir) return;
-    send({ t: 'createProject', hostId: hostSel.value, name: ($('pnew-name') as HTMLInputElement).value.trim(), dir });
-    ($('pnew-dir') as HTMLInputElement).value = '';
-    ($('pnew-name') as HTMLInputElement).value = '';
+    send({
+      t: 'createProject',
+      hostId: hostSel.value,
+      name: ($('pnew-name') as HTMLInputElement).value.trim(),
+      dir,
+      label: ($('pnew-label') as HTMLInputElement).value.trim() || undefined,
+    });
+    for (const f of ['pnew-dir', 'pnew-name', 'pnew-label']) ($(f) as HTMLInputElement).value = '';
   });
 
   $('projects').querySelectorAll<HTMLElement>('.pcard').forEach((card) => {
     const id = card.dataset.project!;
-    card.querySelector('[data-act="add"]')?.addEventListener('click', () => send({ t: 'addProjectSession', projectId: id }));
+    card.querySelector('[data-act="add"]')?.addEventListener('click', () => {
+      const label = prompt('새 세션 이름 (비우면 "세션 N")', '')?.trim();
+      if (label === undefined) return; // cancelled
+      send({ t: 'addProjectSession', projectId: id, label: label || undefined });
+    });
     card.querySelector('[data-act="archive"]')?.addEventListener('click', () => {
       if (confirm('이 프로젝트를 보관할까요? 열려 있는 세션이 모두 닫힙니다. (폴더는 그대로입니다)')) send({ t: 'archiveProject', id });
     });
@@ -100,6 +111,10 @@ export function renderProjects(st: UIState, send: Send) {
       openSession = openSession === id ? null : id;
       if (openSession) send({ t: 'getLogs', employeeId: id });
       renderProjects(st, send);
+    });
+    el.querySelector('[data-act="office"]')?.addEventListener('click', () => {
+      const cur = (st.snap.projects ?? []).flatMap((p) => p.sessions).find((x) => x.id === id);
+      send({ t: 'setSessionInOffice', id, inOffice: !(cur && cur.desk >= 0) });
     });
     el.querySelector('[data-act="stop"]')?.addEventListener('click', () => send({ t: 'stop', employeeId: id }));
     el.querySelector('[data-act="close"]')?.addEventListener('click', () => {
