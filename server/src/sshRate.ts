@@ -48,12 +48,21 @@ export class SshThrottle {
     return Math.max(0, 60_000 - (now - kept[0]) + 50);
   }
 
-  /** Wait for a slot, up to `maxWaitMs`. Resolves true when taken, false on timeout. */
+  /** Wait for a slot, up to `maxWaitMs`, and take it. Resolves true when taken, false on timeout. */
   async reserve(key: string, maxWaitMs = 70_000): Promise<boolean> {
+    if (!(await this.waitForSlot(key, maxWaitMs))) return false;
+    return this.allow(key);
+  }
+
+  /**
+   * Wait until a slot is free WITHOUT taking it — for callers whose actual spawn takes the slot
+   * itself, so there is exactly one place that spends budget and no double counting.
+   */
+  async waitForSlot(key: string, maxWaitMs = 70_000): Promise<boolean> {
     const deadline = Date.now() + maxWaitMs;
     for (;;) {
-      if (this.allow(key)) return true;
       const wait = this.waitMs(key);
+      if (wait === 0) return true;
       if (Date.now() + wait > deadline) return false;
       await new Promise((r) => setTimeout(r, Math.min(wait, 2_000)));
     }

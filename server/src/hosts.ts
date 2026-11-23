@@ -68,6 +68,11 @@ mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
  * stream-json protocol that rides this pipe.
  */
 export function spawnRemote(cfg: HostConfig, a: SpawnArgs): SpawnedProcess {
+  // The budget is spent HERE, not in the caller: this is the only way a session reaches a server,
+  // so no future caller can route around the limit. Callers that can wait should call
+  // sshThrottle.waitForSlot() first (which does not consume) to avoid failing needlessly.
+  if (!sshThrottle.allow(cfg.ssh))
+    throw new Error(`ssh 횟수 제한 (${cfg.ssh}: 분당 ${sshThrottle.limitFor(cfg.ssh)}회) — 잠시 후 다시 시도하세요`);
   // stdio is all pipes, so stdin/stdout are non-null — ChildProcess types them as nullable
   return spawn('ssh', [...SSH_BASE, cfg.ssh, remoteCommand(cfg, a)], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedProcess;
 }
@@ -117,7 +122,7 @@ export class Host {
    */
   private async exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
     if (!this.isLocal && !sshThrottle.allow(this.cfg.ssh))
-      return { code: -1, stdout: '', err: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.perMinute}회) — 이번 확인은 건너뜁니다` };
+      return { code: -1, stdout: '', err: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.limitFor(this.cfg.ssh)}회) — 이번 확인은 건너뜁니다` };
     const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_SHORT, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';

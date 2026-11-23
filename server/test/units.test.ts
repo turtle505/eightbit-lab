@@ -1291,3 +1291,34 @@ describe('ssh budget for agent commands', async () => {
     for (let i = 0; i < 50; i++) expect(t.allow('desktop', t0)).toBe(true); // opted out
   });
 });
+
+describe('ssh budget: nothing routes around it', async () => {
+  const { SshThrottle } = await import('../src/sshRate.ts');
+  const { spawnRemote, setSshLimit, sshThrottle } = await import('../src/hosts.ts');
+
+  it('the spawn itself refuses when over budget, so a new caller cannot skip the check', () => {
+    setSshLimit(2);
+    const cfg: any = { id: 't', name: 't', ssh: 'nonexistent-test-host', projectRoot: '~/x', claudePath: '/bin/true' };
+    const args: any = { command: 'claude', args: ['--version'], cwd: '/tmp', env: {} };
+    // two go through (they fail to connect, which is fine — we only care that budget is spent)
+    for (let i = 0; i < 2; i++) spawnRemote(cfg, args).kill('SIGKILL');
+    expect(() => spawnRemote(cfg, args)).toThrow(/분당 2회/);
+    setSshLimit(5);
+  });
+
+  it('waitForSlot does not consume, so the slot is counted exactly once', async () => {
+    const t = new SshThrottle(1);
+    expect(await t.waitForSlot('h', 50)).toBe(true);
+    expect(t.used('h')).toBe(0); // waiting alone spends nothing
+    expect(t.allow('h')).toBe(true);
+    expect(t.used('h')).toBe(1);
+    expect(await t.waitForSlot('h', 50)).toBe(false); // now it really is full
+  });
+
+  it('reports the host-specific limit, not the office default', () => {
+    const t = new SshThrottle(5);
+    t.setLimit('strict', 1);
+    expect(t.limitFor('strict')).toBe(1);
+    expect(t.limitFor('other')).toBe(5);
+  });
+});

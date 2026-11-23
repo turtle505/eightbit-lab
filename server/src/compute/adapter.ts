@@ -31,7 +31,7 @@ export interface Exec {
 export const sshExec: Exec = (host, script, timeoutMs = 30_000) =>
   new Promise((resolve) => {
     if (!sshThrottle.allow(host)) {
-      resolve({ code: -1, stdout: '', stderr: `ssh 횟수 제한 (${host}: 분당 ${sshThrottle.perMinute}회)` });
+      resolve({ code: -1, stdout: '', stderr: `ssh 횟수 제한 (${host}: 분당 ${sshThrottle.limitFor(host)}회)` });
       return;
     }
     // polled every 20-60s, so it shares one master connection per host (see hosts.ts sshControlOpts)

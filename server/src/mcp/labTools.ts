@@ -87,7 +87,10 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
               ? ['cp', ['-r', remote_path, dest]]
               : ['scp', ['-r', '-o', 'BatchMode=yes', `${cfg.ssh_host}:${remote_path}`, dest]];
             if (!local && !(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
-              return text(`ssh 횟수 제한 (${cfg.ssh_host}: 분당 ${sshThrottle.perMinute}회)으로 지금은 가져올 수 없습니다. 잠시 후 다시 시도하세요.`, true);
+              return text(
+                `ssh 횟수 제한 (${cfg.ssh_host}: 분당 ${sshThrottle.limitFor(cfg.ssh_host)}회)으로 지금은 가져올 수 없습니다. 잠시 후 다시 시도하세요.`,
+                true,
+              );
             const code = await new Promise<number>((res) => {
               const p = spawn(cmd, args, { stdio: 'ignore' });
               p.on('close', (c) => res(c ?? -1));

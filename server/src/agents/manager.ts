@@ -592,8 +592,9 @@ export class AgentManager {
     const remote = e.role.host ? this.hosts?.get(e.role.host) : undefined;
     if (remote && !remote.isLocal) {
       if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', `⏳ ${remote.view.name} 접속 차례 기다리는 중`);
-      if (!(await sshThrottle.reserve(remote.cfg.ssh, 70_000))) {
-        this.log(e, 'error', `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.perMinute}회)으로 세션을 열지 못했습니다`);
+      // wait without consuming — spawnRemote takes the slot, so it is counted exactly once
+      if (!(await sshThrottle.waitForSlot(remote.cfg.ssh, 70_000))) {
+        this.log(e, 'error', `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.limitFor(remote.cfg.ssh)}회)으로 세션을 열지 못했습니다`);
         this.set(e, 'error', '⚠️ ssh 횟수 제한');
         return;
       }
