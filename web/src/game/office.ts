@@ -12,8 +12,12 @@ const COL_X = [40, 170, 300];
 const GRID_TOP = 92;
 const ROW_H = 72;
 const MIN_ROWS = 2;
-/** canvas height for a given number of grid rows (2 rows = the original 240) */
-export const heightFor = (rows: number) => GRID_TOP + Math.max(MIN_ROWS, rows) * ROW_H + 4;
+/**
+ * Canvas height for a given number of grid rows. The bottom strip (manager desk, reception, lead)
+ * needs room of its own below the last row, or the reception desk lands on top of it.
+ */
+const BOTTOM_H = 20;
+export const heightFor = (rows: number) => GRID_TOP + Math.max(MIN_ROWS, rows) * ROW_H + BOTTOM_H;
 /** rows needed to seat the highest grid slot in use */
 export const rowsFor = (maxSlot: number) => Math.max(MIN_ROWS, Math.floor(Math.max(0, maxSlot) / COLS) + 1);
 /** current canvas height; grows as desks are added (see OfficeScene.layout) */

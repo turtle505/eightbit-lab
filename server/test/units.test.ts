@@ -1135,8 +1135,11 @@ describe('office seating', async () => {
     expect(rowsFor(5)).toBe(2); // 3 columns × 2 rows = slots 0..5
     expect(rowsFor(6)).toBe(3);
     expect(rowsFor(11)).toBe(4);
-    expect(heightFor(2)).toBe(240); // unchanged from before the server room came out
-    expect(heightFor(3)).toBe(312);
+    // the bottom strip (manager, reception, lead) needs its own band below the last row,
+    // or the reception desk clips the row above it
+    expect(heightFor(2)).toBe(256);
+    expect(heightFor(3)).toBe(328);
+    expect(heightFor(3) - heightFor(2)).toBe(72); // one row taller, nothing else moves
   });
 
   it('a session only takes a desk once it is let into the office, and gives it back', () => {
