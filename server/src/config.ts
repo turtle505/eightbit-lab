@@ -24,6 +24,8 @@ export interface OfficeConfig {
   sessionIdleMinutes: number;
   /** machines sessions can run on; `local` is this machine */
   hosts: HostConfig[];
+  /** shared secret the browser/scripts must present; empty = no lock (loopback only) */
+  authToken: string;
 }
 
 /**
@@ -169,6 +171,7 @@ export function loadOffice(): OfficeConfig {
       : null,
     permissionMode: c.permissionMode === 'ask' ? 'ask' : 'auto',
     sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
+    authToken: String(c.authToken ?? '').trim(),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };

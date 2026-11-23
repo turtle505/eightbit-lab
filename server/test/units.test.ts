@@ -1032,3 +1032,42 @@ describe('removing a role from roles.yaml', async () => {
     expect(s.reassignUnknown(['lit', 'eval', 'sec', 'exec'])).toBe(0); // idempotent
   });
 });
+
+describe('office token lock', async () => {
+  const { isAuthorized, tokenMatches, parseCookies, COOKIE, cookieHeader, suggestToken } = await import('../src/auth.ts');
+  const TOKEN = 's3cret-office-token';
+  const req = (headers: Record<string, string>) => ({ headers });
+
+  it('open when no token is configured (loopback-only, as before)', () => {
+    expect(isAuthorized(req({}), '')).toBe(true);
+  });
+
+  it('lets in the browser cookie and the script header, nothing else', () => {
+    expect(isAuthorized(req({ cookie: `${COOKIE}=${TOKEN}` }), TOKEN)).toBe(true);
+    expect(isAuthorized(req({ 'x-office-token': TOKEN }), TOKEN)).toBe(true);
+    expect(isAuthorized(req({}), TOKEN)).toBe(false);
+    expect(isAuthorized(req({ cookie: `${COOKIE}=wrong` }), TOKEN)).toBe(false);
+    expect(isAuthorized(req({ 'x-office-token': TOKEN + 'x' }), TOKEN)).toBe(false);
+    expect(isAuthorized(req({ cookie: 'other=1; junk' }), TOKEN)).toBe(false);
+  });
+
+  it('compares tokens of different lengths without throwing', () => {
+    expect(tokenMatches('short', TOKEN)).toBe(false);
+    expect(tokenMatches(TOKEN, TOKEN)).toBe(true);
+    expect(tokenMatches('', TOKEN)).toBe(false);
+    expect(tokenMatches(undefined, TOKEN)).toBe(false);
+  });
+
+  it('reads cookies with spaces, encoding and junk around them', () => {
+    const c = parseCookies(`a=1; ${COOKIE}=${encodeURIComponent('tok en/+=')}; b=2`);
+    expect(c[COOKIE]).toBe('tok en/+=');
+    expect(parseCookies(undefined)).toEqual({});
+  });
+
+  it('sets a cookie a page script cannot read or send cross-site', () => {
+    const h = cookieHeader(TOKEN);
+    expect(h).toContain('HttpOnly');
+    expect(h).toContain('SameSite=Strict');
+    expect(suggestToken()).toMatch(/^[A-Za-z0-9_-]{32}$/);
+  });
+});

@@ -19,6 +19,7 @@ import { UsageMonitor } from './usage.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
+import { cookieHeader, isAuthorized, loginPage, suggestToken, tokenMatches } from './auth.ts';
 import { HostRegistry } from './hosts.ts';
 import { mkdirSync } from 'node:fs';
 
@@ -329,6 +330,22 @@ function handleApi(req: import('node:http').IncomingMessage, res: import('node:h
   const json = (code: number, body: unknown) => res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
   if (!sameOrigin(req)) return json(403, { error: 'cross-origin request refused' });
 
+  // the one route that may be reached without the token
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.length < 64 && chunks.push(c));
+    req.on('end', () => {
+      const token = new URLSearchParams(Buffer.concat(chunks).toString()).get('token') ?? '';
+      if (!tokenMatches(token, office.authToken)) {
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(true));
+        return;
+      }
+      res.writeHead(303, { location: '/', 'set-cookie': cookieHeader(office.authToken) }).end();
+    });
+    return;
+  }
+  if (!isAuthorized(req, office.authToken)) return json(401, { error: '사무실 토큰이 필요합니다' });
+
   if (url.pathname === '/api/upload' && req.method === 'POST') {
     if (req.headers['x-office-upload'] !== '1') return json(403, { error: 'X-Office-Upload header required' });
     const declared = Number(req.headers['content-length'] ?? 0);
@@ -372,6 +389,10 @@ function handleApi(req: import('node:http').IncomingMessage, res: import('node:h
 const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
+  if (!isAuthorized(req, office.authToken)) {
+    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(false));
+    return;
+  }
   let p = resolve(DIST, '.' + decodeURIComponent(url.pathname));
   if (!p.startsWith(DIST) || !existsSync(p) || statSync(p).isDirectory()) p = resolve(DIST, 'index.html');
   if (!existsSync(p)) {
@@ -386,9 +407,15 @@ const wss = new WebSocketServer({
   server: http,
   path: '/ws',
   verifyClient: ({ origin, req }, done) => {
-    if (allowedOrigin(origin, office.port)) return done(true);
-    console.warn(`⛔ 다른 사이트에서 온 WebSocket 연결 거부: ${origin} (${req.socket.remoteAddress})`);
-    done(false, 403, 'cross-origin websocket refused');
+    if (!allowedOrigin(origin, office.port)) {
+      console.warn(`⛔ 다른 사이트에서 온 WebSocket 연결 거부: ${origin} (${req.socket.remoteAddress})`);
+      return done(false, 403, 'cross-origin websocket refused');
+    }
+    if (!isAuthorized(req, office.authToken)) {
+      console.warn(`⛔ 토큰 없는 WebSocket 연결 거부 (${req.socket.remoteAddress})`);
+      return done(false, 401, 'office token required');
+    }
+    done(true);
   },
 });
 wss.on('connection', (ws) => {
@@ -417,5 +444,7 @@ http.listen(office.port, '127.0.0.1', () => {
   setInterval(pollTodos, 3_000);
   attachments.cleanup();
   setInterval(() => attachments.cleanup(), 3600_000);
+  if (office.authToken) console.log('🔑 사무실 토큰 잠금 켜짐 (브라우저는 첫 접속에 한 번 입력, 스크립트는 X-Office-Token 헤더)');
+  else console.warn(`🔓 사무실에 토큰 잠금이 없습니다. desktop 에 SSH 로 들어올 수 있는 사람은 누구나 직원을 조종할 수 있습니다.\n   켜려면 config/office.local.yaml 에:  authToken: "${suggestToken()}"`);
   console.log(`⏰ routines: ${routines.list().map((r) => `${r.name}(${r.schedule}${r.enabled ? '' : ', off'})`).join(', ') || '(none)'}`);
 });
