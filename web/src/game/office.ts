@@ -484,7 +484,7 @@ export class OfficeScene {
     type Desk = { i: number; seat?: 'reception' | 'lead'; lead: boolean; local: boolean; status: AgentStatus | null };
     const desks = new Map<string, Desk>();
     const key = (i: number, seat?: string) => `${seat ?? ''}#${i}`;
-    for (let i = 0; i < this.rows * 3; i++) desks.set(key(i), { i, lead: false, local: false, status: null }); // empty grid
+    // only occupied desks are drawn — an office of empty furniture looks abandoned
 
     for (const a of this.actors.values()) {
       const v = a.view;
@@ -638,6 +638,22 @@ export class OfficeScene {
     this.g.drawImage(spr, 150 - SPRITE_W / 2, 206 - SPRITE_H + 2);
   }
 
+  /** A small gold crown above the lead's head. */
+  private drawCrown(cx: number, headTop: number) {
+    const g = this.g;
+    const x = Math.round(cx) - 4;
+    const y = Math.round(headTop) - 4;
+    g.fillStyle = '#b8892e'; // band
+    g.fillRect(x, y + 3, 9, 2);
+    g.fillStyle = '#e8c55a'; // points
+    g.fillRect(x, y, 2, 3);
+    g.fillRect(x + 4, y - 1, 2, 4);
+    g.fillRect(x + 7, y, 2, 3);
+    g.fillRect(x, y + 2, 9, 1);
+    g.fillStyle = '#ff6b6b'; // jewel
+    g.fillRect(x + 4, y + 3, 1, 1);
+  }
+
   private drawActor(a: Actor, seated: boolean) {
     const g = this.g;
     const v = a.view;
@@ -656,6 +672,7 @@ export class OfficeScene {
     g.fillStyle = 'rgba(0,0,0,0.18)';
     g.fillRect(x + 1, Math.round(a.y) - 1, SPRITE_W - 2, 2);
     g.drawImage(spr, x, y);
+    if (v.deskStyle === 'lead') this.drawCrown(x + SPRITE_W / 2, y);
     // selection marker
     if (this.selected === a.id) {
       g.fillStyle = '#ffe066';
