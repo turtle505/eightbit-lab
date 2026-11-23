@@ -1167,3 +1167,25 @@ describe('office seating', async () => {
     for (const v of Object.values(one)) expect(v).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
+
+describe('schema migrations', () => {
+  it('adds the desk column to a project_sessions table made before it existed', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const file = join(mkdtempSync(join(tmpdir(), 'office-mig-')), 'office.db');
+
+    // an older database: project_sessions without `desk`
+    const old = new DatabaseSync(file);
+    old.exec(`CREATE TABLE project_sessions (id TEXT PRIMARY KEY, projectId TEXT NOT NULL, label TEXT NOT NULL,
+      createdAt INTEGER NOT NULL, closedAt INTEGER)`);
+    old.exec(`INSERT INTO project_sessions (id, projectId, label, createdAt) VALUES ('p:old:1', 'old', '세션 1', 1)`);
+    old.close();
+
+    const s = new Store(file);
+    const row = s.listProjectSessions('old')[0];
+    expect(row.desk).toBe(-1); // existing sessions start outside the office, not at desk 0
+    expect(s.setSessionDesk(row.id, true, [0, 1])).toBe(2);
+  });
+});

@@ -121,6 +121,8 @@ export class Store {
     if (!cols.includes('skill')) this.db.exec('ALTER TABLE routines ADD COLUMN skill TEXT');
     const tcols = (this.db.prepare('PRAGMA table_info(tasks)').all() as any[]).map((c) => c.name);
     if (!tcols.includes('createdBy')) this.db.exec('ALTER TABLE tasks ADD COLUMN createdBy TEXT');
+    const pscols = (this.db.prepare('PRAGMA table_info(project_sessions)').all() as any[]).map((c) => c.name);
+    if (pscols.length && !pscols.includes('desk')) this.db.exec('ALTER TABLE project_sessions ADD COLUMN desk INTEGER NOT NULL DEFAULT -1');
     const scols = (this.db.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
     if (!scols.includes('hostId')) this.db.exec('ALTER TABLE sessions ADD COLUMN hostId TEXT');
     if (!tcols.includes('requireApproval')) this.db.exec('ALTER TABLE tasks ADD COLUMN requireApproval INTEGER NOT NULL DEFAULT 0');
