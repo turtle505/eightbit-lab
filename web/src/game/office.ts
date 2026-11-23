@@ -234,19 +234,29 @@ export class OfficeScene {
     c.width = W;
     c.height = H;
     const g = c.getContext('2d')!;
-    // floor — the whole room is office now that the server racks are gone
+    // floor: offset planks with a seam between courses
     for (let y = WALL_H; y < H; y += 8)
       for (let x = 0; x < W; x += 16) {
-        g.fillStyle = (x / 16 + y / 8) % 2 === 0 ? '#b98a5a' : '#b0814f';
+        g.fillStyle = (x / 16 + y / 8) % 2 === 0 ? '#bb8d5d' : '#b08350';
         g.fillRect(x + ((y / 8) % 2) * 8 - 8, y, 16, 8);
       }
     g.fillStyle = '#9c6d40';
     for (let y = WALL_H; y < H; y += 8) g.fillRect(0, y, W, 1);
-    // wall
-    g.fillStyle = '#e3d9c6';
+    for (let y = WALL_H; y < H; y += 8) {
+      g.fillStyle = 'rgba(255,240,210,0.10)'; // a touch of light down each plank
+      g.fillRect(0, y + 1, W, 1);
+    }
+    // wall, with a picture rail and skirting so it reads as a room
+    g.fillStyle = '#e7ddca';
     g.fillRect(0, 0, W, WALL_H);
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    g.fillRect(0, 0, W, 6);
+    g.fillStyle = '#cdbfa6';
+    g.fillRect(0, WALL_H - 8, W, 2);
     g.fillStyle = '#c9bca4';
     g.fillRect(0, WALL_H - 4, W, 4);
+    g.fillStyle = 'rgba(0,0,0,0.10)'; // shadow the wall casts on the floor
+    g.fillRect(0, WALL_H, W, 3);
     // window
     g.fillStyle = '#6b5a45';
     g.fillRect(14, 5, 44, 24);
@@ -273,14 +283,44 @@ export class OfficeScene {
     g.fillStyle = '#7bc4ff';
     g.fillRect(242, 26, 10, 2);
     g.fillRect(258, 26, 12, 2);
+    // ceiling lights: a pool of warm light under each one
+    for (const lx of [80, 200, 320]) {
+      g.fillStyle = '#6e6456';
+      g.fillRect(lx - 1, 0, 2, 5);
+      g.fillStyle = '#d9cfa8';
+      g.fillRect(lx - 9, 5, 18, 3);
+      g.fillStyle = '#fff4cf';
+      g.fillRect(lx - 7, 8, 14, 1);
+      const grad = g.createRadialGradient(lx, WALL_H, 4, lx, WALL_H, 70);
+      grad.addColorStop(0, 'rgba(255,240,200,0.16)');
+      grad.addColorStop(1, 'rgba(255,240,200,0)');
+      g.fillStyle = grad;
+      g.fillRect(lx - 70, WALL_H, 140, 90);
+    }
+    // bookshelf against the right wall, where the server room used to be
+    g.fillStyle = '#6b4a2f';
+    g.fillRect(366, 44, 28, 54);
+    g.fillStyle = '#50371f';
+    g.fillRect(366, 44, 28, 2);
+    for (let r = 0; r < 3; r++) {
+      const sy = 48 + r * 17;
+      g.fillStyle = '#3f2c19';
+      g.fillRect(367, sy + 14, 26, 2);
+      const books = ['#c0504d', '#4f81bd', '#9bbb59', '#e8c55a', '#8064a2'];
+      for (let b = 0; b < 6; b++) {
+        g.fillStyle = books[(r * 6 + b) % books.length];
+        const bh = 10 + ((r + b) % 3);
+        g.fillRect(368 + b * 4, sy + 14 - bh, 3, bh);
+      }
+    }
     // clock on the far right of the wall
-    g.fillStyle = '#8c8c8c';
-    g.fillRect(330, 8, 18, 18);
+    g.fillStyle = '#6e6456';
+    g.fillRect(352, 10, 16, 16);
     g.fillStyle = '#fbfbf7';
-    g.fillRect(332, 10, 14, 14);
+    g.fillRect(353, 11, 14, 14);
     g.fillStyle = '#2e3440';
-    g.fillRect(338, 13, 1, 5);
-    g.fillRect(338, 17, 4, 1);
+    g.fillRect(359, 14, 1, 5);
+    g.fillRect(359, 18, 4, 1);
     // counter + coffee machine
     g.fillStyle = '#7a5537';
     g.fillRect(6, 44, 40, 14);
@@ -291,13 +331,29 @@ export class OfficeScene {
     g.fillRect(28, 40, 4, 4);
     g.fillRect(34, 40, 4, 4);
     // plants
-    paintMap(g, PLANT, PLANT_COLORS, 370, 44);
     paintMap(g, PLANT, PLANT_COLORS, 6, H - 20);
-    paintMap(g, PLANT, PLANT_COLORS, 370, H - 20);
+    paintMap(g, PLANT, PLANT_COLORS, 372, H - 20);
+    // water cooler beside the lounge, so the coffee corner is not alone
+    g.fillStyle = '#cfd8dc';
+    g.fillRect(54, 40, 10, 8);
+    g.fillStyle = '#7fb2ff';
+    g.fillRect(55, 41, 8, 6);
+    g.fillStyle = '#90a4ae';
+    g.fillRect(55, 48, 8, 10);
+    g.fillStyle = '#607d8b';
+    g.fillRect(55, 58, 8, 1);
     // manager desk ("you") is drawn per frame in drawBossRug/drawBossChair/drawBossDesk (y-sorted with the actors)
     // rug under desks
-    g.fillStyle = 'rgba(80,110,140,0.18)';
-    g.fillRect(24, 80, 340, H - 90);
+    // rug under the desk grid, with a border — follows the row count
+    const rugY = GRID_TOP - 14;
+    const rugH = this.rows * ROW_H - 10;
+    g.fillStyle = 'rgba(70,100,130,0.16)';
+    g.fillRect(22, rugY, W - 44, rugH);
+    g.fillStyle = 'rgba(70,100,130,0.22)';
+    g.fillRect(22, rugY, W - 44, 2);
+    g.fillRect(22, rugY + rugH - 2, W - 44, 2);
+    g.fillRect(22, rugY, 2, rugH);
+    g.fillRect(W - 24, rugY, 2, rugH);
     return c;
   }
 
