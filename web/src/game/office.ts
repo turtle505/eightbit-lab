@@ -672,13 +672,6 @@ export class OfficeScene {
       g.fillRect(cx - half + dx, y + 10 + r, 1, 1);
       g.fillRect(cx + half - 1 + dx, y + 10 + r, 1, 1);
     }
-    // high standing collar of the cape, framing the head
-    g.fillStyle = '#b3203a';
-    g.fillRect(x, y + 7, 2, 4);
-    g.fillRect(x + MANAGER_W - 2, y + 7, 2, 4);
-    g.fillStyle = '#ff5a6e';
-    g.fillRect(x, y + 6, 1, 5);
-    g.fillRect(x + MANAGER_W - 1, y + 6, 1, 5);
     g.drawImage(managerSprite(t % 240 < 6), x, y);
     // sparkles twinkling around, each on its own phase
     const spots = [[-13, 2], [12, -3], [-10, 14], [14, 10], [0, -6]];

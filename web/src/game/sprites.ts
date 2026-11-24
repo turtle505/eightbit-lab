@@ -146,23 +146,23 @@ export function professorSprite(blink = false, frame: 0 | 1 = 0): HTMLCanvasElem
   return c;
 }
 
-// The manager (you): a showpiece. Swept glossy-black pompadour, a proper face (brows, eyes, smile, ears),
+// The manager (you): a showpiece. Long glossy black hair over the shoulders, a proper face (brows, eyes, smile),
 // royal-purple velvet suit with gold lapels, crimson tie, pink pocket square, gold chain and belt buckle.
 // 14x20. Cape and sparkles are drawn around it per frame in office.ts.
 const MANAGER = [
-  '....HHhhHH....',
-  '...HHhhhHHHH..',
-  '..HHHHHHHHHHH.',
+  '....HHHHHH....',
+  '...HHHhhHHH...',
+  '..HHHhhHHHHH..',
   '..HHSSSSSSHH..',
   '..HSbbSSbbSH..',
-  '..SSSESSESSS..',
-  '...SSSSnSSS...',
-  '...SSMMMMSS...',
-  '....SSSSSS....',
-  '....WWSSWW....',
-  '..VVLWRRWLVV..',
-  '.VVVVLWRWLVVV.',
-  '.VVQVVLRLVVVV.',
+  '..HSSESSESSH..',
+  '..HSSSSnSSSH..',
+  '..HSSMMMMSSH..',
+  '..HHSSSSSSHH..',
+  '..HHWWSSWWHH..',
+  '.HHVLWRRWLVHH.',
+  '.HHVVLWRWLVHH.',
+  '.HVQVVLRLVVVH.',
   '.SVVVVCRCVVVS.',
   '.SVVVVVYVVVVS.',
   '..VVVVvvVVVV..',
