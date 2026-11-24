@@ -227,6 +227,20 @@ export function effectivePermission(employee: PermissionSetting, requireApproval
   return requireApproval ? 'ask' : employee;
 }
 
+/** Codex asks only after its own sandbox check; auto mode handles routine requests here. */
+export function codexAutoApproval(method: string, input: Record<string, unknown>, mode: PermissionSetting, autoAllow: string[], extraAllow: string[]): boolean {
+  if (mode !== 'auto') return false;
+  if (method === 'item/fileChange/requestApproval') {
+    return !input.grantRoot && (isAutoAllowed(autoAllow, 'Edit') || isAutoAllowed(autoAllow, 'Write') || extraAllow.some((r) => matchesRule(r, 'Edit', input)));
+  }
+  if (method !== 'item/commandExecution/requestApproval') return false;
+  const command = typeof input.command === 'string' ? input.command : '';
+  if (!command || needsLabApproval('Bash', { command })) return false;
+  // Explicit filesystem grants and commands that alter machine or Git state still need a card.
+  if (input.additionalPermissions || /\b(?:sudo|rm|rmdir|dd|mkfs|shutdown|reboot)\b|\bgit\s+(?:reset|clean|push|force-push)\b/.test(command)) return false;
+  return true;
+}
+
 /**
  * Index of the next waiting employee that may start, or -1. Claude employees share the subscription limit
  * (maxConcurrent, FIFO); employees on a provider bypass it and get one slot per provider (one GPU each).
@@ -776,6 +790,7 @@ export class AgentManager {
     let turn: CodexTurn | null = null;
     const tools = new CodexTools();
     e.codexStopped = false;
+    const codexPermission = effectivePermission(e.view.permission, work.requireApproval);
     const skillName = work.text.match(/office:([a-z0-9-]+)/)?.[1];
     const skillPath = skillName ? resolve(ROOT, 'workspaces/office-skills/skills', skillName, 'SKILL.md') : '';
     const skillText = skillPath && existsSync(skillPath) ? `\n\nOffice skill office:${skillName}:\n${readFileSync(skillPath, 'utf8')}` : '';
@@ -788,13 +803,14 @@ export class AgentManager {
         const name = `mcp__${namespace}__${tool}`;
         const readOnly = new Set(['mcp__lab__list_servers', 'mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log', 'mcp__office__office_status', 'mcp__office__list_tasks', 'mcp__office__office_activity', 'mcp__office__list_routines', 'mcp__office__list_skills']);
         const allowed = isAutoAllowed(e.role.autoAllow, name) || work.extraAllow.some((rule) => matchesRule(rule, name, args));
-        if (!allowed && (!readOnly.has(name) || e.view.permission === 'ask' || work.requireApproval)) {
+        if (!allowed && (!readOnly.has(name) || codexPermission === 'ask')) {
           const decision = await this.broker.request(e.role.id, name, args, new AbortController().signal);
           if (decision.behavior !== 'allow') throw new Error(decision.message || 'Manager denied the tool call');
         }
         return tools.call(namespace, tool, args);
       };
-      turn = new CodexTurn(e.role.id, this.broker, tools, callTool, host?.cfg);
+      const autoApprove = (method: string, input: Record<string, unknown>) => codexAutoApproval(method, input, codexPermission, e.role.autoAllow, work.extraAllow);
+      turn = new CodexTurn(e.role.id, this.broker, tools, callTool, autoApprove, host?.cfg);
       e.codexTurn = turn;
       this.sendView(e);
       const result = await turn.start(cwd, prompt, e.view.sessionId, (method, params) => {
@@ -814,7 +830,7 @@ export class AgentManager {
           this.log(e, 'assistant', item.text);
           this.set(e, 'thinking', `💬 ${clip(item.text.replace(/\s+/g, ' '), 55)}`);
         }
-      }, e.view.permission === 'ask' || work.requireApproval);
+      }, codexPermission === 'ask');
       if (e.codexStopped || result.status === 'interrupted') {
         this.set(e, 'idle', tr({ ko: '☕ 대기 중', en: '☕ Idle' }));
         return;

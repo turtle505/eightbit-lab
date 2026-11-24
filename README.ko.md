@@ -152,7 +152,7 @@ employees:
 
 ### Codex 직원
 
-직원의 작업이 끝난 뒤 직원 패널의 실행기 선택에서 **Codex**를 고를 수 있습니다. 선택은 저장되며, Claude로 다시 전환하면 별도로 보존된 Claude 대화를 이어갑니다. Codex는 백엔드 머신의 로컬 app-server와 ChatGPT 로그인을 사용하므로 공식 Codex CLI를 설치하고 `codex login`을 실행하세요. 직원이 원격 host에서 일한다면 그 host에도 설치하고 로그인해야 합니다. 비로그인 SSH 셸에서 CLI를 찾지 못하면 `office.local.yaml`의 해당 host에 절대 경로 `codexPath`를 지정하세요. 화면이 없는 host에서는 `codex login --device-auth`를 사용할 수 있습니다. Codex는 직원 대화를 재개할 때도 해당 host의 CLI 모델 설정을 적용합니다. 계정에서 기본 모델을 거부한다면 그 host의 `~/.codex/config.toml` 맨 위에 `model = "<사용 가능한 모델>"`을 설정하세요. 작업 보드, 보고 피드, 승인 카드, 사무실·랩 도구는 동일하게 사용합니다. Codex 구독 사용량은 상단 Claude 사용량 표시와 별개입니다.
+직원의 작업이 끝난 뒤 직원 패널의 실행기 선택에서 **Codex**를 고를 수 있습니다. 선택은 저장되며, Claude로 다시 전환하면 별도로 보존된 Claude 대화를 이어갑니다. Codex는 백엔드 머신의 로컬 app-server와 ChatGPT 로그인을 사용하므로 공식 Codex CLI를 설치하고 `codex login`을 실행하세요. 직원이 원격 host에서 일한다면 그 host에도 설치하고 로그인해야 합니다. 비로그인 SSH 셸에서 CLI를 찾지 못하면 `office.local.yaml`의 해당 host에 절대 경로 `codexPath`를 지정하세요. 화면이 없는 host에서는 `codex login --device-auth`를 사용할 수 있습니다. Codex는 직원 대화를 재개할 때도 해당 host의 CLI 모델 설정을 적용합니다. 계정에서 기본 모델을 거부한다면 그 host의 `~/.codex/config.toml` 맨 위에 `model = "<사용 가능한 모델>"`을 설정하세요. 작업 보드, 보고 피드, 승인 카드, 사무실·랩 도구는 동일하게 사용합니다. 자동 모드에서는 일반 명령과 파일 변경 승인을 자동 처리하고, SSH·랩 접근, 일부 위험 명령, 추가 파일시스템 권한 요청은 승인 카드로 남깁니다. Codex 구독 사용량은 상단 Claude 사용량 표시와 별개입니다.
 
 <details>
 <summary><b>🖥️ GPU 서버 (job 올리고 추적하기)</b></summary>

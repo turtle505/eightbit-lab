@@ -666,12 +666,23 @@ describe('providers (local model)', async () => {
 });
 
 describe('permission mode', async () => {
-  const { effectivePermission } = await import('../src/agents/manager.ts');
+  const { effectivePermission, codexAutoApproval } = await import('../src/agents/manager.ts');
   it('a 🔒 task only ever tightens', () => {
     expect(effectivePermission('auto', false)).toBe('auto');
     expect(effectivePermission('auto', true)).toBe('ask');
     expect(effectivePermission('ask', false)).toBe('ask');
     expect(effectivePermission('ask', true)).toBe('ask');
+  });
+  it('auto mode handles routine Codex approvals but keeps sensitive requests manual', () => {
+    const command = 'item/commandExecution/requestApproval';
+    const file = 'item/fileChange/requestApproval';
+    expect(codexAutoApproval(command, { command: 'npm test' }, 'auto', [], [])).toBe(true);
+    expect(codexAutoApproval(file, {}, 'auto', ['Edit'], [])).toBe(true);
+    expect(codexAutoApproval(command, { command: 'npm test' }, 'ask', [], [])).toBe(false);
+    expect(codexAutoApproval(command, { command: 'ssh desktop nvidia-smi' }, 'auto', [], [])).toBe(false);
+    expect(codexAutoApproval(command, { command: 'rm -rf data' }, 'auto', [], [])).toBe(false);
+    expect(codexAutoApproval(command, { command: 'npm test', additionalPermissions: { fileSystem: {} } }, 'auto', [], [])).toBe(false);
+    expect(codexAutoApproval(file, { grantRoot: '/other' }, 'auto', ['Edit'], [])).toBe(false);
   });
   it('Store keeps the per-employee mode and task requireApproval', () => {
     const s = new Store(':memory:');

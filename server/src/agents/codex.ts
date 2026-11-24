@@ -23,7 +23,7 @@ export class CodexTurn {
   private text = '';
   readonly done: Promise<{ threadId: string; text: string; status: string; error?: string }>;
 
-  constructor(private employeeId: string, private broker: PermissionBroker, private tools: CodexTools, private callTool: (namespace: string, tool: string, args: Record<string, unknown>) => Promise<{ contentItems: { type: string; text: string }[]; success: boolean }>, host?: HostConfig) {
+  constructor(private employeeId: string, private broker: PermissionBroker, private tools: CodexTools, private callTool: (namespace: string, tool: string, args: Record<string, unknown>) => Promise<{ contentItems: { type: string; text: string }[]; success: boolean }>, private autoApprove: (method: string, input: Json) => boolean, host?: HostConfig) {
     if (host && host.ssh !== 'local') {
       if (!sshThrottle.allow(host.ssh)) throw new Error(`SSH rate limit: ${host.ssh}`);
       const command = `${sq(host.codexPath || 'codex')} app-server --listen stdio://`;
@@ -71,6 +71,10 @@ export class CodexTurn {
     }
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
       const tool = method.includes('commandExecution') ? 'Bash' : 'Edit';
+      if (this.autoApprove(method, input)) {
+        this.write({ id: msg.id, result: { decision: 'accept' } });
+        return;
+      }
       const signal = new AbortController();
       this.onEvent?.('approval/requested', { tool, input });
       const result = await this.broker.request(this.employeeId, tool, input, signal.signal);
