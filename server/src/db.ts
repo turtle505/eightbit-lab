@@ -26,6 +26,39 @@ export interface ProjectSessionRow {
 }
 import type { Engine, FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
 
+interface LegacyLog {
+  id: number;
+  employeeId: string;
+  kind: string;
+  text: string;
+}
+
+/** lines only the Codex runner writes (manager.ts runCodex) */
+const CODEX_LINE = (l: Pick<LegacyLog, 'kind' | 'text'>) =>
+  (l.kind === 'result' && /^(Codex 작업 완료|Codex turn completed)$/.test(l.text)) ||
+  (l.kind === 'error' && /codex/i.test(l.text)) ||
+  (l.kind === 'tool' && (l.text.startsWith('/bin/bash -lc') || l.text === 'File change'));
+
+/**
+ * Which engine wrote each line of one employee's history, for lines from before they were tagged.
+ * A turn runs from a 'user' line to the next; it is Codex if any line in it has a Codex-only shape,
+ * else Claude (lines before the first instruction are Claude: Codex arrived later).
+ */
+export function inferLogEngines(lines: Pick<LegacyLog, 'kind' | 'text'>[]): Engine[] {
+  const out: Engine[] = new Array(lines.length).fill('claude');
+  let start = 0;
+  const close = (end: number) => {
+    if (lines.slice(start, end).some(CODEX_LINE)) out.fill('codex', start, end);
+  };
+  lines.forEach((l, i) => {
+    if (l.kind !== 'user' || i === 0) return;
+    close(i);
+    start = i;
+  });
+  close(lines.length);
+  return out;
+}
+
 const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, engine: r.engine === 'claude' || r.engine === 'codex' ? r.engine : null, attachments });
 
 export interface RoutineRow {
@@ -131,6 +164,28 @@ export class Store {
     if (!tcols.includes('requireApproval')) this.db.exec('ALTER TABLE tasks ADD COLUMN requireApproval INTEGER NOT NULL DEFAULT 0');
     if (!tcols.includes('startAt')) this.db.exec('ALTER TABLE tasks ADD COLUMN startAt INTEGER');
     if (!tcols.includes('engine')) this.db.exec('ALTER TABLE tasks ADD COLUMN engine TEXT');
+    const lcols = (this.db.prepare('PRAGMA table_info(logs)').all() as any[]).map((c) => c.name);
+    if (!lcols.includes('engine')) {
+      this.db.exec('ALTER TABLE logs ADD COLUMN engine TEXT');
+      this.tagLegacyLogs();
+    }
+  }
+
+  /** One-time: tag the history written before lines carried their engine (see inferLogEngines). */
+  private tagLegacyLogs() {
+    const rows = this.db.prepare('SELECT id, employeeId, kind, text FROM logs ORDER BY employeeId, id').all() as unknown as LegacyLog[];
+    if (!rows.length) return;
+    const set = this.db.prepare('UPDATE logs SET engine = ? WHERE id = ?');
+    this.db.exec('BEGIN');
+    try {
+      const byEmp = new Map<string, LegacyLog[]>();
+      for (const r of rows) byEmp.set(r.employeeId, [...(byEmp.get(r.employeeId) ?? []), r]);
+      for (const list of byEmp.values()) inferLogEngines(list).forEach((engine, i) => set.run(engine, list[i].id));
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   // ---- tasks
@@ -373,18 +428,18 @@ export class Store {
 
   // ---- logs
   addLog(l: LogLine) {
-    this.db.prepare('INSERT INTO logs (employeeId, ts, kind, text) VALUES (?, ?, ?, ?)').run(l.employeeId, l.ts, l.kind, l.text);
+    this.db.prepare('INSERT INTO logs (employeeId, ts, kind, text, engine) VALUES (?, ?, ?, ?, ?)').run(l.employeeId, l.ts, l.kind, l.text, l.engine ?? null);
   }
   recentLogs(employeeId: string, limit = 300): LogLine[] {
     const rows = this.db
-      .prepare('SELECT employeeId, ts, kind, text FROM logs WHERE employeeId = ? ORDER BY id DESC LIMIT ?')
+      .prepare('SELECT employeeId, ts, kind, text, engine FROM logs WHERE employeeId = ? ORDER BY id DESC LIMIT ?')
       .all(employeeId, limit) as unknown as LogLine[];
     return rows.reverse();
   }
 
   logsSince(ts: number, limit = 400): LogLine[] {
     const rows = this.db
-      .prepare('SELECT employeeId, ts, kind, text FROM logs WHERE ts >= ? ORDER BY id DESC LIMIT ?')
+      .prepare('SELECT employeeId, ts, kind, text, engine FROM logs WHERE ts >= ? ORDER BY id DESC LIMIT ?')
       .all(ts, limit) as unknown as LogLine[];
     return rows.reverse();
   }

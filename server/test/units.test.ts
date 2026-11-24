@@ -1000,6 +1000,20 @@ describe('live sessions', async () => {
     expect(seen).toHaveLength(1);
   });
 
+  it('log lines carry the engine of the conversation they belong to', async () => {
+    const sdk = fakeSdk();
+    const { m, store } = makeManager(sdk);
+    m.instruct('lit', 'on claude');
+    await settle();
+    (m as any).runCodex = async (e: any) => (m as any).log(e, 'assistant', 'codex says hi');
+    m.instruct('lit', 'on codex', null, { engine: 'codex' });
+    await settle();
+    const lines = store.recentLogs('lit');
+    expect(lines.filter((l) => l.engine === 'claude').map((l) => l.text)).toContain('on claude');
+    expect(lines.filter((l) => l.engine === 'codex').map((l) => l.text)).toEqual(expect.arrayContaining(['on codex', 'codex says hi']));
+    expect(lines.every((l) => l.engine === 'claude' || l.engine === 'codex')).toBe(true);
+  });
+
   it('a local-model employee ignores a Codex override', async () => {
     const sdk = fakeSdk();
     const { m, store } = makeManager(sdk);
@@ -1842,5 +1856,53 @@ describe('lead picks the engine per task', async () => {
     expect('engine' in r2 && r2.engine).toBe('claude'); // that one was routed to Codex
     expect(planTaskEngine({ reviewOf: done.id, engine: 'claude' }, s.listTasks(), emps)).toMatchObject({ engine: 'claude' });
     expect(planTaskEngine({ reviewOf: 999 }, s.listTasks(), emps)).toEqual({ error: 'reviewOf: there is no task #999.' });
+  });
+});
+
+describe('log history per engine', async () => {
+  const { inferLogEngines } = await import('../src/db.ts');
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const L = (kind: string, text: string) => ({ kind, text });
+
+  it('tags old turns by the shapes only the Codex runner writes', () => {
+    const lines = [
+      L('system', 'boot'), // before any instruction → claude
+      L('user', 'a'), L('system', '🧠 모델: claude'), L('result', '완료 (2 turns, 3s)'),
+      L('user', 'b'), L('tool', '/bin/bash -lc "ls"'), L('result', 'Codex 작업 완료'),
+      L('user', 'c'), L('tool', 'Bash(ls)'),
+      L('user', 'd'), L('error', 'failed to load configuration: /home/x/.codex/config.toml'),
+      L('user', 'e'), L('tool', 'File change'),
+      L('user', 'f'), L('error', 'Codex: failed'),
+    ];
+    expect(inferLogEngines(lines)).toEqual([
+      'claude',
+      'claude', 'claude', 'claude',
+      'codex', 'codex', 'codex',
+      'claude', 'claude',
+      'codex', 'codex',
+      'codex', 'codex',
+      'codex', 'codex',
+    ]);
+  });
+
+  it('round-trips the engine and backfills a database from before the column', () => {
+    const s = new Store(':memory:');
+    s.addLog({ employeeId: 'x', ts: 1, kind: 'user', text: 'hi', engine: 'codex' });
+    expect(s.recentLogs('x')[0].engine).toBe('codex');
+
+    const path = join(mkdtempSync(join(tmpdir(), 'office-logs-')), 'old.db');
+    const old = new DatabaseSync(path);
+    old.exec('CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, employeeId TEXT NOT NULL, ts INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL)');
+    const ins = old.prepare('INSERT INTO logs (employeeId, ts, kind, text) VALUES (?, ?, ?, ?)');
+    ins.run('lit', 1, 'user', 'old claude turn');
+    ins.run('lit', 2, 'result', '완료 (1 turns, 1s)');
+    ins.run('lit', 3, 'user', 'old codex turn');
+    ins.run('lit', 4, 'result', 'Codex 작업 완료');
+    old.close();
+    const migrated = new Store(path);
+    expect(migrated.recentLogs('lit').map((l) => l.engine)).toEqual(['claude', 'claude', 'codex', 'codex']);
   });
 });

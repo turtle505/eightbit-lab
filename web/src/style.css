@@ -1590,3 +1590,7 @@ body .md-body h4 {
 .card.open { cursor: default; }
 .card.open .card-detail { margin-top: 6px; }
 .col-more { display: block; width: 100%; text-align: center; font-size: 12px; padding: 2px; background: none; border: 0; color: var(--accent); cursor: pointer; }
+.eng-mark { display: inline-block; width: 1.3em; margin-right: 4px; text-align: center; font-size: 10px; font-weight: 700; border-radius: 2px; flex: none; }
+.eng-mark.e-claude { color: var(--accent); }
+.eng-mark.e-codex { color: var(--ok); }
+.emp-logmode { margin-left: auto; font-size: 12px; }

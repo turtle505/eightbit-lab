@@ -380,10 +380,11 @@ export class AgentManager {
   /** the CLI reports the limit as plain text too, e.g. "You've hit your 5-hour limit · resets 4:10am" */
   private static readonly RATE_LIMIT = /rate_limit|hit your .*limit|usage limit/i;
 
-  private log(e: Employee, kind: LogLine['kind'], text: string) {
+  /** `engine` defaults to the engine running now (a task's override, else the employee's own) */
+  private log(e: Employee, kind: LogLine['kind'], text: string, engine?: Engine) {
     if (kind === 'error' && AgentManager.NO_SESSION.test(text)) e.resumeMissing = true;
     if (kind === 'error' && AgentManager.RATE_LIMIT.test(text)) e.rateLimitedUntil ??= Date.now() + LIMIT_FALLBACK_MS;
-    const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text };
+    const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text, engine: engine ?? e.view.turnEngine ?? e.view.engine };
     this.store.addLog(line);
     bus.send({ t: 'log', data: line });
   }
@@ -397,7 +398,9 @@ export class AgentManager {
   ) {
     const e = this.emp(employeeId);
     const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
-    this.log(e, 'user', taskId ? `${tr({ ko: `[작업 #${taskId}]`, en: `[Task #${taskId}]` })} ${text}` : text);
+    // the turn hasn't started, so say which conversation this instruction goes to
+    const engine = opts.engine && !e.role.provider ? opts.engine : e.view.engine;
+    this.log(e, 'user', taskId ? `${tr({ ko: `[작업 #${taskId}]`, en: `[Task #${taskId}]` })} ${text}` : text, engine);
     this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval, attachmentPaths: opts.attachmentPaths ?? [], engine: opts.engine ?? undefined });
   }
 

@@ -438,7 +438,12 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       <div class="row emp-actions">
         <button type="button" id="emp-stop">${tr({ ko: '중지', en: 'Stop' })}</button>
         <button type="button" id="emp-reset" title="${tr({ ko: '대화 맥락을 비우고 새 세션으로 시작', en: 'Clear the conversation and start a new session' })}">${tr({ ko: '새 세션', en: 'New session' })}</button>
+        <button type="button" id="emp-logmode" class="emp-logmode"></button>
       </div>`;
+    $('emp-logmode').addEventListener('click', () => {
+      logAll = !logAll;
+      renderEmployeePanel(st, send);
+    });
     $('emp-stop').addEventListener('click', () => send({ t: 'stop', employeeId: e.id }));
     $('emp-reset').addEventListener('click', () => {
       if (confirm(tr({ ko: '대화 맥락을 비우고 새 세션으로 시작할까요?', en: 'Clear the conversation and start a new session?' }))) send({ t: 'resetSession', employeeId: e.id });
@@ -532,18 +537,32 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       if (nick !== null) send({ t: 'renameEmployee', employeeId: e.id, nick });
     });
   }
-  const lines = st.logs.get(e.id) ?? [];
-  if (changed('emp-log', [e.id, lines.length, lines[lines.length - 1]?.ts])) {
+  // Claude and Codex keep separate conversations: show the one in view (or both, marked)
+  const all = st.logs.get(e.id) ?? [];
+  const lines = logAll ? all : all.filter((l) => !l.engine || l.engine === engineNow);
+  if (changed('emp-log', [e.id, all.length, all[all.length - 1]?.ts, engineNow, logAll, getLang()])) {
+    const btn = $('emp-logmode');
+    btn.textContent = logAll ? tr({ ko: `📜 ${engineName(engineNow)} 기록만`, en: `📜 ${engineName(engineNow)} only` }) : tr({ ko: '📜 전체 기록', en: '📜 All history' });
+    btn.title = logAll
+      ? tr({ ko: `지금 실행기(${engineName(engineNow)})의 대화만 보기`, en: `Show only the ${engineName(engineNow)} conversation` })
+      : tr({ ko: 'Claude와 Codex 기록을 함께 보기 (C/X 표시)', en: 'Show the Claude and Codex history together (marked C/X)' });
     const log = $('emp-log');
-    log.innerHTML = lines
-      .map(
-        (l) =>
-          `<div class="line k-${l.kind}"><span class="ts">${new Date(l.ts).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span><span class="txt">${esc(l.text)}</span></div>`,
-      )
-      .join('');
-    followBottom(`log:${e.id}`, log, lines.length);
+    const mark = (l: LogLine) =>
+      logAll && l.engine ? `<span class="eng-mark e-${l.engine}" title="${l.engine === 'codex' ? 'Codex' : 'Claude'}">${l.engine === 'codex' ? 'X' : 'C'}</span>` : '';
+    log.innerHTML = lines.length
+      ? lines
+          .map(
+            (l) =>
+              `<div class="line k-${l.kind}">${mark(l)}<span class="ts">${new Date(l.ts).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span><span class="txt">${esc(l.text)}</span></div>`,
+          )
+          .join('')
+      : `<p class="muted small">${tr({ ko: `아직 ${engineName(engineNow)} 대화 기록이 없습니다.`, en: `No ${engineName(engineNow)} conversation yet.` })}</p>`;
+    followBottom(`log:${e.id}:${logAll ? 'all' : engineNow}`, log, lines.length);
   }
 }
+
+/** employee log: every line (marked by engine) instead of only the conversation in view */
+let logAll = false;
 
 export function bindNewTaskForm(send: Send) {
   const form = $('task-form') as HTMLFormElement;

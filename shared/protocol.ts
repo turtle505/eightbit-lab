@@ -169,6 +169,8 @@ export interface LogLine {
   ts: number;
   kind: 'user' | 'assistant' | 'tool' | 'result' | 'system' | 'error';
   text: string;
+  /** which conversation it belongs to (Claude and Codex keep separate ones); null = untagged legacy line */
+  engine?: Engine | null;
 }
 
 export interface RoutineView {
