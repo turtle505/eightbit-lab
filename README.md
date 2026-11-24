@@ -2,106 +2,153 @@
 
 # 🧬 8-bit Lab
 
-`eightbit-lab` — a pixel-art office of AI agents you hand research and day-to-day work to.
+**A pixel-art office where your AI agents work.** 8-bit Lab runs several Claude Code agents ("employees") side by side, and shows them as little characters at their desks. You're the manager: you hand out work, approve anything risky, and read their reports.
 
-An **AI agent office** for protein-structure deep-learning research. It runs several Claude Code agents (employees) in parallel,
-and in a pixel-art game office you watch their status while giving instructions, approving actions and managing remote GPU jobs.
+It was built for a protein-structure deep-learning lab, so it also knows how to submit and watch GPU jobs on remote servers. But it works fine for any research or day-to-day work.
 
-## Running
+- 🧑‍💻 **Six employees out of the box**: a literature researcher, an evaluation analyst, two research aides, an assistant, and a lead engineer who can hand work to the others.
+- 👀 **See what everyone is doing**: who's typing, running commands, searching the web, or waiting for you.
+- ✋ **You stay in control**: risky actions (anything touching a lab server, deletes, pushes) show up as approval cards.
+- 📨 **Reports come to you**: finished work and saved report files appear in a chat-like feed.
+- ⏰ **Routines**: "every weekday at 9, brief me on new papers". Just ask the assistant.
+- 🖥️ **GPU jobs**: submit, watch and fetch jobs on ssh or Slurm servers. The employee who submitted a job reports back when it finishes.
+- 🌐 **Korean / English**: switch the whole office with one button.
+
+It runs locally on your machine and uses your own **Claude Pro/Max subscription** through the `claude` CLI login. There's no API key.
+
+---
+
+## Quick start
+
+### What you need
+
+- **Node.js 22.5 or newer**. The app uses the built-in `node:sqlite`.
+- **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
+- macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
+
+### Run it
 
 ```bash
+git clone https://github.com/turtle505/eightbit-lab.git
+cd eightbit-lab
 npm install
-npm run dev          # backend (8787) + frontend (5173) together → http://localhost:5173
-# or deployment mode
-npm run build && npm start   # → http://127.0.0.1:8787
+npm run dev
 ```
 
-Authentication reuses this Mac's `claude` CLI login (Pro/Max subscription). Data is stored in `data/office.db` (SQLite).
+Open **http://localhost:5173**. That's it: no config is needed to start.
 
-## Usage
+### Your first five minutes
 
-| What you want | How |
+1. **Click an employee** (or press <kbd>1</kbd>–<kbd>6</kbd>) and type an instruction in the box at the bottom, e.g. *"Find three recent papers on protein structure diffusion models and summarise them."*
+2. Watch them work. The speech bubble shows what they're doing right now.
+3. If they **raise a hand with a `!`**, they need your OK: approve or deny in the yellow approval panel.
+4. When they finish, the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
+
+For bigger jobs, add a **task card** on the board and drag it onto an employee. Finished cards move to *Review* with the report attached.
+
+> 💡 The first instruction to each employee takes a few seconds while their session starts. After that, replies start almost instantly.
+
+---
+
+## Everyday use
+
+| I want to… | Do this |
 |---|---|
-| Give an instruction | Click an employee (or number keys 1–5) → type the instruction in the input box at the bottom |
-| Assign a task | Add a card on the task board → drag the card onto an employee in the office (or use the card's dropdown) |
-| Approve | The employee raises a hand with a `!` → approve/deny in the yellow approval panel |
-| Check results | When a task finishes, its card moves to "Review"; expand `Report`, check it, then "Done" |
-| Today's to-dos | `✅ Today's to-dos` panel: check, edit (double-click), add (＋, ↳) and delete checkboxes of your Obsidian daily note. Changes go straight into the note file, and edits made in Obsidian show up within a few seconds (requires the `obsidian` setting in `office.local.yaml`) |
-| Report feed | `📨 Reports` box: whenever a report file is saved or modified, or a run finishes, it stacks up at the bottom like a chat (Markdown) |
-| Re-read reports | `Reports` tab at the top: browse .md files under `workspaces/<employee>/reports/` as a folder tree, with unread counts. `?view=reports` opens it in its own window |
-| Stop / new session | `Stop` and `New session` in the employee panel (sessions continue by default) |
-| Scheduled work | Routine panel: `+ New routine` to add, edit, delete (with confirmation), enable/disable, `Run now` — or just ask the assistant |
-| Switch views | `Game / Console / Reports` buttons at the top right, or <kbd>`</kbd> (last view is remembered; `?view=console` opens it directly) |
+| Give an instruction | Click an employee → type in the input box |
+| Assign a task | Add a card on the task board → drag it onto an employee (or pick from the card's dropdown) |
+| Approve / deny | Use the yellow approval panel (<kbd>a</kbd> / <kbd>d</kbd> in the console view) |
+| Check results | Finished cards move to **Review**: expand **Report**, then mark it **Done** |
+| Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
+| Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
+| Start fresh | **New session** in the employee panel (clears the conversation) |
+| Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
+| Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
+| Switch language | The **EN / 한국어** button at the top right |
 
-**Subscription usage**: the top bar shows your Claude subscription's **session (5-hour) and weekly usage %** and reset times (plus per-model weekly limits if any). Refreshed every 3 minutes, when an employee finishes work, and on click. It queries through an empty session that uses no tokens; since this is an experimental SDK API, it may show "Usage —" if that changes. The per-employee figure is not a % of the limit but **that employee's share of the whole office's usage**.
+**Views.** *Game* is the pixel office. *Console* shows the same data as tables: staff, tasks, a combined activity feed and approvals, all driven from the keyboard. *Reports* is a reader for report files. Add `?view=console` or `?view=reports` to the URL to open one directly.
 
-**Console view**: a work-oriented view of the same data as the game, as tables. Employee table (status, current activity, task, session, cumulative usage), task table (change status/assignee in place, expand a row to see the instruction and report), activity feed across all employees (filter by employee), approval requests (always shown).
-Shortcuts: <kbd>1</kbd>–<kbd>5</kbd> select employee · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruction input · <kbd>a</kbd>/<kbd>d</kbd> approve/deny the first approval request · <kbd>Esc</kbd> deselect.
+**Keyboard** (console): <kbd>1</kbd>–<kbd>6</kbd> select · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruct · <kbd>a</kbd>/<kbd>d</kbd> approve/deny · <kbd>Esc</kbd> deselect.
 
-Character states: ☕ lounge = idle · typing at the desk = working (monitor colour: blue editing / green running commands / sky blue web research) ·
-`...` = thinking · hand raised with `!` = waiting for approval · walking to the server room = remote GPU work · sparkle = done.
+**What the characters mean**
 
-## Configuration
+| You see | It means |
+|---|---|
+| ☕ In the lounge | Idle |
+| Typing at the desk | Working. The monitor is blue when editing, green when running commands, sky blue when on the web |
+| `...` | Thinking |
+| ✋ Hand up with `!` | Waiting for your approval |
+| ✨ Sparkle | Just finished |
 
-**Put personal settings in `config/<name>.local.yaml`** (not committed to git). They are layered on top of the default files.
-`office.local.yaml` overrides key by key; for the employee, routine and server lists, entries with the same `id` (`name` for servers) are overridden and new ones are added.
-Anything that shouldn't be public — research repo paths, servers, personal routines — goes into `.local.yaml`.
+**Subscription usage.** The top bar shows your Claude plan's **5-hour and weekly usage** and when each resets. The number in each employee's panel is *their share* of the office's total usage, not a percentage of your limit. If the 5-hour window runs out mid-task, the employee pauses and **picks the work up again by itself** when the window resets. **▶️ Resume now** skips the wait.
+
+---
+
+## Customising
+
+Everything lives in `config/`. **Don't edit the committed files for personal settings.** Put them in `config/<name>.local.yaml` next to them instead. Those files are git-ignored and layered on top:
+
+- `office.local.yaml` overrides keys one by one.
+- In the employee, routine and server lists, an entry with the same `id` (servers: `name`) replaces the default, and a new one is added.
 
 ```yaml
-# example config/office.local.yaml
-researchRepo: ~/research/my-protein-model
-maxConcurrent: 4
+# config/office.local.yaml (a typical one)
+language: en              # en | ko: UI and the language employees report in
+maxConcurrent: 3          # employees working at the same time (protects your subscription's rate limit)
+researchRepo: ~/research/my-model   # optional: each engineer gets their own git worktree of this repo
+authToken: ""             # optional: lock the office with a password (see "Safety")
 ```
 
-- `config/office.yaml` — number of employees working at once (`maxConcurrent`, subscription rate-limit protection), model, research repo path
-  - If you set `researchRepo`, the model/data engineers each get a **git worktree** of that repo (branch `office/<id>`) and work without conflicts
-  - If empty, everyone works in `workspaces/shared`
-- `config/roles.yaml` — employee definitions: role prompt, tools allowed without approval (`autoAllow`), character colours
-- `config/routines.yaml` — initial scheduled routines (5-field cron, this Mac's local time, only run while the backend is up). Imported into the DB on first run; later changes are made through the UI/assistant
-  - Default: weekdays 09:00 morning briefing, weekdays 18:00 evening daily report (on) · Fri 17:00 weekly review, weekdays 08:30 Obsidian daily note (off)
-- `config/servers.local.yaml` — GPU servers (copy `servers.example.yaml`, excluded from git). Each server has `type: ssh | slurm`
-  - `ssh_host` is a `~/.ssh/config` alias and **must connect without a password (key auth)**
-  - Employees use servers through the `mcp__lab__*` tools (list_servers, gpu_status, submit_job, job_status, tail_log, cancel_job, fetch_results)
-  - When a job finishes, the employee who submitted it is notified automatically and reports the results
+| File | What it controls |
+|---|---|
+| `config/office.yaml` | Concurrency, model, language, idle timeout, hosts, local models |
+| `config/roles.yaml` | The employees: name, role prompt, tools they may use without asking (`autoAllow`), sprite colours |
+| `config/routines.yaml` | Starter routines: weekday 09:00 morning briefing, weekday 18:00 evening report, Friday 17:00 weekly review (off) |
+| `config/servers.local.yaml` | Your GPU servers (copy `servers.example.yaml`) |
 
-### Language
+**Workspaces.** With `researchRepo` set, each engineer works in their own git worktree (branch `office/<id>`), so they don't step on each other. Without it, everyone shares `workspaces/shared`. Reports go to `workspaces/<employee>/reports/`.
 
-- Set `language: ko` or `language: en` in `config/office.local.yaml` (default `en`). It sets the language of the UI and the language agents report in.
-- The `KO/EN` button in the header switches it at runtime; the choice is remembered and takes precedence over the config file.
-- Agents always get English prompts; only the language they report in follows this setting.
-- Existing logs and feed entries stay in the language they were written in.
-- Routines already stored in the DB are not retranslated (`config/routines.yaml` only seeds ids the DB hasn't seen).
+**The team.** The `common:` block at the top of `roles.yaml` is shared by everyone: report honestly, read before changing, be polite to lab servers, use the report format. Each employee then adds their own role:
 
-## Employee sessions
+| id | Who | What they do |
+|---|---|---|
+| `lit` | Ada | Papers and web research |
+| `eval` | Gauss | Metrics, figures, evaluation reports |
+| `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
+| `sec` | Hana | The assistant: routines, office overview, organising reports |
+| `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
 
-Each employee keeps **one open** Claude Code session, and instructions are pushed into it. A new process is not started for each instruction.
+Removing an employee from `roles.yaml` doesn't lose their task cards. They go back to *unassigned*.
 
-- Only the first instruction is slow (process start, session load, MCP connection). After that it starts right away — measured on assistant 2: **49.6 s → 1.0 s**.
-- An instruction sent while the employee is working is handled **as soon as the current turn ends** (the turn is not cut short).
-- After `sessionIdleMinutes` (default 30) without work the session closes, and the next instruction reopens it, **resuming the conversation**.
-- **Stop** cuts only the current turn and keeps the session alive. To clear the context too, use the **New session** button.
-- Sessions that are merely open and idle don't count towards `maxConcurrent` (employees working at once). Only employees currently in a turn count.
-- The employee panel and console table show `🟢 session open` / `⚪ session idle`.
+**Language.** Employees always get their instructions in English; only the language they *report* in follows the setting. The header button overrides `language:` and is remembered. Old logs and feed entries keep the language they were written in, and routines already saved aren't retranslated.
 
-## Project sessions
+**Routines with the assistant.** Tell Hana *"every Friday at 5, summarise what everyone did this week"*. She asks a few questions, then writes the steps down as an **office skill** (`workspaces/office-skills/skills/<name>/SKILL.md`) and schedules a routine that runs it. A skill can list commands it may run without asking (`office-allow`). That only holds while the file is exactly the version you approved: if it changes, the routine panel shows **⚠️ Needs re-approval**. Routines use 5-field cron in the backend machine's local time, and only run while the backend is up.
 
-In the **Projects** tab, pick a host and a folder, and a Claude Code session opens in that folder. One project can run several sessions, independent of each other
-(the same as `ssh <host>`, `cd ~/project/<name>` and starting several `claude`s).
+---
 
-- The folder **must already exist**. The office doesn't create it. The input lets you pick a subfolder of that host's `projectRoot`.
-- Each session can have a **name** (empty = "Session N"). Rename it later with the same ✏️ button as employees.
-- Each session has its own log and input box. Like employees, sessions persist, and approval cards and the lab-server guard apply the same way.
-- By default a session lives **only in the tab**. Press **"Bring to office"** and it gets a free desk and appears as a character in the game view; take it out and the desk is returned.
-  You only bring in what you want to see, so even with many sessions open, the office shows just the ones you picked.
-  Declaring it as an employee in `roles.yaml` with `host` + `cwd` still works too.
-- Sessions don't appear on the task board or in assignee dropdowns. Finished work shows up in the report feed (📨).
-- Sessions of the same project share a shirt colour family, so they group at a glance.
-- Closing a session discards its conversation (the folder's files stay). Archiving a project closes all its sessions.
-- They use the subscription, so they count towards `maxConcurrent` as well.
+## Optional features
 
-## Running sessions on other machines / moving the backend
+<details>
+<summary><b>🖥️ GPU servers (submit and track jobs)</b></summary>
 
-List machines under `hosts` in `config/office.local.yaml` and give an employee or project `host: <id>`, and its Claude Code session runs on that machine.
+Copy `config/servers.example.yaml` to `config/servers.local.yaml` and list your servers. Each one has `type: ssh` or `type: slurm`, plus an `ssh_host` from your `~/.ssh/config`, which **must log in with a key, without a password**. If the backend itself runs on that machine, use `ssh_host: local`.
+
+Employees then get the `mcp__lab__*` tools: `list_servers`, `gpu_status`, `submit_job`, `job_status`, `tail_log`, `cancel_job` and `fetch_results`. Jobs appear in the jobs panel. When a job finishes, the employee who submitted it is told automatically and reports the result.
+</details>
+
+<details>
+<summary><b>📁 Project sessions (a Claude Code session in any folder)</b></summary>
+
+In the **Projects** tab, pick a host and an existing folder to open a Claude Code session there. It's like `ssh host`, `cd ~/project/x`, `claude`, but with approvals, logs and reports. One project can run several independent sessions.
+
+- Sessions live in the tab. Press **Bring to office** to give one a desk and a character.
+- Sessions share the same approval rules and count towards `maxConcurrent`.
+- Closing a session discards its conversation; the files stay.
+</details>
+
+<details>
+<summary><b>🌍 Running sessions on another machine / moving the backend</b></summary>
+
+List machines under `hosts` in `office.local.yaml`, then give an employee or project `host: <id>`:
 
 ```yaml
 hosts:
@@ -109,133 +156,106 @@ hosts:
   - { id: gpu1, name: "🧮 gpu1", ssh: gpu1, projectRoot: "~/project", claudePath: "/home/me/.local/bin/claude" }
 ```
 
-- `ssh: local` = the machine the backend runs on. Anything else is an alias from `~/.ssh/config` (key auth required).
-- **Connections per minute**: `sshPerMinute` (default 5). For a per-server value, set `sshPerMinute` on the `hosts` entry (`0` = no limit for that server).
-  **The `ssh`, `scp` and `rsync` that employees run through Bash share the same limit** — over it, the call is denied right away without even an approval card, and the employee is told to retry in a few seconds.
-  The host badge shows `ssh per minute 3/5` as a tooltip, and above 80% of the limit a visible `⏳ 4/5` appears.
-- (What follows are the mechanisms that actually enforce that limit)
-- **Connection limit details**: `sshPerMinute` (default 5). Caps the ssh/scp the office opens to one host at that many per minute.
-  Health checks and GPU polling skip the round when over (one skipped round doesn't mark the server as down), and opening a session waits until a slot frees up.
-  `ssh`/`scp` that employees run directly through Bash go through a manager approval card every time anyway.
-- **Mind the connection count**: shared servers sometimes ban clients that open ssh/scp too often. So **short, frequent commands** such as health checks, folder listings and GPU polling
-  **share one ssh connection per host** (`ControlMaster`, sockets in `data/ssh/`). Sessions deliberately use their own connections — so one dropping doesn't take the rest down with it.
-  **A host's health is checked only once, at startup.** While it stays reachable, it isn't poked periodically — an idle server gets zero connections.
-  (Only after a failed connection does it retry with growing intervals; it also re-checks when opening a session and via the ↻ button in the employee panel.
-  The trade-off is that the badge can go stale: if a server goes down, you won't know until something uses it.)
-- **Use an absolute path for `claudePath`**: non-interactive ssh usually doesn't put `~/.local/bin` on PATH.
-- Each machine needs its own claude CLI install and subscription login. It's checked with `claude --version` every 30 seconds, and sessions don't start on a dead machine.
-- A session ID only means something on the machine that holds its history. If you move an employee to another machine or **move the backend itself**, it automatically starts in a new session.
-- Remote sessions can't read attachments (the files are on the backend's disk). `mcp__lab__fetch_results` also downloads to the backend's disk.
+- `ssh: local` is the backend's own machine. Anything else is an ssh alias (key auth).
+- Each machine needs its own `claude` install and login. Give `claudePath` as an **absolute path**, because non-interactive ssh usually lacks `~/.local/bin`.
+- Remote sessions can't read attachments, which live on the backend's disk.
+- A conversation only exists on the machine that ran it, so moving an employee starts a new session.
 
-**To move the backend to a server**: `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`.
-rsync `data/office.db` and `workspaces/` and tasks, routines and attachments carry over (attachment paths are stored relative to `workspaceRoot`).
-In that server's `servers.local.yaml`, set itself to `ssh_host: local` so it doesn't go through ssh.
-To keep using the Obsidian to-do panel, sync the vault to that server (Syncthing etc.) and point `obsidian.vault` at the copy.
-**Don't run it on the Mac and the server at the same time** — routines would run twice.
+**Shared servers dislike noisy clients**, so the office is careful with ssh:
 
-## Access lock (`authToken`)
+- Short commands reuse one connection per host.
+- A reachable host is checked once and then left alone.
+- Each host has a budget of `sshPerMinute` connections (default 5; set per host on its `hosts` entry, `0` = unlimited). Employees' own `ssh`/`scp`/`rsync` count towards it too. Over the budget, the command is refused with a "try again in N seconds" message.
+- The host badge shows ⏳ when the budget is nearly spent.
 
-Put a token in `config/office.local.yaml` and the office is locked. Leave it empty and it isn't (at startup it prints a warning along with a token you could use).
+**Moving the backend to a server:** `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`. Copy `data/office.db` and `workspaces/` across to keep tasks, routines and attachments. Don't run two backends at once, or routines will fire twice.
+</details>
+
+<details>
+<summary><b>✅ Today's to-dos from Obsidian</b></summary>
+
+Point the office at your vault and the **✅ Today's to-dos** panel shows today's daily note. You can tick, edit (double-click), add and delete items. Changes are written straight to the note, and edits made in Obsidian show up within seconds. If the line changed in Obsidian meanwhile, the office refuses your edit rather than overwrite it.
 
 ```yaml
-authToken: "a-long-random-string-here"
+obsidian:
+  vault: /path/to/vault
+  daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"
+```
+</details>
+
+<details>
+<summary><b>📎 Attachments</b></summary>
+
+Drop files on 📎 in the task form or on an employee's input box (up to 50 MB each). The employee gets the file paths with the instruction.
+
+- CSV, text, JSON, images and PDF are read directly.
+- On macOS, Word, RTF, ODT and HTML files also get a `.txt` conversion.
+- Excel files are read with pandas.
+- Uploads you never attach to anything are deleted after 24 hours.
+</details>
+
+<details>
+<summary><b>🦙 An employee on a local model (Ollama)</b></summary>
+
+Any employee can run on an Ollama model instead of your subscription, which is good for light work like summaries and notes. Add a provider and point an employee at it with `provider: <id>` in `roles.local.yaml`:
+
+```yaml
+providers:
+  - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
 ```
 
-- **Browser**: enter it once on first visit and it's remembered in a cookie (HttpOnly, SameSite=Strict).
-- **Scripts / curl**: the `X-Office-Token: <token>` header.
-- Checked on both the WebSocket and `/api`; both sides are hashed before comparison, so neither length nor timing leaks.
+- The office opens the ssh tunnel itself and health-checks it.
+- Start Ollama with a **64k+ context** (`OLLAMA_CONTEXT_LENGTH=65536 ollama serve`), because Claude Code's own prompt is over 20k tokens.
+- Pick the model from the employee panel.
+- These employees don't count towards `maxConcurrent`.
+</details>
 
-**Why it's needed**: the backend listens only on loopback, but anyone who can SSH into that machine can reach the port.
-If `authorized_keys` holds several keys, "people who can log in to the server" and "people who can control the employees" become the same group. The token separates the two.
+---
 
-## Access scope
+## Safety
 
-The backend binds only to `127.0.0.1`, and accepts browser requests **only when the Origin is the office itself or the vite dev server (5173)** (both WebSocket and `/api`).
-CORS doesn't apply to WebSockets, so without this check any web page the manager has open could attach to `ws://127.0.0.1:8787/ws` and instruct employees or click approvals on their behalf.
+Agents can read untrusted web pages and papers, so the office keeps a few guard rails on.
 
-## Attachments
+- **Auto mode by default.** Each employee runs in **🤖 Auto**: a classifier approves clearly safe tool calls, and anything unclear becomes an approval card. Switch an employee to **✋ Ask** to approve everything yourself.
+- **Lab servers always ask.** Submitting, cancelling or fetching jobs on another machine, and any `ssh`/`scp`/`rsync`/`sftp` command, always show an approval card, even in auto mode. So one hidden instruction in a web page can't run commands on your GPU server. Read-only checks (GPU status, job status, logs) don't ask.
+- **🔒 per task.** Tick 🔒 on a task card and that task asks for every tool outside the employee's allow-list.
+- **Loopback only.** The backend listens on `127.0.0.1` and refuses browser requests from other origins, so a random web page you have open can't drive the office.
+- **Optional password.** Set `authToken` in `office.local.yaml` if other people can log in to the machine. Browsers enter it once and get a cookie; scripts send `X-Office-Token: <token>`.
 
-Pick or drag-and-drop files onto 📎 in the task form (`Attach` in the console) or onto an employee's instruction box to attach them (50 MB per file).
-Files are stored in `workspaces/attachments/<date>/`, and a list of `#id name (size, type): absolute path` is appended to the assigned employee's instruction. Every employee session can read this folder.
+---
 
-- csv, txt, json, images (png/jpg/gif/webp) and pdf are read as is. The local model (assistant 2) can read images too.
-- For docx, doc, rtf, odt and html, macOS `textutil` makes a `.txt` conversion next to the upload and its path is given as well. xlsx is read by the employee with pandas/openpyxl.
-- The lead hands received attachments to the assignee via `attachments: [id]` in `create_task`. The 📎 link on a task card opens the original.
-- Uploads not attached to a task or instruction are deleted after 24 hours.
+## Troubleshooting
 
-## Permissions: auto mode / ask for approval
+| Problem | Try |
+|---|---|
+| Usage shows "—" | The usage check uses an experimental API and may be unavailable. Everything else still works |
+| An employee shows ⏸ **Usage limit** | Your 5-hour window ran out. They resume by themselves at the shown time, or press ▶️ **Resume now** |
+| An employee seems stuck | Open their panel and check the log; **Stop**, then instruct again. **New session** if the conversation went off the rails |
+| A host badge says it can't connect | Check `ssh <alias>` works without a password, then press ↻ on the badge |
+| New tool or option not picked up | Long-lived sessions cache tool lists: press **New session** |
 
-- Employees work in **🤖 auto mode** by default. Tools the model classifier deems safe run right away; only unclear ones come up as approval cards.
-  Switch per employee with the `🤖 Auto` / `✋ Ask` button in the employee panel's title bar (applies from the next instruction). The default is `permissionMode` in `office.yaml`.
-- **Calls that reach a lab server always show an approval card, even in auto mode** (`submit_job`/`cancel_job`/`fetch_results`, and Bash commands containing `ssh`, `scp`, `rsync` or `sftp`).
-  This is so that, even if an employee falls for hidden instructions while reading the web or papers, a single classifier decision can't run commands on a GPU server.
-  Read-only tools (`gpu_status`, `job_status`, `tail_log`) stay automatic, and listing something exactly in `autoAllow` or an approved skill's `office-allow` makes it an exception.
-- If you tick **🔒 Require approval** on a task card, that task asks for approval for every tool outside `autoAllow`, even if the assignee is in auto mode.
-  The lead hands off work involving deletion/overwriting, git push, cancelling or bulk-submitting GPU jobs, or sending data outside with `requireApproval: true`.
+---
 
-## Employees
+## For developers
 
-| id | Seat | What they do |
-|---|---|---|
-| `lit` | row 1 | Paper and web research |
-| `eval` | row 1 | Metric computation and interpretation, figures and reports |
-| `aide1` | row 1 | Research aide — no speciality, takes whatever is handed over |
-| `aide2` | row 2 | Research aide |
-| `sec` | row 2 | Routines, office tools, organising reports |
-| `exec` | row 2 (👑) | Lead engineer — does implementation, data and analysis directly, submits GPU jobs, and hands out work |
-
-The six employees fill a 3-column, 2-row grid; project sessions brought into the office sit from the row below (the room grows as rows are added).
-
-The **`common:`** block at the top of `roles.yaml` is prepended to every employee's prompt (project sessions included) —
-shared rules such as honest reporting, reading before changing, lab server etiquette and report format are managed in one place.
-
-If you remove a role from `roles.yaml`, task cards assigned to that person don't disappear; they **return to unassigned** (those in progress go back to to-do).
-
-## The assistant (Hana)
-
-Reception seat next to the manager's desk. Sees the whole office through the `mcp__office__*` tools:
-`office_status` (staff, jobs, servers), `list_tasks`, `office_activity` (per-employee activity over the last N hours), `list_routines`, `create_routine`/`update_routine`/`delete_routine` (routine management), `create_task` (delegate to another employee).
-Delegation and routine changes **need manager approval** by default, and deleting a routine shows an extra confirmation dialog when approved.
-
-### Routine = one skill run
-Tell the assistant "I want a routine that does X every Friday at 5" and, after asking a few questions to pin it down,
-she uses `list_skills` / `save_skill` to create an **office skill** (`workspaces/office-skills/skills/<name>/SKILL.md`, not in git) and registers a routine that runs it.
-Skills are loaded into every employee session as `office:<name>`.
-Tools listed in the skill frontmatter's `office-allow` (e.g. `Bash(python3 "/path/script.py"*)`) run without approval **only in routines that run that skill**.
-This applies only while the file content is exactly what the manager approved; if the file changes, the routine panel shows `⚠️ Needs re-approval`. Reports are saved in `workspaces/secretary/reports/`.
-
-Employee sessions don't see claude.ai integrations (Gmail, Google Calendar, etc.). What they can use are local plugin MCPs (PubMed, bioRxiv, etc.) and skills (daily-note, etc.).
-
-## Assistant 2 (Mini) — local model
-
-Where Hana works on the Claude subscription, assistant 2 works on an **Ollama model on the desktop GPU** (uses no subscription quota; seated by the server room's glass wall).
-It's for light work such as checking status, summaries and notes, and has no web search (WebSearch).
-
-- List the Ollama server under `providers` in `config/office.local.yaml`, add `provider: <id>` to an employee definition, and that employee runs on the local model.
-  ```yaml
-  providers:
-    - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
-  ```
-- The backend opens the `ssh -L 11435:127.0.0.1:11434 desktop` tunnel itself and checks its health every 30 seconds. Ollama only needs to listen on desktop's 127.0.0.1.
-- Claude Code's system prompt and tool definitions alone exceed 20k tokens, so give **Ollama a context of 64k or more**: `OLLAMA_CONTEXT_LENGTH=65536 ollama serve`.
-- Change the model from the dropdown in the employee panel (the list of models installed on desktop). The choice is saved in the DB.
-- Provider employees don't count towards `maxConcurrent` (the subscription concurrency limit), and each provider runs one at a time.
-- Only `kind: ollama` is supported for now. Other backends (e.g. Codex) can be added by adding a `kind` and attaching a runner to AgentManager.
-
-## Structure
-
-```
-shared/protocol.ts        server↔browser message types
-server/src/agents/        AgentManager (Agent SDK sessions, concurrency queue), status mapping, worktree
-server/src/permissions/   approval broker (canUseTool → UI)
-server/src/compute/       ssh / slurm adapters, server polling and job tracking
-server/src/mcp/           lab tools for agents (GPU servers), office tools (for the assistant)
-server/src/routines.ts    scheduled routine scheduler (cron.ts)
-web/src/game/             canvas pixel-art office (original sprites drawn in code)
-web/src/ui/               shared panels (panels.ts), console view (console.ts), view switching (view.ts)
+```bash
+npm run dev         # backend (tsx watch, :8787) + Vite (:5173)
+npm run build && npm start   # production: backend serves dist/ on 127.0.0.1:8787
+npm test            # unit tests (vitest)
+npm run typecheck
 ```
 
-`npm test` — unit tests · `npm run typecheck` — type check
+```
+shared/protocol.ts     every message between server and browser
+shared/i18n.ts         ko/en switch: tr({ ko, en }), locale helpers
+server/src/agents/     AgentManager: one long-lived Agent SDK session per employee, queue, permissions
+server/src/compute/    ssh / slurm adapters, server polling, job tracking
+server/src/mcp/        tools for agents: lab (GPU servers), office (for the assistant)
+web/src/game/          the pixel office (sprites drawn in code)
+web/src/ui/            panels, console, reports, projects
+```
+
+[CLAUDE.md](CLAUDE.md) explains the architecture in detail. Data lives in `data/office.db` (SQLite) and `workspaces/`; both are git-ignored.
 
 ## License
 
