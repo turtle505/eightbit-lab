@@ -1,5 +1,6 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
+import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState, UsageRow } from '../../../shared/protocol.ts';
 import { dowShort, getLang, hhmm, locale, tr } from '../../../shared/i18n.ts';
 
@@ -214,6 +215,7 @@ export function renderBoard(st: UIState, send: Send) {
         const who = emps.find((e) => e.id === t.assignee);
         return `<div class="card" draggable="true" data-id="${t.id}">
           <div class="card-title">#${t.id} ${t.requireApproval ? `<span class="lock" title="${esc(tr({ ko: '승인 받기: 자동 모드여도 도구마다 매니저 승인', en: 'Require approval: every tool needs the manager\'s approval, even in auto mode' }))}">🔒</span> ` : ''}${esc(t.title)}</div>
+          ${t.startAt != null && state === 'todo' ? `<div class="card-when">${scheduledBadge(t)} <button data-act="now">${tr({ ko: '▶ 지금 시작', en: '▶ Start now' })}</button></div>` : ''}
           ${t.detail ? `<div class="card-detail">${esc(t.detail.slice(0, 140))}</div>` : ''}
           ${t.attachments?.length ? `<div class="card-att">📎 ${attachmentLinks(t.attachments)}</div>` : ''}
           ${t.result ? `<details><summary>${tr({ ko: '보고', en: 'Report' })}</summary><div class="card-result">${esc(t.result)}</div></details>` : ''}
@@ -241,6 +243,10 @@ export function renderBoard(st: UIState, send: Send) {
       if (v) send({ t: 'assignTask', taskId: id, employeeId: v });
     });
     card.querySelector('button[data-act="done"]')?.addEventListener('click', () => send({ t: 'moveTask', taskId: id, state: 'done' }));
+    card.querySelector('button[data-act="now"]')?.addEventListener('click', () => {
+      const t = st.snap.tasks.find((x) => x.id === id);
+      if (t?.assignee) send({ t: 'assignTask', taskId: id, employeeId: t.assignee });
+    });
     card.querySelector('button[data-act="del"]')!.addEventListener('click', () => {
       if (confirm(tr({ ko: `작업 #${id}을 삭제할까요?`, en: `Delete task #${id}?` }))) send({ t: 'deleteTask', taskId: id });
     });
@@ -457,6 +463,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
 export function bindNewTaskForm(send: Send) {
   const form = $('task-form') as HTMLFormElement;
   const att = bindAttach(form, $('task-attach'), $('task-chips'));
+  const when = bindSchedule($('task-when'), $('task-when-box'));
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const title = ($('task-title') as HTMLInputElement).value.trim();
@@ -465,8 +472,11 @@ export function bindNewTaskForm(send: Send) {
     const detail = ($('task-detail') as HTMLTextAreaElement).value;
     const assignee = ($('task-assignee') as HTMLSelectElement).value || null;
     const requireApproval = ($('task-lock') as HTMLInputElement).checked;
-    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take() });
+    const startAt = checkSchedule(when.take(), assignee);
+    if (startAt === undefined) return;
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt });
     form.reset();
+    when.reset();
   });
 }
 

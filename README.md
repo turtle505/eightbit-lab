@@ -67,6 +67,7 @@ For bigger jobs, add a **task card** on the board and drag it onto an employee. 
 | Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |
+| Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Ada summarise the new papers"* |
 | Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
 | Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
 | Switch language | The **EN / 한국어** button at the top right |
@@ -207,6 +208,24 @@ obsidian:
 ```
 
 Any plain note works: every `- [ ]` under a `## ` heading is shown, grouped by heading, and a note without headings is read as one list. Optionally, a line that is only **bold text** starts a named group inside a section, and a trailing `↻3` on an item is shown as "carried over 3 times".
+</details>
+
+<details>
+<summary><b>📱 Notifications on your phone</b></summary>
+
+The browser can only notify you while an office tab is open. To hear about approvals, finished work, failed runs, GPU jobs and scheduled starts when you're away, have the office push them to your phone with [ntfy](https://ntfy.sh) (free, no account) or a Slack/Discord webhook:
+
+1. Install the ntfy app and subscribe to a topic with a long random name (e.g. `office-7f3k9q2m`).
+2. Add it to `config/office.local.yaml` on the machine running the backend, and restart:
+   ```yaml
+   notify:
+     ntfy: https://ntfy.sh/office-7f3k9q2m
+     # webhook: https://hooks.slack.com/services/...   # or/also a Slack/Discord incoming webhook
+     # events: [approval, result, error, job, scheduled]
+   ```
+3. `npm run notify:test`: your phone should buzz.
+
+Nothing is sent while an office tab is in front somewhere (`whenAway: false` to always send). Notifications carry only who and what (for example "✅ Ada: 📋 #12 Summarise the paper"), not the reply, unless you set `preview: true`. **Anyone who knows an ntfy.sh topic can read it**, so treat its name like a password, or self-host ntfy.
 </details>
 
 <details>

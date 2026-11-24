@@ -33,6 +33,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p .",
     "start": "node scripts/check-node.mjs && tsx server/src/index.ts",
-    "update": "tsx scripts/update.ts"
+    "update": "tsx scripts/update.ts",
+    "notify:test": "tsx scripts/notify-test.ts"
   }
 }

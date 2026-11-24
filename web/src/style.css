@@ -1527,3 +1527,13 @@ body .md-body h4 {
 .jump-bottom[hidden] {
   display: none;
 }
+
+/* ⏰ scheduled tasks: the form's time row, the badge on cards */
+.when-box { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; }
+.when-box[hidden] { display: none; }
+.when-box input { font: inherit; padding: 2px 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.when-box button { font: inherit; cursor: pointer; }
+.when-btn.on { opacity: 1; border-color: var(--accent); color: var(--accent); }
+.card-when { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 2px 0; }
+.card-when button { font-size: 11px; padding: 0 4px; cursor: pointer; }
+.when-badge { color: var(--accent); white-space: nowrap; font-size: 12px; }

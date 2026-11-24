@@ -1565,3 +1565,108 @@ describe('language', async () => {
     }
   });
 });
+
+describe('phone notifications', async () => {
+  const { Notifier, normalizeNotify, encodeHeader } = await import('../src/notify.ts');
+
+  function make(over: Record<string, unknown> = {}, ok = true) {
+    const calls: { url: string; init: any }[] = [];
+    const n = new Notifier(normalizeNotify({ ntfy: 'https://ntfy.example/topic', ...over } as any));
+    n.fetchFn = (async (url: any, init: any) => {
+      calls.push({ url: String(url), init });
+      if (!ok) throw new Error('offline');
+      return new Response('', { status: 200 });
+    }) as any;
+    return { n, calls };
+  }
+
+  it('is off without a channel, and defaults to every event, no preview, whenAway', () => {
+    expect(normalizeNotify(undefined)).toBeNull();
+    expect(normalizeNotify({ ntfy: '  ' } as any)).toBeNull();
+    const c = normalizeNotify({ ntfy: 'https://x/y' } as any)!;
+    expect(c.events).toEqual(['approval', 'result', 'error', 'job', 'scheduled']);
+    expect(c.preview).toBe(false);
+    expect(c.whenAway).toBe(true);
+    expect(normalizeNotify({ ntfy: 'https://x/y', events: ['approval', 'bogus'] } as any)!.events).toEqual(['approval']);
+  });
+
+  it('sends to ntfy with a title that survives Korean and emoji', async () => {
+    const { n, calls } = make();
+    expect(await n.send('approval', '🔐 승인 요청', 'body', 'high')).toBe(true);
+    expect(calls).toHaveLength(1);
+    const h = calls[0].init.headers;
+    expect(h.Priority).toBe('4');
+    expect(h.Tags).toBe('approval');
+    expect(h.Title).toBe(encodeHeader('🔐 승인 요청'));
+    expect(Buffer.from(h.Title.slice(10, -2), 'base64').toString()).toBe('🔐 승인 요청');
+    expect(encodeHeader('plain')).toBe('plain');
+  });
+
+  it('skips unchosen events and holds back while someone is watching', async () => {
+    const { n, calls } = make({ events: ['approval'] });
+    expect(await n.send('result', 'x')).toBe(false);
+    n.isWatched = () => true;
+    expect(await n.send('approval', 'x')).toBe(false);
+    expect(calls).toHaveLength(0);
+    const { n: n2, calls: c2 } = make({ whenAway: false });
+    n2.isWatched = () => true;
+    expect(await n2.send('approval', 'x')).toBe(true);
+    expect(c2).toHaveLength(1);
+  });
+
+  it('caps the rate and never throws on a dead channel', async () => {
+    const { n, calls } = make();
+    for (let i = 0; i < 25; i++) await n.send('result', `r${i}`);
+    expect(calls).toHaveLength(20);
+    const { n: dead } = make({}, false);
+    await expect(dead.send('result', 'x')).resolves.toBe(false);
+  });
+
+  it('keeps reply text out unless preview is on', () => {
+    expect(make().n.preview('secret result')).toBe('');
+    const long = 'a'.repeat(500);
+    expect(make({ preview: true }).n.preview(long)).toHaveLength(201);
+  });
+
+  it('posts Slack/Discord-shaped JSON to a webhook', async () => {
+    const { n, calls } = make({ ntfy: '', webhook: 'https://hooks.example/abc' });
+    await n.send('job', 'Job #1 done', 'ok');
+    expect(JSON.parse(calls[0].init.body)).toEqual({ text: '*Job #1 done*\nok', content: '*Job #1 done*\nok' });
+  });
+});
+
+describe('scheduled tasks', async () => {
+  const { dueTasks, parseStartAt } = await import('../src/schedule.ts');
+
+  it('stores startAt and clears it on update', () => {
+    const s = new Store(':memory:');
+    const t = s.createTask('later', '', 'lit', null, false, 1_000);
+    expect(t.startAt).toBe(1_000);
+    expect(t.assignee).toBe('lit');
+    expect(t.state).toBe('todo');
+    expect(s.updateTask(t.id, { state: 'doing', startAt: null })!.startAt).toBeNull();
+    expect(s.getTask(t.id)!.startAt).toBeNull();
+    expect(s.createTask('plain', '', null).startAt).toBeNull();
+  });
+
+  it('starts only todo cards whose time has come, with an existing assignee', () => {
+    const s = new Store(':memory:');
+    const due = s.createTask('due', '', 'lit', null, false, 1_000);
+    s.createTask('future', '', 'lit', null, false, 9_000);
+    s.createTask('gone', '', 'ghost', null, false, 1_000);
+    s.createTask('unscheduled', '', 'lit');
+    const started = s.createTask('started', '', 'lit', null, false, 1_000);
+    s.updateTask(started.id, { state: 'doing' });
+    expect(dueTasks(s.listTasks(), 5_000, (id) => id === 'lit').map((t) => t.id)).toEqual([due.id]);
+  });
+
+  it('parses the secretary\'s local time and refuses past or malformed ones', () => {
+    const now = new Date(2026, 0, 30, 12, 0).getTime();
+    const ok = parseStartAt('2026-01-31T09:00', now);
+    expect(ok).toEqual({ ms: new Date(2026, 0, 31, 9, 0).getTime() });
+    for (const bad of ['tomorrow 9am', '2026-01-29T09:00', '2026-02-30T09:00']) {
+      const r = parseStartAt(bad, now);
+      expect('error' in r && r.error).toMatch(/It is now/);
+    }
+  });
+});

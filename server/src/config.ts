@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 import type { PermissionSetting } from '../../shared/protocol.ts';
 import { tr, type Lang } from '../../shared/i18n.ts';
 import { DEFAULT_NOTE_FORMAT, type NoteFormat } from './obsidian.ts';
+import { normalizeNotify, type NotifyConfig } from './notify.ts';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -34,6 +35,8 @@ export interface OfficeConfig {
   language: Lang;
   /** what the team works on, one line; put in front of every prompt as "About this team: …" (empty = left out) */
   domain: string;
+  /** phone / chat notifications; null = off */
+  notify: NotifyConfig | null;
 }
 
 /**
@@ -192,6 +195,7 @@ export function loadOffice(): OfficeConfig {
     sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
     language: c.language === 'ko' ? 'ko' : 'en',
     domain: String(c.domain ?? '').trim(),
+    notify: normalizeNotify(c.notify),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };

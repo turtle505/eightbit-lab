@@ -26,7 +26,7 @@ export interface ProjectSessionRow {
 }
 import type { FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
 
-const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, attachments });
+const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, attachments });
 
 export interface RoutineRow {
   id: string;
@@ -129,6 +129,7 @@ export class Store {
     const scols = (this.db.prepare('PRAGMA table_info(sessions)').all() as any[]).map((c) => c.name);
     if (!scols.includes('hostId')) this.db.exec('ALTER TABLE sessions ADD COLUMN hostId TEXT');
     if (!tcols.includes('requireApproval')) this.db.exec('ALTER TABLE tasks ADD COLUMN requireApproval INTEGER NOT NULL DEFAULT 0');
+    if (!tcols.includes('startAt')) this.db.exec('ALTER TABLE tasks ADD COLUMN startAt INTEGER');
   }
 
   // ---- tasks
@@ -147,20 +148,20 @@ export class Store {
     const r = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     return r ? rowToTask(r, this.attachmentsForTask(id).map(toView)) : undefined;
   }
-  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null = null, requireApproval = false): Task {
+  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null = null, requireApproval = false, startAt: number | null = null): Task {
     const now = Date.now();
     const r = this.db
-      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, now, now);
+      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, startAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, startAt, now, now);
     return this.getTask(Number(r.lastInsertRowid))!;
   }
-  updateTask(id: number, patch: Partial<Pick<Task, 'assignee' | 'state' | 'result'>>): Task | undefined {
+  updateTask(id: number, patch: Partial<Pick<Task, 'assignee' | 'state' | 'result' | 'startAt'>>): Task | undefined {
     const t = this.getTask(id);
     if (!t) return undefined;
     const n = { ...t, ...patch, updatedAt: Date.now() };
     this.db
-      .prepare('UPDATE tasks SET assignee = ?, state = ?, result = ?, updatedAt = ? WHERE id = ?')
-      .run(n.assignee, n.state as TaskState, n.result, n.updatedAt, id);
+      .prepare('UPDATE tasks SET assignee = ?, state = ?, result = ?, startAt = ?, updatedAt = ? WHERE id = ?')
+      .run(n.assignee, n.state as TaskState, n.result, n.startAt, n.updatedAt, id);
     return n;
   }
   /**

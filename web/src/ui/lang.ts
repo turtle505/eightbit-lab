@@ -18,6 +18,8 @@ const STATIC: Record<string, { ko: string; en: string }> = {
   'task.title.long': { ko: '새 작업 제목 (예: 첨부한 논문 요약)', en: 'New task title (e.g. Summarize the attached paper)' },
   'task.title': { ko: '새 작업 제목', en: 'New task title' },
   'task.detail': { ko: '세부 지시 (선택)', en: 'Details (optional)' },
+  'when.title': { ko: '예약: 정한 시각에 담당 직원이 시작', en: 'Schedule: the assignee starts it at the time you pick' },
+  'when.short': { ko: '예약', en: 'Schedule' },
   'attach.form': { ko: '파일 첨부 (폼에 끌어다 놓아도 됨)', en: 'Attach files (or drop them on the form)' },
   'attach.line': { ko: '파일 첨부 (입력줄에 끌어다 놓아도 됨)', en: 'Attach files (or drop them on the input row)' },
   attach: { ko: '첨부', en: 'Attach' },

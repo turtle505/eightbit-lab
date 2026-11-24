@@ -3,6 +3,7 @@ import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, agoText, changed, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
+import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
   todo: { ko: '할 일', en: 'To do' },
@@ -94,7 +95,7 @@ export function renderTaskTable(st: UIState, send: Send) {
         <td class="num">#${t.id}</td>
         <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
           t.attachments?.length ? ` <span class="muted">${tr({ ko: `[첨부 ${t.attachments.length}]`, en: `[${t.attachments.length} files]` })}</span>` : ''
-        }</button></td>
+        }</button> ${scheduledBadge(t)}</td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>
         <td><select data-act="assign">${empOpts(t.assignee)}</select></td>
         <td class="num muted">${ago(t.updatedAt)}</td>
@@ -136,6 +137,7 @@ export function renderTaskTable(st: UIState, send: Send) {
 export function bindConsoleTaskForm(send: Send) {
   const form = $('c-task-form') as HTMLFormElement;
   const att = bindAttach(form, $('c-task-attach'), $('c-task-chips'));
+  const when = bindSchedule($('c-task-when'), $('c-task-when-box'));
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const title = ($('c-task-title') as HTMLInputElement).value.trim();
@@ -144,8 +146,11 @@ export function bindConsoleTaskForm(send: Send) {
     const detail = ($('c-task-detail') as HTMLInputElement).value;
     const assignee = ($('c-task-assignee') as HTMLSelectElement).value || null;
     const requireApproval = ($('c-task-lock') as HTMLInputElement).checked;
-    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take() });
+    const startAt = checkSchedule(when.take(), assignee);
+    if (startAt === undefined) return;
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt });
     form.reset();
+    when.reset();
   });
 }
 

@@ -108,6 +108,8 @@ export interface Task {
   createdBy: string | null;
   /** run this task in 'ask' mode even if the assignee is on auto (risky / hard-to-undo work) */
   requireApproval: boolean;
+  /** scheduled start (epoch ms): the card waits in 'todo' with its assignee until then; null = not scheduled */
+  startAt: number | null;
   attachments: AttachmentView[];
   createdAt: number;
   updatedAt: number;
@@ -343,7 +345,9 @@ export type ServerMsg =
 
 // client -> server
 export type ClientMsg =
-  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[] }
+  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[]; startAt?: number | null }
+  /** whether this tab is in front (phone notifications are held back while someone is watching) */
+  | { t: 'presence'; visible: boolean }
   | { t: 'assignTask'; taskId: number; employeeId: string }
   | { t: 'moveTask'; taskId: number; state: TaskState }
   | { t: 'deleteTask'; taskId: number }

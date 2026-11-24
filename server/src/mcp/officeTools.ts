@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { RoutineInput } from '../routines.ts';
+import { fmtWhen, parseStartAt } from '../schedule.ts';
 import type { EmployeeView, Job, LogLine, RoutineView, ServerView, SkillView, Task } from '../../../shared/protocol.ts';
 
 /** What the office exposes to the secretary. Wired up in index.ts. */
@@ -11,7 +12,7 @@ export interface OfficeApi {
   servers(): ServerView[];
   routines(): RoutineView[];
   logsSince(ts: number): LogLine[];
-  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null, requireApproval?: boolean, attachmentIds?: number[]): Task;
+  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null, requireApproval?: boolean, attachmentIds?: number[], startAt?: number | null): Task;
   createRoutine(input: RoutineInput): RoutineView;
   updateRoutine(id: string, patch: Partial<RoutineInput>): RoutineView;
   deleteRoutine(id: string): RoutineView;
@@ -35,6 +36,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
     instructions:
       'Tools to see and manage the AI office: staff status, the task board, remote jobs, servers and routines. ' +
       'create_task with an assignee immediately puts that employee to work, so delegate only when the manager asked for it or a routine says so. ' +
+      'For a one-off "do X at time T" (tomorrow 9am, in 2 hours), use create_task with `startAt`; routines are for work that repeats. ' +
       'Routines (create_routine / update_routine / delete_routine) change the office schedule: use them only when the manager asked; every call waits for the manager\'s approval. ' +
       'A routine should normally run an office skill (save_skill → create_routine with `skill`) instead of carrying a long prompt.',
     tools: [
@@ -160,7 +162,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
       ),
       tool(
         'create_task',
-        'Add a task to the board. With `assignee` (employee id) the employee starts on it right away.',
+        'Add a task to the board. With `assignee` (employee id) the employee starts on it right away, or at `startAt` if given.',
         {
           title: z.string(),
           detail: z.string().optional(),
@@ -172,18 +174,32 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
               'true = the assignee must get the manager\'s approval for every non-whitelisted tool call on this task, even if they are on auto mode. ' +
                 'Use it for risky or hard-to-undo work: deleting/overwriting files or data, git push/merge, cancelling or submitting large GPU jobs, anything sent outside the lab.',
             ),
+          startAt: z
+            .string()
+            .optional()
+            .describe(
+              'one-off scheduled start, local time "YYYY-MM-DDTHH:mm" (e.g. "2026-01-31T09:00"); needs `assignee`. ' +
+                'The card waits on the board until then. If unsure of the current date/time, run `date` first.',
+            ),
           attachments: z
             .array(z.number().int())
             .optional()
             .describe('attachment ids (#N in the "Attachments" section of your instructions) to hand to the assignee; they get the file paths in their task'),
         },
-        async ({ title, detail, assignee, requireApproval, attachments }) => {
+        async ({ title, detail, assignee, requireApproval, startAt, attachments }) => {
           if (assignee && !api.employees().some((e) => e.id === assignee)) return text(`unknown employee ${assignee}`, true);
           if (assignee === selfId) return text('You cannot delegate a task to yourself.', true);
-          const t = api.createTask(title, detail ?? '', assignee ?? null, selfId, !!requireApproval, attachments ?? []);
+          let at: number | null = null;
+          if (startAt) {
+            if (!assignee) return text('startAt needs an assignee: who should start it at that time?', true);
+            const p = parseStartAt(startAt);
+            if ('error' in p) return text(p.error, true);
+            at = p.ms;
+          }
+          const t = api.createTask(title, detail ?? '', assignee ?? null, selfId, !!requireApproval, attachments ?? [], at);
           const missing = (attachments ?? []).filter((id) => !t.attachments.some((a) => a.id === id));
           return text(
-            `created task #${t.id}${assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 every tool call needs approval)' : ''}` +
+            `created task #${t.id}${t.startAt ? `, scheduled: ${assignee} starts it ${fmtWhen(t.startAt)}` : assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 every tool call needs approval)' : ''}` +
               (t.attachments.length ? `, attachments ${t.attachments.map((a) => `#${a.id}`).join(' ')}` : '') +
               (missing.length ? ` (ignored unknown attachment ids: ${missing.join(', ')})` : ''),
           );

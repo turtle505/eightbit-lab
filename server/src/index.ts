@@ -17,6 +17,8 @@ import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
 import type { FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
+import { Notifier } from './notify.ts';
+import { dueTasks, SCHEDULE_SLACK_MS } from './schedule.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
@@ -79,6 +81,15 @@ const sendSkills = () => bus.send({ t: 'skills', data: skills.list() });
 
 // ---- report feed: finished runs + report files that appear or change
 const pushFeed = (f: FeedItem) => bus.send({ t: 'feed', data: f });
+const notifier = new Notifier(office.notify);
+const empName = (id: string) => agents.views().find((v) => v.id === id)?.name ?? id;
+bus.on('runFinished', (r: RunFinished) => {
+  void notifier.send(r.ok ? 'result' : 'error', `${r.ok ? '✅' : '⚠️'} ${empName(r.employeeId)}: ${r.label}`, notifier.preview(r.text), r.ok ? 'default' : 'high');
+});
+bus.on('msg', (m: ServerMsg) => {
+  if (m.t === 'approval')
+    void notifier.send('approval', tr({ ko: `🔐 ${empName(m.data.employeeId)} 승인 요청: ${m.data.toolName}`, en: `🔐 ${empName(m.data.employeeId)} needs approval: ${m.data.toolName}` }), '', 'high');
+});
 bus.on('runFinished', (r: RunFinished) => {
   if (!r.text.trim() && r.ok) return;
   pushFeed(store.addFeed({ ts: Date.now(), kind: 'result', employeeId: r.employeeId, title: r.label, body: r.text || tr({ ko: '(응답 없음 — 로그 확인)', en: '(no reply; check the log)' }), path: null, ok: r.ok }));
@@ -121,19 +132,46 @@ bus.on('msg', (m: ServerMsg) => {
 
 function assignTask(taskId: number, employeeId: string) {
   if (!agents.has(employeeId)) return;
-  const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing' });
+  const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing', startAt: null }); // assigning by hand starts a scheduled card now
   if (!t) return;
   bus.send({ t: 'task', data: t });
   agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval });
 }
 
-function createTask(title: string, detail: string, assignee: string | null, createdBy: string | null = null, requireApproval = false, attachmentIds: number[] = []) {
-  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', null, createdBy, requireApproval);
+function createTask(
+  title: string,
+  detail: string,
+  assignee: string | null,
+  createdBy: string | null = null,
+  requireApproval = false,
+  attachmentIds: number[] = [],
+  startAt: number | null = null,
+) {
+  // a start time only means something with someone to start it; one that's (nearly) now just starts now
+  const later = assignee && agents.has(assignee) && startAt != null && startAt > Date.now() + SCHEDULE_SLACK_MS ? startAt : null;
+  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later ? assignee : null, createdBy, requireApproval, later);
   if (attachmentIds.length) store.bindAttachments(created.id, attachmentIds);
   const t = store.getTask(created.id)!;
   bus.send({ t: 'task', data: t });
-  if (assignee) assignTask(t.id, assignee);
+  if (assignee && !later) assignTask(t.id, assignee);
   return store.getTask(t.id)!;
+}
+
+/** Start scheduled cards whose time has come (checked every 20 s; at boot, ones missed while the backend was down). */
+function startDueTasks(now = Date.now()) {
+  for (const t of dueTasks(store.listTasks(), now, (id) => agents.has(id))) {
+    const late = now - t.startAt! > 5 * 60_000;
+    const who = empName(t.assignee!);
+    bus.send({
+      t: 'notice',
+      level: 'info',
+      text: late
+        ? tr({ ko: `⏰ 예약 작업 #${t.id} 시작 (예정보다 늦음): ${t.title} → ${who}`, en: `⏰ Scheduled task #${t.id} started late: ${t.title} → ${who}` })
+        : tr({ ko: `⏰ 예약 작업 #${t.id} 시작: ${t.title} → ${who}`, en: `⏰ Scheduled task #${t.id} started: ${t.title} → ${who}` }),
+    });
+    void notifier.send('scheduled', tr({ ko: `⏰ ${who}: #${t.id} ${t.title} 시작`, en: `⏰ ${who} started #${t.id} ${t.title}` }), '', 'low');
+    assignTask(t.id, t.assignee!);
+  }
 }
 
 const routines = new RoutineScheduler(
@@ -237,6 +275,7 @@ bus.on('runFinished', (r: RunFinished) => {
 // When a remote job ends, tell whoever submitted it so they can follow up.
 registry.onJobFinished((job) => {
   bus.send({ t: 'notice', level: job.state === 'completed' ? 'info' : 'warn', text: `Job #${job.id} ${job.name} @${job.server}: ${job.state}` });
+  void notifier.send('job', `🖥️ Job #${job.id} ${job.name} @${job.server}: ${job.state}`, '', job.state === 'completed' ? 'default' : 'high');
   if (job.submittedBy && agents.has(job.submittedBy)) {
     agents.instruct(
       job.submittedBy,
@@ -251,7 +290,11 @@ function handle(msg: ClientMsg, ws: WebSocket) {
   const reply = (m: ServerMsg) => ws.send(JSON.stringify(m));
   switch (msg.t) {
     case 'createTask':
-      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? []);
+      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? [], msg.startAt ?? null);
+      break;
+    case 'presence':
+      if (msg.visible) watching.add(ws);
+      else watching.delete(ws);
       break;
     case 'assignTask':
       assignTask(msg.taskId, msg.employeeId);
@@ -524,7 +567,11 @@ const wss = new WebSocketServer({
     done(true);
   },
 });
+/** tabs in front right now: phone notifications wait while someone is watching (notify.whenAway) */
+const watching = new Set<WebSocket>();
+notifier.isWatched = () => watching.size > 0;
 wss.on('connection', (ws) => {
+  ws.on('close', () => watching.delete(ws));
   ws.send(JSON.stringify({ t: 'snapshot', data: snapshot() } satisfies ServerMsg));
   ws.on('message', (raw) => {
     try {
@@ -552,6 +599,9 @@ http.listen(office.port, '127.0.0.1', () => {
   setInterval(pollTodos, 3_000);
   attachments.cleanup();
   setInterval(() => attachments.cleanup(), 3600_000);
+  startDueTasks();
+  setInterval(startDueTasks, 20_000);
+  if (notifier.channels.length) console.log(`📱 notifications → ${notifier.channels.join(' + ')} (${office.notify!.events.join(', ')})`);
   if (office.authToken) console.log(
       tr({
         ko: '🔑 사무실 토큰 잠금 켜짐 (브라우저는 첫 접속에 한 번 입력, 스크립트는 X-Office-Token 헤더)',

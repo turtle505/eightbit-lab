@@ -38,6 +38,15 @@ workspaceRoot: ./workspaces
 #   sections: []                          # "## " headings to read (substring, any case). Empty = every section; a note without headings is read whole
 #   schedule: [Schedule, 일정]             # headings treated as a schedule: plain bullets (appointments) are shown too, not just checkboxes
 #   createCommand: ["python3", "scripts/new_daily.py", "{vault}"]   # "create today's note" button: argv, no shell, cwd = vault (hidden if unset)
+# Phone / chat notifications while you're away from the office tab (approvals, finished work, GPU jobs, scheduled starts).
+# ntfy: install the ntfy app, subscribe to a long random topic, and put its URL here. Anyone who knows the topic
+# can read it, so treat the name like a password (or self-host ntfy). Test with: npm run notify:test
+# notify:
+#   ntfy: https://ntfy.sh/<long-random-topic>
+#   webhook: https://hooks.slack.com/services/...      # Slack / Discord incoming webhook (optional)
+#   events: [approval, result, error, job, scheduled]  # default: all
+#   preview: false                                     # true = add the first ~200 chars of the reply (it leaves this machine)
+#   whenAway: true                                     # hold back while an office tab is in front somewhere
 # Model servers to use instead of the Claude subscription (linked from roles.yaml with provider: <id>). Only kind: ollama is supported for now.
 # Opens an SSH tunnel (localPort) to Ollama on ssh_host (127.0.0.1:remotePort) and runs the Claude Code session over its Anthropic-compatible API.
 # Ollama needs a context of 64k or more: OLLAMA_CONTEXT_LENGTH=65536 ollama serve. Put real hosts in office.local.yaml.

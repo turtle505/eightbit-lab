@@ -257,6 +257,7 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     state.connected = true;
+    sendPresence();
     renderAll();
   };
   ws.onmessage = (ev) => onMsg(JSON.parse(ev.data));
@@ -266,6 +267,12 @@ function connect() {
     setTimeout(connect, 1500);
   };
 }
+
+/** tell the backend whether this tab is in front, so it holds phone notifications while someone is watching */
+function sendPresence() {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'presence', visible: !document.hidden } satisfies ClientMsg));
+}
+document.addEventListener('visibilitychange', sendPresence);
 
 window.addEventListener('office-toast', (ev) => {
   const d = (ev as CustomEvent<{ text: string; level?: 'info' | 'warn' | 'error' }>).detail;
