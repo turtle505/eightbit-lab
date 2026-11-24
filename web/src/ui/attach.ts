@@ -1,6 +1,7 @@
 // Attachments: upload files (picker or drag & drop) to /api/upload before sending a task / instruction,
 // then pass the returned ids along with the message.
 import type { AttachmentView } from '../../../shared/protocol.ts';
+import { tr } from '../../../shared/i18n.ts';
 import { esc } from './panels.ts';
 
 export const sizeText = (n: number) =>
@@ -11,7 +12,7 @@ export const attachmentLinks = (list: AttachmentView[]) =>
   list
     .map(
       (a) =>
-        `<a class="att-link" href="/api/attachments/${a.id}" target="_blank" rel="noopener" title="${esc(a.mime)} · ${sizeText(a.size)}${a.hasText ? ' · 텍스트 변환본 있음' : ''}">${esc(a.name)}</a>`,
+        `<a class="att-link" href="/api/attachments/${a.id}" target="_blank" rel="noopener" title="${esc(a.mime)} · ${sizeText(a.size)}${a.hasText ? tr({ ko: ' · 텍스트 변환본 있음', en: ' · text version available' }) : ''}">${esc(a.name)}</a>`,
     )
     .join(' ');
 
@@ -22,7 +23,7 @@ async function upload(file: File): Promise<AttachmentView> {
     body: file,
   });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error ?? `업로드 실패 (HTTP ${r.status})`);
+  if (!r.ok) throw new Error(body.error ?? tr({ ko: `업로드 실패 (HTTP ${r.status})`, en: `Upload failed (HTTP ${r.status})` }));
   return body as AttachmentView;
 }
 
@@ -51,8 +52,8 @@ export function bindAttach(dropZone: HTMLElement, button: HTMLElement, chips: HT
     chips.innerHTML = items
       .map(
         (it) =>
-          `<span class="chip${it.att ? '' : ' uploading'}" data-key="${it.key}">📎 ${esc(it.name)} <span class="muted">${it.att ? sizeText(it.size) : '올리는 중…'}</span>${
-            it.att ? ` <button type="button" class="chip-x" title="첨부 빼기">✕</button>` : ''
+          `<span class="chip${it.att ? '' : ' uploading'}" data-key="${it.key}">📎 ${esc(it.name)} <span class="muted">${it.att ? sizeText(it.size) : tr({ ko: '올리는 중…', en: 'uploading…' })}</span>${
+            it.att ? ` <button type="button" class="chip-x" title="${tr({ ko: '첨부 빼기', en: 'Remove attachment' })}">✕</button>` : ''
           }</span>`,
       )
       .join('');

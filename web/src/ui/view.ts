@@ -1,5 +1,6 @@
 // Switching between the pixel "game" view, the plain "console" view and the "reports" browser.
 import type { ViewMode } from './panels.ts';
+import { tr } from '../../../shared/i18n.ts';
 
 const KEY = 'eightbit-lab:view';
 /** Panels that exist once and move into whichever view is active. */
@@ -35,8 +36,7 @@ export function applyView(view: ViewMode) {
       if (el && slot && el.parentElement !== slot) slot.append(el);
     }
   document.querySelectorAll<HTMLButtonElement>('.view-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-  document.title =
-    view === 'console' ? '8-bit Lab · Console' : view === 'reports' ? '8-bit Lab · 보고서' : view === 'projects' ? '8-bit Lab · 프로젝트' : '8-bit Lab';
+  document.title = viewTitle(view);
   try {
     // a separate ?view=reports window should not change what the main window opens with
     if (new URLSearchParams(location.search).get('view') !== 'reports') localStorage.setItem(KEY, view);
@@ -49,3 +49,12 @@ export function applyView(view: ViewMode) {
     history.replaceState(null, '', url);
   }
 }
+
+export const viewTitle = (view: ViewMode): string =>
+  view === 'console'
+    ? '8-bit Lab · Console'
+    : view === 'reports'
+      ? tr({ ko: '8-bit Lab · 보고서', en: '8-bit Lab · Reports' })
+      : view === 'projects'
+        ? tr({ ko: '8-bit Lab · 프로젝트', en: '8-bit Lab · Projects' })
+        : '8-bit Lab';

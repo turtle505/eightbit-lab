@@ -122,13 +122,13 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
             }
             if (!(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
               return text(
-                `ssh 횟수 제한 (${cfg.ssh_host}: 분당 ${sshThrottle.limitFor(cfg.ssh_host)}회)으로 지금은 가져올 수 없습니다. 잠시 후 다시 시도하세요.`,
+                `ssh rate limit reached (${cfg.ssh_host}: ${sshThrottle.limitFor(cfg.ssh_host)} per minute), so the results cannot be fetched right now. Try again shortly.`,
                 true,
               );
             // One compressed stream over one connection. `scp -r` of a folder talks per file, which is
             // what gets lab IPs blocked; tar sends a single archive instead.
             const code = await tarFetch(cfg.ssh_host, remote_path, dest);
-            return code === 0 ? text(`copied to ${dest} (압축 스트림 1회 전송)`) : text(`전송 실패 (exit ${code})`, true);
+            return code === 0 ? text(`copied to ${dest} (one compressed stream)`) : text(`transfer failed (exit ${code})`, true);
           } catch (e) {
             return text(String((e as Error).message), true);
           }

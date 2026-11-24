@@ -1,14 +1,14 @@
-# GPU 서버 목록. 이 파일을 config/servers.local.yaml 로 복사해 실제 값으로 채우세요 (git에 올라가지 않음).
-# ssh_host 는 ~/.ssh/config 의 Host alias 를 권장 (키 인증, 비밀번호 프롬프트 없이 접속돼야 함).
+# GPU server list. Copy this file to config/servers.local.yaml and fill in real values (it is not committed to git).
+# ssh_host should be a Host alias from ~/.ssh/config (key auth; it must connect without a password prompt).
 # type:
-#   ssh   - 직접 실행 (setsid nohup 로 백그라운드 실행, nvidia-smi 로 GPU 상태)
-#   slurm - sbatch 로 제출, squeue/sacct 로 상태 확인
+#   ssh   - run directly (in the background via setsid nohup; GPU status from nvidia-smi)
+#   slurm - submit with sbatch; status from squeue/sacct
 servers:
   - name: gpu-a
     type: ssh
     ssh_host: gpu-a          # ~/.ssh/config alias
-    workdir: ~/office-jobs   # job 로그/스크립트가 저장될 원격 폴더
-    setup: |                 # 모든 job 앞에 실행되는 준비 명령
+    workdir: ~/office-jobs   # remote folder for job logs/scripts
+    setup: |                 # setup commands run before every job
       source ~/miniconda3/etc/profile.d/conda.sh
       conda activate protein
 

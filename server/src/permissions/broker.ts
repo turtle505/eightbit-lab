@@ -36,7 +36,7 @@ export class PermissionBroker {
     p.resolve(
       allow
         ? { behavior: 'allow', updatedInput: p.approval.input }
-        : { behavior: 'deny', message: message || '매니저가 이 작업을 거부했습니다. 다른 방법을 찾거나 이유를 물어보세요.' },
+        : { behavior: 'deny', message: message || 'The manager denied this action. Find another way, or ask why.' },
     );
     return true;
   }

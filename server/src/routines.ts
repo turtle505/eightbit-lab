@@ -1,3 +1,4 @@
+import { tr } from '../../shared/i18n.ts';
 import type { RoutineView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import type { RoutineConfig } from './config.ts';
@@ -55,18 +56,23 @@ export class RoutineScheduler {
     }
   }
 
-  /** Validates and parses; throws a Korean message for the UI / secretary. */
+  /** Validates and parses; throws a message (in the office language) for the UI / secretary. */
   private entry(row: RoutineRow): Entry {
-    if (!row.name.trim()) throw new Error('루틴 이름이 비어 있습니다.');
+    if (!row.name.trim()) throw new Error(tr({ ko: '루틴 이름이 비어 있습니다.', en: 'The routine name is empty.' }));
     if (row.skill) {
-      if (!this.hasSkill(row.skill)) throw new Error(`없는 스킬입니다: "${row.skill}" (먼저 save_skill로 만드세요)`);
-    } else if (!row.prompt.trim()) throw new Error('루틴 지시 내용(prompt)이 비어 있습니다. 스킬을 지정하거나 지시문을 쓰세요.');
-    if (!this.isEmployee(row.employee)) throw new Error(`없는 직원입니다: "${row.employee}"`);
+      if (!this.hasSkill(row.skill)) throw new Error(tr({ ko: `없는 스킬입니다: "${row.skill}" (먼저 save_skill로 만드세요)`, en: `No such skill: "${row.skill}" (create it with save_skill first)` }));
+    } else if (!row.prompt.trim()) throw new Error(
+        tr({
+          ko: '루틴 지시 내용(prompt)이 비어 있습니다. 스킬을 지정하거나 지시문을 쓰세요.',
+          en: 'The routine instruction (prompt) is empty. Pick a skill or write an instruction.',
+        }),
+      );
+    if (!this.isEmployee(row.employee)) throw new Error(tr({ ko: `없는 직원입니다: "${row.employee}"`, en: `No such employee: "${row.employee}"` }));
     let cron: Cron;
     try {
       cron = parseCron(row.schedule);
     } catch (e) {
-      throw new Error(`일정(cron) 형식이 잘못되었습니다: ${(e as Error).message}`);
+      throw new Error(tr({ ko: `일정(cron) 형식이 잘못되었습니다: ${(e as Error).message}`, en: `Invalid schedule (cron): ${(e as Error).message}` }));
     }
     return { row, cron };
   }
@@ -92,7 +98,7 @@ export class RoutineScheduler {
 
   private find(id: string): Entry {
     const e = this.entries.find((x) => x.row.id === id);
-    if (!e) throw new Error(`루틴 ${id}을(를) 찾을 수 없습니다.`);
+    if (!e) throw new Error(tr({ ko: `루틴 ${id}을(를) 찾을 수 없습니다.`, en: `Routine ${id} not found.` }));
     return e;
   }
 
@@ -183,13 +189,13 @@ export class RoutineScheduler {
 
 /** The instruction an employee receives when a routine fires. */
 export function routinePrompt(row: Pick<RoutineRow, 'name' | 'prompt' | 'skill'>, now: Date): string {
-  const stamp = now.toLocaleString('ko-KR', { dateStyle: 'full', timeStyle: 'short' });
-  const head = `[루틴: ${row.name} · ${stamp}]`;
+  const stamp = now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' });
+  const head = `[Routine: ${row.name} · ${stamp}]`;
   if (!row.skill) return `${head}\n${row.prompt}`;
-  const notes = row.prompt.trim() ? `\n\n추가 메모: ${row.prompt.trim()}` : '';
+  const notes = row.prompt.trim() ? `\n\nAdditional notes: ${row.prompt.trim()}` : '';
   return (
-    `${head}\nSkill 도구로 \`office:${row.skill}\` 스킬을 실행하세요. ` +
-    `예약(무인) 실행이므로 질문하지 말고 스킬 지침대로 진행한 뒤 결과만 짧게 보고하세요. ` +
-    `실패하면 추측해서 채우지 말고 무엇이 왜 실패했는지 보고하세요.${notes}`
+    `${head}\nRun the \`office:${row.skill}\` skill with the Skill tool. ` +
+    `This is a scheduled (unattended) run, so don't ask questions: follow the skill's instructions and report only a short result. ` +
+    `If something fails, don't fill in guesses; report what failed and why.${notes}`
   );
 }

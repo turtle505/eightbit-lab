@@ -2,7 +2,8 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, resolve } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { FIGURE_DEFAULT_NAMES, FIGURE_MAX_LEN, type ClientMsg, type FigureKey, type ServerMsg, type Snapshot } from '../../shared/protocol.ts';
+import { FIGURE_KEYS, FIGURE_MAX_LEN, figureDefaultName, type ClientMsg, type FigureKey, type ServerMsg, type Snapshot } from '../../shared/protocol.ts';
+import { getLang, isLang, setLang, tr } from '../../shared/i18n.ts';
 import { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
 import { ServerRegistry } from './compute/registry.ts';
@@ -27,6 +28,10 @@ import { mkdirSync } from 'node:fs';
 const office = loadOffice();
 const roles = loadRoles();
 const store = new Store();
+{
+  const saved = store.getSetting('language');
+  setLang(isLang(saved) ? saved : office.language);
+}
 const broker = new PermissionBroker();
 const registry = new ServerRegistry(loadServers(), store);
 const agents = new AgentManager(office, roles, store, broker, registry);
@@ -37,26 +42,43 @@ const attachments = new AttachmentLibrary(office.workspaceRoot, store);
 mkdirSync(attachments.dir, { recursive: true });
 agents.extraDirs = [attachments.dir];
 const orphaned = store.reassignUnknown(roles.map((r) => r.id));
-if (orphaned) console.warn(`⚠️ 없는 직원에게 배정돼 있던 작업 ${orphaned}건을 미배정으로 되돌렸습니다`);
+if (orphaned)
+  console.warn(
+    tr({
+      ko: `⚠️ 없는 직원에게 배정돼 있던 작업 ${orphaned}건을 미배정으로 되돌렸습니다`,
+      en: `⚠️ Unassigned ${orphaned} task(s) that were assigned to employees who no longer exist`,
+    }),
+  );
 setSshLimit(office.sshPerMinute);
 const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)
-  if (r.host && !hosts.get(r.host)) console.warn(`⚠️ ${r.id}: host '${r.host}' 가 office(.local).yaml 의 hosts 에 없습니다`);
+  if (r.host && !hosts.get(r.host))
+    console.warn(
+      tr({
+        ko: `⚠️ ${r.id}: host '${r.host}' 가 office(.local).yaml 의 hosts 에 없습니다`,
+        en: `⚠️ ${r.id}: host '${r.host}' is not in the hosts of office(.local).yaml`,
+      }),
+    );
 hosts.bindLiveness((hostId) => agents.views().some((v) => v.hostId === hostId && v.live));
 const projects = new ProjectRegistry(store, agents, hosts);
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;
 for (const r of roles)
   if (r.provider && !providers.get(r.provider))
-    console.warn(`⚠️ ${r.id}: provider '${r.provider}' 가 office(.local).yaml 의 providers 에 없습니다 — 이 직원은 실행할 수 없습니다`);
+    console.warn(
+      tr({
+        ko: `⚠️ ${r.id}: provider '${r.provider}' 가 office(.local).yaml 의 providers 에 없습니다 — 이 직원은 실행할 수 없습니다`,
+        en: `⚠️ ${r.id}: provider '${r.provider}' is not in the providers of office(.local).yaml; this employee cannot run`,
+      }),
+    );
 const sendSkills = () => bus.send({ t: 'skills', data: skills.list() });
 
 // ---- report feed: finished runs + report files that appear or change
 const pushFeed = (f: FeedItem) => bus.send({ t: 'feed', data: f });
 bus.on('runFinished', (r: RunFinished) => {
   if (!r.text.trim() && r.ok) return;
-  pushFeed(store.addFeed({ ts: Date.now(), kind: 'result', employeeId: r.employeeId, title: r.label, body: r.text || '(응답 없음 — 로그 확인)', path: null, ok: r.ok }));
+  pushFeed(store.addFeed({ ts: Date.now(), kind: 'result', employeeId: r.employeeId, title: r.label, body: r.text || tr({ ko: '(응답 없음 — 로그 확인)', en: '(no reply; check the log)' }), path: null, ok: r.ok }));
 });
 const reports = new ReportLibrary(() =>
   reportRoots(office.workspaceRoot, office.reportDirs, (dir) => roles.find((ro) => ro.cwd && resolve(ROOT, ro.cwd) === dir)?.id ?? null),
@@ -103,7 +125,7 @@ function assignTask(taskId: number, employeeId: string) {
 }
 
 function createTask(title: string, detail: string, assignee: string | null, createdBy: string | null = null, requireApproval = false, attachmentIds: number[] = []) {
-  const created = store.createTask(title.trim() || '(제목 없음)', detail ?? '', null, createdBy, requireApproval);
+  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', null, createdBy, requireApproval);
   if (attachmentIds.length) store.bindAttachments(created.id, attachmentIds);
   const t = store.getTask(created.id)!;
   bus.send({ t: 'task', data: t });
@@ -115,11 +137,19 @@ const routines = new RoutineScheduler(
   loadRoutines(),
   store,
   (employeeId, prompt, name, skill) => {
-    bus.send({ t: 'notice', level: 'info', text: `⏰ 루틴 시작: ${name}` });
+    bus.send({ t: 'notice', level: 'info', text: tr({ ko: `⏰ 루틴 시작: ${name}`, en: `⏰ Routine started: ${name}` }) });
     let extraAllow: string[] = [];
     if (skill) {
       const allow = skills.allowFor(skill);
-      if (allow === null) bus.send({ t: 'notice', level: 'warn', text: `🧩 스킬 ${skill}이(가) 승인 후 바뀌었거나 승인되지 않아 자동 허용 없이 실행합니다. 루틴 패널에서 재승인하세요.` });
+      if (allow === null)
+        bus.send({
+          t: 'notice',
+          level: 'warn',
+          text: tr({
+            ko: `🧩 스킬 ${skill}이(가) 승인 후 바뀌었거나 승인되지 않아 자동 허용 없이 실행합니다. 루틴 패널에서 재승인하세요.`,
+            en: `🧩 Skill ${skill} changed since approval or was never approved, so it runs without auto-allow. Re-approve it in the routines panel.`,
+          }),
+        });
       else extraAllow = allow;
     }
     agents.instruct(employeeId, prompt, null, { extraAllow, label: `⏰ ${name}` });
@@ -148,8 +178,8 @@ agents.officeApi = {
 };
 
 // professor / manager are decoration, not employees; their names live in employee_names under reserved keys
-const figureName = (key: FigureKey) => store.getEmployeeName(`__${key}`) ?? FIGURE_DEFAULT_NAMES[key];
-const figureNames = () => Object.fromEntries((Object.keys(FIGURE_DEFAULT_NAMES) as FigureKey[]).map((k) => [k, figureName(k)])) as Record<FigureKey, string>;
+const figureName = (key: FigureKey) => store.getEmployeeName(`__${key}`) ?? figureDefaultName(key);
+const figureNames = () => Object.fromEntries(FIGURE_KEYS.map((k) => [k, figureName(k)])) as Record<FigureKey, string>;
 
 function snapshot(): Snapshot {
   return {
@@ -171,12 +201,13 @@ function snapshot(): Snapshot {
     providers: providers.views(),
     hosts: hosts.views(),
     projects: projects.views(),
+    language: getLang(),
   };
 }
 
 function taskPrompt(id: number): string {
   const t = store.getTask(id)!;
-  return `매니저가 작업 #${t.id}을(를) 배정했습니다.\n\n제목: ${t.title}\n\n${t.detail || '(세부 설명 없음)'}${attachmentBlock(store.attachmentsForTask(t.id))}\n\n작업을 마치면 산출물 위치와 요약을 보고하세요.`;
+  return `The manager assigned you task #${t.id}.\n\nTitle: ${t.title}\n\n${t.detail || '(no details)'}${attachmentBlock(store.attachmentsForTask(t.id))}\n\nWhen you finish, report where the outputs are and a summary.`;
 }
 
 // When a delegated task ends, hand the result back to the employee who delegated it (team lead / secretary).
@@ -186,17 +217,17 @@ bus.on('runFinished', (r: RunFinished) => {
   const by = t?.createdBy;
   if (!t || !by || by === r.employeeId || !agents.has(by)) return;
   const who = agents.views().find((v) => v.id === r.employeeId)?.name ?? r.employeeId;
-  const result = r.text.trim() ? (r.text.length > 1500 ? `${r.text.slice(0, 1500)}…(생략, 전체는 list_tasks)` : r.text) : '(응답 없음)';
+  const result = r.text.trim() ? (r.text.length > 1500 ? `${r.text.slice(0, 1500)}…(truncated; full text via list_tasks)` : r.text) : '(no reply)';
   // the finished task is still 'doing' here (it moves to review right after this event)
   const open = store.listTasks().filter((o) => o.createdBy === by && o.id !== t.id && (o.state === 'todo' || o.state === 'doing'));
   const rest = open.length
-    ? `아직 진행 중인 위임 작업: ${open.map((o) => `#${o.id} ${o.title} (${o.assignee ?? '미배정'})`).join(', ')}\n→ 이 결과를 짧게 기록만 하고 기다리세요. 이 결과가 있어야 시작할 수 있는 다음 단계가 계획에 있었다면 지금 배정하세요.`
-    : '위임한 작업이 모두 끝났습니다.\n→ 이 결과로 시작해야 할 다음 단계가 계획에 남아 있으면 배정하고, 없으면 전체 결과를 종합해 매니저에게 보고하세요.';
+    ? `Delegated tasks still in progress: ${open.map((o) => `#${o.id} ${o.title} (${o.assignee ?? 'unassigned'})`).join(', ')}\n→ Just note this result briefly and wait. If your plan had a next step that needed this result to start, assign it now.`
+    : 'All the tasks you delegated are done.\n→ If your plan still has a next step that starts from this result, assign it; otherwise combine all the results and report to the manager.';
   agents.instruct(
     by,
-    `[자동 알림] 작업 #${t.id} "${t.title}" (담당 ${who})이(가) ${r.ok ? '끝났습니다' : '오류로 끝났습니다'}.\n\n결과:\n${result}\n\n${rest}`,
+    `[Automatic notice] Task #${t.id} "${t.title}" (assignee ${who}) ${r.ok ? 'finished' : 'ended with an error'}.\n\nResult:\n${result}\n\n${rest}`,
     null,
-    { label: `📬 #${t.id} 결과 도착` },
+    { label: tr({ ko: `📬 #${t.id} 결과 도착`, en: `📬 #${t.id} result in` }) },
   );
 });
 
@@ -206,7 +237,7 @@ registry.onJobFinished((job) => {
   if (job.submittedBy && agents.has(job.submittedBy)) {
     agents.instruct(
       job.submittedBy,
-      `[자동 알림] 원격 job #${job.id} (${job.name}, ${job.server})이(가) '${job.state}' 상태로 끝났습니다. mcp__lab__tail_log 로 로그를 확인하고 결과를 짧게 보고하세요. 다음 단계가 명확하지 않으면 제안만 하세요.`,
+      `[Automatic notice] Remote job #${job.id} (${job.name}, ${job.server}) ended in state '${job.state}'. Check the log with mcp__lab__tail_log and report the result briefly. If the next step is not clear, only suggest it.`,
       null,
       { label: `🖥️ Job #${job.id} ${job.name} (${job.state})` },
     );
@@ -235,7 +266,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       const rows = attachments.rows(msg.attachmentIds ?? []);
       if (!msg.text.trim() && !rows.length) break;
       store.markAttachmentsUsed(rows.map((r) => r.id));
-      agents.instruct(msg.employeeId, (msg.text.trim() || '첨부 파일을 확인해 주세요.') + attachmentBlock(rows));
+      agents.instruct(msg.employeeId, (msg.text.trim() || 'Please look at the attached files.') + attachmentBlock(rows));
       break;
     }
     case 'stop':
@@ -251,7 +282,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       agents.rename(msg.employeeId, msg.nick);
       break;
     case 'renameFigure': {
-      if (!(msg.key in FIGURE_DEFAULT_NAMES)) break;
+      if (!FIGURE_KEYS.includes(msg.key)) break;
       const n = msg.name.trim().slice(0, FIGURE_MAX_LEN[msg.key]);
       store.setEmployeeName(`__${msg.key}`, n || null);
       bus.send({ t: 'figureName', key: msg.key, name: figureName(msg.key) });
@@ -279,12 +310,13 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       const { id, name, schedule, employee, prompt, skill, enabled } = msg;
       const input = { name, schedule, employee, prompt, skill: skill ?? null, enabled };
       const r = id ? routines.update(id, input) : routines.create(input);
-      bus.send({ t: 'notice', level: 'info', text: `⏰ 루틴 ${id ? '수정' : '등록'}: ${r.name}` });
+      bus.send({ t: 'notice', level: 'info', text: id ? tr({ ko: `⏰ 루틴 수정: ${r.name}`, en: `⏰ Routine updated: ${r.name}` }) : tr({ ko: `⏰ 루틴 등록: ${r.name}`, en: `⏰ Routine added: ${r.name}` }),
+      });
       break;
     }
     case 'deleteRoutine': {
       const r = routines.remove(msg.id);
-      bus.send({ t: 'notice', level: 'info', text: `🗑️ 루틴 삭제: ${r.name}` });
+      bus.send({ t: 'notice', level: 'info', text: tr({ ko: `🗑️ 루틴 삭제: ${r.name}`, en: `🗑️ Routine deleted: ${r.name}` }) });
       break;
     }
     case 'todoOp':
@@ -300,7 +332,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
         .create()
         .then(() => {
           pollTodos();
-          bus.send({ t: 'notice', level: 'info', text: '🗒️ 오늘 노트를 만들었습니다.' });
+          bus.send({ t: 'notice', level: 'info', text: tr({ ko: '🗒️ 오늘 노트를 만들었습니다.', en: "🗒️ Created today's note." }) });
         })
         .catch((e) => reply({ t: 'notice', level: 'error', text: String(e.message) }));
       break;
@@ -312,7 +344,11 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'approveSkill': {
       const v = skills.approve(msg.name);
       sendSkills();
-      bus.send({ t: 'notice', level: 'info', text: `🧩 스킬 승인: ${v.name}${v.allow.length ? ` (자동 허용 ${v.allow.length}개)` : ''}` });
+      bus.send({ t: 'notice', level: 'info', text: tr({
+          ko: `🧩 스킬 승인: ${v.name}${v.allow.length ? ` (자동 허용 ${v.allow.length}개)` : ''}`,
+          en: `🧩 Skill approved: ${v.name}${v.allow.length ? ` (${v.allow.length} auto-allow rule(s))` : ''}`,
+        }),
+      });
       break;
     }
     case 'refreshUsage':
@@ -329,13 +365,13 @@ function handle(msg: ClientMsg, ws: WebSocket) {
         .create(msg.hostId, msg.name, msg.dir, msg.label)
         .then((p) => {
           projects.send();
-          bus.send({ t: 'notice', level: 'info', text: `📂 프로젝트 추가: ${p.name}` });
+          bus.send({ t: 'notice', level: 'info', text: tr({ ko: `📂 프로젝트 추가: ${p.name}`, en: `📂 Project added: ${p.name}` }) });
         })
         .catch((e) => reply({ t: 'notice', level: 'error', text: String((e as Error).message) }));
       break;
     case 'archiveProject':
       projects.archive(msg.id);
-      bus.send({ t: 'notice', level: 'info', text: '📂 프로젝트를 보관했습니다' });
+      bus.send({ t: 'notice', level: 'info', text: tr({ ko: '📂 프로젝트를 보관했습니다', en: '📂 Project archived' }) });
       break;
     case 'addProjectSession':
       projects.addSession(msg.projectId, msg.label);
@@ -343,9 +379,20 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'closeProjectSession':
       projects.closeSession(msg.id);
       break;
+    case 'setLanguage': {
+      if (!isLang(msg.lang) || msg.lang === getLang()) break;
+      setLang(msg.lang);
+      store.setSetting('language', msg.lang);
+      // server-made text (statuses, default names, usage labels) is rebuilt in the new language
+      bus.send({ t: 'snapshot', data: snapshot() });
+      break;
+    }
     case 'resumeWork': {
       const ok = agents.resumeNow(msg.employeeId);
-      bus.send({ t: 'notice', level: ok ? 'info' : 'warn', text: ok ? '▶️ 중단된 작업을 다시 시작했습니다' : '이어서 할 작업이 없습니다' });
+      bus.send({ t: 'notice', level: ok ? 'info' : 'warn', text: ok
+          ? tr({ ko: '▶️ 중단된 작업을 다시 시작했습니다', en: '▶️ Resumed the paused work' })
+          : tr({ ko: '이어서 할 작업이 없습니다', en: 'Nothing to resume' }),
+      });
       break;
     }
     case 'recheckHost':
@@ -357,7 +404,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'setProviderModel':
       providers.setModel(msg.providerId, msg.model);
       agents.reopenProviderSessions(msg.providerId); // the model is baked into the session's env at start
-      bus.send({ t: 'notice', level: 'info', text: `🖥 모델 변경: ${msg.model}` });
+      bus.send({ t: 'notice', level: 'info', text: tr({ ko: `🖥 모델 변경: ${msg.model}`, en: `🖥 Model changed: ${msg.model}` }) });
       break;
   }
 }
@@ -385,18 +432,18 @@ function handleApi(req: import('node:http').IncomingMessage, res: import('node:h
     });
     return;
   }
-  if (!isAuthorized(req, office.authToken)) return json(401, { error: '사무실 토큰이 필요합니다' });
+  if (!isAuthorized(req, office.authToken)) return json(401, { error: tr({ ko: '사무실 토큰이 필요합니다', en: 'Office token required' }) });
 
   if (url.pathname === '/api/upload' && req.method === 'POST') {
     if (req.headers['x-office-upload'] !== '1') return json(403, { error: 'X-Office-Upload header required' });
     const declared = Number(req.headers['content-length'] ?? 0);
-    if (declared > MAX_ATTACHMENT_BYTES) return json(413, { error: '파일이 너무 큽니다 (최대 50 MB)' });
+    if (declared > MAX_ATTACHMENT_BYTES) return json(413, { error: tr({ ko: '파일이 너무 큽니다 (최대 50 MB)', en: 'File too large (max 50 MB)' }) });
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (c: Buffer) => {
       size += c.length;
       if (size > MAX_ATTACHMENT_BYTES) {
-        json(413, { error: '파일이 너무 큽니다 (최대 50 MB)' });
+        json(413, { error: tr({ ko: '파일이 너무 큽니다 (최대 50 MB)', en: 'File too large (max 50 MB)' }) });
         req.destroy();
       } else chunks.push(c);
     });
@@ -437,7 +484,12 @@ const http = createServer((req, res) => {
   let p = resolve(DIST, '.' + decodeURIComponent(url.pathname));
   if (!p.startsWith(DIST) || !existsSync(p) || statSync(p).isDirectory()) p = resolve(DIST, 'index.html');
   if (!existsSync(p)) {
-    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('개발 모드: http://localhost:5173 을 여세요 (npm run dev). 배포 모드: npm run build 후 다시 실행.');
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(
+      tr({
+        ko: '개발 모드: http://localhost:5173 을 여세요 (npm run dev). 배포 모드: npm run build 후 다시 실행.',
+        en: 'Dev mode: open http://localhost:5173 (npm run dev). Production: run npm run build, then start again.',
+      }),
+    );
     return;
   }
   res.writeHead(200, { 'content-type': MIME[extname(p)] ?? 'application/octet-stream' });
@@ -449,11 +501,18 @@ const wss = new WebSocketServer({
   path: '/ws',
   verifyClient: ({ origin, req }, done) => {
     if (!allowedOrigin(origin, office.port)) {
-      console.warn(`⛔ 다른 사이트에서 온 WebSocket 연결 거부: ${origin} (${req.socket.remoteAddress})`);
+      console.warn(
+        tr({
+          ko: `⛔ 다른 사이트에서 온 WebSocket 연결 거부: ${origin} (${req.socket.remoteAddress})`,
+          en: `⛔ Refused a WebSocket connection from another site: ${origin} (${req.socket.remoteAddress})`,
+        }),
+      );
       return done(false, 403, 'cross-origin websocket refused');
     }
     if (!isAuthorized(req, office.authToken)) {
-      console.warn(`⛔ 토큰 없는 WebSocket 연결 거부 (${req.socket.remoteAddress})`);
+      console.warn(
+        tr({ ko: `⛔ 토큰 없는 WebSocket 연결 거부 (${req.socket.remoteAddress})`, en: `⛔ Refused a WebSocket connection without a token (${req.socket.remoteAddress})` }),
+      );
       return done(false, 401, 'office token required');
     }
     done(true);
@@ -487,7 +546,17 @@ http.listen(office.port, '127.0.0.1', () => {
   setInterval(pollTodos, 3_000);
   attachments.cleanup();
   setInterval(() => attachments.cleanup(), 3600_000);
-  if (office.authToken) console.log('🔑 사무실 토큰 잠금 켜짐 (브라우저는 첫 접속에 한 번 입력, 스크립트는 X-Office-Token 헤더)');
-  else console.warn(`🔓 사무실에 토큰 잠금이 없습니다. desktop 에 SSH 로 들어올 수 있는 사람은 누구나 직원을 조종할 수 있습니다.\n   켜려면 config/office.local.yaml 에:  authToken: "${suggestToken()}"`);
+  if (office.authToken) console.log(
+      tr({
+        ko: '🔑 사무실 토큰 잠금 켜짐 (브라우저는 첫 접속에 한 번 입력, 스크립트는 X-Office-Token 헤더)',
+        en: '🔑 Office token lock on (browsers enter it once on first visit; scripts send the X-Office-Token header)',
+      }),
+    );
+  else console.warn(
+      tr({
+        ko: `🔓 사무실에 토큰 잠금이 없습니다. desktop 에 SSH 로 들어올 수 있는 사람은 누구나 직원을 조종할 수 있습니다.\n   켜려면 config/office.local.yaml 에:  authToken: "${suggestToken()}"`,
+        en: `🔓 The office has no token lock. Anyone who can SSH into this desktop can drive the employees.\n   To turn it on, in config/office.local.yaml:  authToken: "${suggestToken()}"`,
+      }),
+    );
   console.log(`⏰ routines: ${routines.list().map((r) => `${r.name}(${r.schedule}${r.enabled ? '' : ', off'})`).join(', ') || '(none)'}`);
 });

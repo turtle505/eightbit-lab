@@ -1,5 +1,6 @@
-// 보고서 탭: a file-browser view over the .md reports employees saved, rendered as markdown.
+// Reports tab: a file-browser view over the .md reports employees saved, rendered as markdown.
 import type { ReportFile } from '../../../shared/protocol.ts';
+import { getLang, locale, tr } from '../../../shared/i18n.ts';
 import { renderMd, resolveMdLink } from './markdown.ts';
 import { $, type Send, type UIState, changed, esc, short } from './panels.ts';
 
@@ -74,7 +75,7 @@ export function onReportContent(path: string, content: string, mtime: number) {
 }
 
 const fmt = (ts: number) =>
-  new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  new Date(ts).toLocaleString(locale(), { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
 interface Dir {
   name: string;
@@ -133,14 +134,17 @@ function countUnread(d: Dir, s: Record<string, number>): number {
   return n;
 }
 
+/** language the side panel's labels were drawn in */
+let shellLang = '';
+
 export function renderReports(st: UIState) {
   const reports = st.snap.reports;
   const s = loadSeen(reports);
   const box = $('view-reports');
   if (!box.querySelector('#rp-tree')) {
     box.innerHTML = `<aside class="panel rp-side">
-        <div class="row space"><h2>보고서</h2><a class="small" href="?view=reports" target="_blank" rel="noopener" title="보고서 창을 새 브라우저 창으로 열기">새 창 ↗</a></div>
-        <input id="rp-filter" placeholder="제목·파일명 검색" autocomplete="off" />
+        <div class="row space"><h2 id="rp-h"></h2><a id="rp-newwin" class="small" href="?view=reports" target="_blank" rel="noopener"></a></div>
+        <input id="rp-filter" autocomplete="off" />
         <div id="rp-tree" class="rp-tree"></div>
       </aside>
       <section class="panel rp-main" id="rp-viewer"></section>`;
@@ -164,6 +168,7 @@ export function renderReports(st: UIState) {
       },
       true,
     );
+    shellLang = '';
     $('rp-viewer').addEventListener('click', (ev) => {
       const t = ev.target as HTMLElement;
       const a = t.closest<HTMLAnchorElement>('a[data-md-link]');
@@ -171,7 +176,7 @@ export function renderReports(st: UIState) {
         ev.preventDefault();
         const target = resolveMdLink(openPath, a.dataset.mdLink!);
         if (st.snap.reports.some((r) => r.path === target)) openReport(target);
-        else alert(`보고서 목록에 없는 파일입니다: ${target}`);
+        else alert(tr({ ko: `보고서 목록에 없는 파일입니다: ${target}`, en: `Not in the report list: ${target}` }));
         return;
       }
       const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
@@ -186,14 +191,26 @@ export function renderReports(st: UIState) {
     });
   }
 
+  if (shellLang !== getLang()) {
+    shellLang = getLang();
+    $('rp-h').textContent = tr({ ko: '보고서', en: 'Reports' });
+    const a = $('rp-newwin');
+    a.textContent = tr({ ko: '새 창 ↗', en: 'New window ↗' });
+    a.title = tr({ ko: '보고서 창을 새 브라우저 창으로 열기', en: 'Open the reports in a new browser window' });
+    ($('rp-filter') as HTMLInputElement).placeholder = tr({ ko: '제목·파일명 검색', en: 'Search titles and file names' });
+  }
+
   if (changed('rp-tree', [reports, filter, openPath, seenVersion, [...collapsed]])) {
     const q = filter;
     const tree = $('rp-tree');
     if (!reports.length) {
-      tree.innerHTML = `<p class="muted small">아직 보고서가 없습니다. 직원들이 <code>workspaces/&lt;직원 폴더&gt;/reports/</code> 아래에 .md 파일을 저장하면 여기에 나타납니다.</p>`;
+      tree.innerHTML = `<p class="muted small">${tr({
+        ko: '아직 보고서가 없습니다. 직원들이 <code>workspaces/&lt;직원 폴더&gt;/reports/</code> 아래에 .md 파일을 저장하면 여기에 나타납니다.',
+        en: 'No reports yet. They appear here when employees save .md files under <code>workspaces/&lt;desk folder&gt;/reports/</code>.',
+      })}</p>`;
     } else if (q) {
       const hits = reports.filter((r) => r.title.toLowerCase().includes(q) || r.path.toLowerCase().includes(q));
-      tree.innerHTML = hits.length ? hits.map((r) => fileRow(r, s, true)).join('') : '<p class="muted small">검색 결과가 없습니다.</p>';
+      tree.innerHTML = hits.length ? hits.map((r) => fileRow(r, s, true)).join('') : `<p class="muted small">${tr({ ko: '검색 결과가 없습니다.', en: 'No matches.' })}</p>`;
     } else {
       tree.innerHTML = dirHtml(buildTree(reports), s);
     }
@@ -212,20 +229,20 @@ function renderViewer(st: UIState, force: boolean) {
   const content = loaded && file && loaded.path === file.path ? loaded : null;
   if (!force && !changed('rp-viewer', [openPath, !!file, content?.mtime, content?.content.length, raw, st.snap.employees.length])) return;
   if (!openPath) {
-    view.innerHTML = `<p class="muted">왼쪽에서 보고서를 고르세요.</p>`;
+    view.innerHTML = `<p class="muted">${tr({ ko: '왼쪽에서 보고서를 고르세요.', en: 'Pick a report on the left.' })}</p>`;
     return;
   }
   if (!file) {
-    view.innerHTML = `<p class="muted">${esc(openPath)} — 목록에 없는 파일입니다 (삭제되었거나 아직 스캔되지 않음).</p>`;
+    view.innerHTML = `<p class="muted">${esc(openPath)} — ${tr({ ko: '목록에 없는 파일입니다 (삭제되었거나 아직 스캔되지 않음).', en: 'not in the list (deleted, or not scanned yet).' })}</p>`;
     return;
   }
   const who = file.employeeId ? st.snap.employees.find((e) => e.id === file.employeeId) : undefined;
   const head = `<div class="rp-head">
       <div><b>${esc(file.title)}</b><div class="muted small">${esc(file.path)} · ${esc(fmt(file.mtime))}${who ? ` · ${esc(short(who.name))}` : ''}</div></div>
-      <div class="row"><button data-act="raw">${raw ? '렌더링 보기' : '원문 보기'}</button><button data-act="reload">새로고침</button></div>
+      <div class="row"><button data-act="raw">${raw ? tr({ ko: '렌더링 보기', en: 'Rendered' }) : tr({ ko: '원문 보기', en: 'Source' })}</button><button data-act="reload">${tr({ ko: '새로고침', en: 'Reload' })}</button></div>
     </div>`;
   if (!content) {
-    view.innerHTML = head + `<p class="muted">불러오는 중…</p>`;
+    view.innerHTML = head + `<p class="muted">${tr({ ko: '불러오는 중…', en: 'Loading…' })}</p>`;
     return;
   }
   // keep the reading position when the same file re-renders (e.g. it changed on disk)

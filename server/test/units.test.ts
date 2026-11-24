@@ -13,7 +13,7 @@ describe('statusForTool', () => {
     expect(statusForTool('Edit', { file_path: '/a/b/model.py' }).activity).toContain('model.py');
     const r = statusForTool('mcp__lab__submit_job', { server: 'gpu-a', name: 'train' });
     expect(r.status).toBe('remote');
-    expect(r.activity).toContain('gpu-a에');
+    expect(r.activity).toContain('to gpu-a');
   });
 });
 
@@ -213,7 +213,7 @@ describe('RoutineScheduler', () => {
   it('rejects bad cron / unknown employee / empty prompt', () => {
     const sch = new RoutineScheduler([], new Store(':memory:'), () => {}, isEmp);
     expect(() => sch.create({ name: 'a', schedule: '0 9 * *', employee: 'sec', prompt: 'p' })).toThrow(/cron/);
-    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'ghost', prompt: 'p' })).toThrow(/직원/);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'ghost', prompt: 'p' })).toThrow(/employee/);
     expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', prompt: ' ' })).toThrow(/prompt/);
     expect(sch.list()).toHaveLength(0);
     const r = sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', prompt: 'p' });
@@ -265,9 +265,9 @@ describe('toUsageRows', () => {
       },
     });
     expect(rows.map((r) => [r.kind, r.label, r.percent, r.severity])).toEqual([
-      ['session', '세션 (5시간)', 5, 'normal'],
-      ['weekly_all', '주간 (전체)', 42, 'warning'],
-      ['weekly_scoped', '주간 · Fable', 1, 'normal'],
+      ['session', 'Session (5 h)', 5, 'normal'],
+      ['weekly_all', 'Weekly (all)', 42, 'warning'],
+      ['weekly_scoped', 'Weekly · Fable', 1, 'normal'],
     ]);
     expect(rows[0].resetsAt).toBe(Date.parse('2026-11-23T10:40:00+00:00'));
   });
@@ -336,9 +336,9 @@ describe('SkillLibrary', () => {
   });
   it('rejects bad names and empty content', () => {
     const { lib } = setup();
-    expect(() => lib.save('../evil', 'd', 'b', [])).toThrow(/이름/);
-    expect(() => lib.save('Bad Name', 'd', 'b', [])).toThrow(/이름/);
-    expect(() => lib.save('ok-name', ' ', 'b', [])).toThrow(/설명/);
+    expect(() => lib.save('../evil', 'd', 'b', [])).toThrow(/Skill names/);
+    expect(() => lib.save('Bad Name', 'd', 'b', [])).toThrow(/Skill names/);
+    expect(() => lib.save('ok-name', ' ', 'b', [])).toThrow(/description/);
     expect(lib.allowFor('missing')).toBeNull();
   });
 });
@@ -348,21 +348,21 @@ describe('RoutineScheduler with skills', () => {
   it('requires an existing skill or a prompt, and builds a skill instruction', () => {
     const fired: Array<[string, string | null]> = [];
     const sch = new RoutineScheduler([], new Store(':memory:'), (_e, p, _n, sk) => fired.push([p, sk]), isEmp, (n) => n === 'daily-note');
-    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', skill: 'ghost' })).toThrow(/스킬/);
+    expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec', skill: 'ghost' })).toThrow(/skill/);
     expect(() => sch.create({ name: 'a', schedule: '0 9 * * *', employee: 'sec' })).toThrow(/prompt/);
     const r = sch.create({ name: '노트', schedule: '0 9 * * *', employee: 'sec', skill: 'daily-note' });
     expect(r.skill).toBe('daily-note');
     sch.run(r.id, new Date(2026, 10, 23, 9, 0));
     expect(fired[0][1]).toBe('daily-note');
     expect(fired[0][0]).toContain('`office:daily-note`');
-    expect(fired[0][0]).not.toContain('추가 메모');
+    expect(fired[0][0]).not.toContain('Additional notes');
     sch.update(r.id, { skill: '', prompt: 'plain' });
     expect(sch.list()[0].skill).toBeNull();
   });
   it('routinePrompt appends notes for skill routines and passes plain prompts through', () => {
     const now = new Date(2026, 10, 23, 9, 0);
-    expect(routinePrompt({ name: 'n', prompt: '오늘은 짧게', skill: 's' }, now)).toMatch(/office:s[\s\S]*추가 메모: 오늘은 짧게$/);
-    expect(routinePrompt({ name: 'n', prompt: 'do it', skill: null }, now)).toMatch(/^\[루틴: n · .*\]\ndo it$/);
+    expect(routinePrompt({ name: 'n', prompt: '오늘은 짧게', skill: 's' }, now)).toMatch(/office:s[\s\S]*Additional notes: 오늘은 짧게$/);
+    expect(routinePrompt({ name: 'n', prompt: 'do it', skill: null }, now)).toMatch(/^\[Routine: n · .*\]\ndo it$/);
   });
   it('adds the skill column to a routines table from the previous version', () => {
     const f = join(mkdtempSync(join(tmpdir(), 'office-db-')), 'office.db');
@@ -531,7 +531,7 @@ describe('Obsidian daily note', () => {
     expect(t2.split('\n')[21]).toBe('\t- [ ] 결합 pose 시각화');
     const t3 = applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '구조 figure 3개' });
     expect(t3.split('\n')[18]).toBe('- [ ] 구조 figure 3개 ↻1');
-    expect(() => applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '  ' })).toThrow(/비어/);
+    expect(() => applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '  ' })).toThrow(/empty/);
   });
 
   it('adds to the end of a block or under a parent, and deletes whole subtrees', () => {
@@ -550,9 +550,9 @@ describe('Obsidian daily note', () => {
   });
 
   it('refuses stale edits and keeps CRLF / trailing newline', () => {
-    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 다른 내용' })).toThrow(/바뀌었습니다/);
-    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 999, raw: 'x' })).toThrow(/바뀌었습니다/);
-    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 17, raw: '무조건 이번주까지..!!' })).toThrow(/체크박스/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 다른 내용' })).toThrow(/changed/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 999, raw: 'x' })).toThrow(/changed/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 17, raw: '무조건 이번주까지..!!' })).toThrow(/checkbox/);
     const crlf = NOTE.replace(/\n/g, '\r\n');
     const out = applyTodoOp(crlf, { op: 'toggle', line: 12, raw: '- [ ] 전략 정하기 ↻1' });
     expect(out).toBe(crlf.replace('- [ ] 전략 정하기 ↻1', '- [x] 전략 정하기 ↻1'));
@@ -708,7 +708,7 @@ describe('attachments', async () => {
     expect(v.hasText).toBe(true);
     const r = lib.rows([v.id])[0];
     expect(readFileSync(r.textPath!, 'utf8')).toContain('단백질 구조 메모');
-    expect(attachmentBlock([r])).toContain('본문 텍스트');
+    expect(attachmentBlock([r])).toContain('extracted text');
   });
 });
 
@@ -1162,7 +1162,7 @@ describe('office seating', async () => {
     const b = s.addProjectSession(p.id);
     expect([a.desk, b.desk]).toEqual([-1, -1]); // tab only
     expect(a.label).toBe('학습');
-    expect(b.label).toBe('세션 2');
+    expect(b.label).toBe('Session 2');
 
     const staff = [0, 1]; // lit and eval hold these grid slots
     expect(s.setSessionDesk(a.id, true, staff)).toBe(2);
@@ -1335,7 +1335,7 @@ describe('ssh budget: nothing routes around it', async () => {
     const args: any = { command: 'claude', args: ['--version'], cwd: '/tmp', env: {} };
     // two go through (they fail to connect, which is fine — we only care that budget is spent)
     for (let i = 0; i < 2; i++) spawnRemote(cfg, args).kill('SIGKILL');
-    expect(() => spawnRemote(cfg, args)).toThrow(/분당 2회/);
+    expect(() => spawnRemote(cfg, args)).toThrow(/2 per minute/);
     setSshLimit(5);
   });
 
@@ -1412,12 +1412,12 @@ describe('usage limit: park and resume', async () => {
     await settle(60);
     const parked = m.views()[0];
     expect(parked.status).toBe('error'); // not stuck on "thinking"
-    expect(parked.activity).toContain('사용량 한도');
+    expect(parked.activity).toContain('Usage limit');
     expect(parked.parkedUntil).toBeGreaterThan(0);
 
     await settle(2600); // the reset time passes
     expect(sdk.prompts).toHaveLength(2);
-    expect(sdk.prompts[1]).toContain('[자동 재개]'); // told not to redo what it already did
+    expect(sdk.prompts[1]).toContain('[Auto-resume]'); // told not to redo what it already did
     expect(m.views()[0].parkedUntil).toBeUndefined();
   });
 
@@ -1439,7 +1439,81 @@ describe('usage limit: park and resume', async () => {
     await settle(60);
     expect(m.resumeNow('lit')).toBe(true);
     await settle(60);
-    expect(sdk.prompts[1]).toContain('[재개]');
+    expect(sdk.prompts[1]).toContain('[Resumed]');
     expect(m.resumeNow('lit')).toBe(false); // nothing left parked
+  });
+});
+
+describe('language', async () => {
+  const { AgentManager, reportLanguageLine } = await import('../src/agents/manager.ts');
+  const { getLang, setLang, tr } = await import('../../shared/i18n.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  it('people-facing text follows the office language', () => {
+    const before = getLang();
+    try {
+      setLang('ko');
+      expect(tr({ ko: '가', en: 'a' })).toBe('가');
+      expect(statusForTool('mcp__lab__submit_job', { server: 'gpu-a', name: 'train' }).activity).toContain('gpu-a에');
+      setLang('en');
+      expect(statusForTool('mcp__lab__submit_job', { server: 'gpu-a', name: 'train' }).activity).toContain('to gpu-a');
+    } finally {
+      setLang(before);
+    }
+  });
+
+  it('the settings table round-trips', () => {
+    const store = new Store(':memory:');
+    expect(store.getSetting('language')).toBeNull();
+    store.setSetting('language', 'ko');
+    store.setSetting('language', 'en');
+    expect(store.getSetting('language')).toBe('en');
+  });
+
+  it('prompts tell the agent which language to report in, and a switch reopens the session', async () => {
+    const before = getLang();
+    const appends: string[] = [];
+    const queryFn: any = ({ prompt, options }: any) => {
+      appends.push(options.systemPrompt.append);
+      const out: any[] = [];
+      let wake: any = null;
+      let closed = false;
+      const emit = (m: any) => { out.push(m); wake?.(); };
+      void (async () => {
+        for await (const _ of prompt as AsyncIterable<any>) {
+          emit({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude', permissionMode: 'auto' });
+          emit({ type: 'result', subtype: 'success', result: 'ok', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+        }
+        closed = true; wake?.();
+      })();
+      return {
+        async *[Symbol.asyncIterator]() { for (;;) { while (out.length) yield out.shift(); if (closed) return; await new Promise<void>((r) => (wake = r)); wake = null; } },
+        setPermissionMode: async () => {}, setModel: async () => {}, interrupt: async () => {},
+        close: () => { closed = true; wake?.(); },
+      };
+    };
+    const office: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: mkdtempSync(join(tmpdir(), 'office-lang-')), reportDirs: [], obsidian: null, providers: [], hosts: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787, authToken: '', sshPerMinute: 5, language: 'en' };
+    const role: any = { id: 'lit', name: 'Ada', title: 'R', desk: 0, sprite: {}, useWorktree: false, autoAllow: [], systemPrompt: 'You are Ada.' };
+    const m = new AgentManager(office, [role], new Store(':memory:'), new PermissionBroker(), { list: () => [], isRemote: () => true } as any);
+    m.queryFn = queryFn;
+    const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      setLang('ko');
+      m.instruct('lit', 'a');
+      await settle(60);
+      m.instruct('lit', 'b'); // same language: the open session is reused
+      await settle(60);
+      expect(appends).toEqual([`You are Ada.\n\n${reportLanguageLine('ko')}`]);
+      setLang('en');
+      m.instruct('lit', 'c');
+      await settle(60);
+      expect(appends).toHaveLength(2);
+      expect(appends[1]).toContain('in English');
+    } finally {
+      setLang(before);
+      m.stop('lit');
+    }
   });
 });

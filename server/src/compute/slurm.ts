@@ -1,3 +1,4 @@
+import { tr } from '../../../shared/i18n.ts';
 import type { JobState } from '../../../shared/protocol.ts';
 import type { ServerConfig } from '../config.ts';
 import { type ComputeAdapter, type Exec, type SubmitSpec, jobScript, slug, sq, sshExec } from './adapter.ts';
@@ -20,7 +21,10 @@ export class SlurmAdapter implements ComputeAdapter {
     if (r.code !== 0 && !r.stdout.includes('MINE=')) throw new Error(r.stderr.trim() || `ssh exit ${r.code}`);
     const mine = /MINE=(\d+) RUN=(\d+)/.exec(r.stdout);
     const nodes = r.stdout.split('\n').slice(1).join(' ').trim();
-    return { gpus: [], note: `내 job ${mine?.[1] ?? '?'}개 (실행 ${mine?.[2] ?? '?'}) · 노드 ${nodes || '?'}` };
+    return { gpus: [], note: tr({
+        ko: `내 job ${mine?.[1] ?? '?'}개 (실행 ${mine?.[2] ?? '?'}) · 노드 ${nodes || '?'}`,
+        en: `my jobs ${mine?.[1] ?? '?'} (running ${mine?.[2] ?? '?'}) · nodes ${nodes || '?'}`,
+      }) };
   }
 
   async submit(spec: SubmitSpec) {

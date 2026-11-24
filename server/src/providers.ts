@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { tr } from '../../shared/i18n.ts';
 import type { ProviderView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import type { ProviderConfig } from './config.ts';
@@ -59,7 +60,7 @@ export class OllamaLink {
       version: null,
       models: [],
       model: store.getProviderModel(cfg.id) ?? cfg.model,
-      error: '연결 중…',
+      error: tr({ ko: '연결 중…', en: 'Connecting…' }),
     };
   }
 
@@ -94,7 +95,7 @@ export class OllamaLink {
       if (this.proc === p) this.proc = null;
       if (this.stopped) return;
       // a port already forwarded (e.g. by an earlier dev instance) also lands here; the health check decides
-      void this.check(stderr.trim().split('\n').pop() || 'ssh 터널 종료');
+      void this.check(stderr.trim().split('\n').pop() || tr({ ko: 'ssh 터널 종료', en: 'ssh tunnel closed' }));
       const wait = this.backoff;
       this.backoff = Math.min(this.backoff * 2, 60_000);
       this.timers.push(setTimeout(() => !this.stopped && this.openTunnel(), wait));
@@ -118,7 +119,8 @@ export class OllamaLink {
       this.backoff = 5_000;
     } catch (err) {
       const msg = tunnelError ?? (err as Error).message;
-      next = { ...this.view, ok: false, error: `${this.cfg.ssh_host}:${this.cfg.remotePort} 응답 없음 (${msg})` };
+      const where = `${this.cfg.ssh_host}:${this.cfg.remotePort}`;
+      next = { ...this.view, ok: false, error: tr({ ko: `${where} 응답 없음 (${msg})`, en: `no response from ${where} (${msg})` }) };
     }
     const changed = JSON.stringify(next) !== JSON.stringify(this.view);
     this.view = next;
@@ -126,7 +128,7 @@ export class OllamaLink {
   }
 
   setModel(model: string) {
-    if (!this.view.models.includes(model)) throw new Error(`${this.cfg.name}에 설치되지 않은 모델: ${model}`);
+    if (!this.view.models.includes(model)) throw new Error(tr({ ko: `${this.cfg.name}에 설치되지 않은 모델: ${model}`, en: `Model not installed on ${this.cfg.name}: ${model}` }));
     this.store.setProviderModel(this.cfg.id, model);
     this.view = { ...this.view, model };
     bus.send({ t: 'provider', data: { ...this.view } });
@@ -134,7 +136,12 @@ export class OllamaLink {
 
   /** what AgentManager needs to start a run, or why it can't */
   runtime(): { model: string; env: Record<string, string> } | { error: string } {
-    if (!this.view.ok) return { error: `${this.cfg.name} Ollama에 연결할 수 없음: ${this.view.error ?? '알 수 없음'}` };
+    if (!this.view.ok) return {
+        error: tr({
+          ko: `${this.cfg.name} Ollama에 연결할 수 없음: ${this.view.error ?? '알 수 없음'}`,
+          en: `Cannot reach ${this.cfg.name} Ollama: ${this.view.error ?? 'unknown'}`,
+        }),
+      };
     return { model: this.view.model, env: ollamaEnv(process.env, this.port, this.view.model) };
   }
 }
@@ -166,7 +173,7 @@ export class ProviderHub {
   }
   setModel(providerId: string, model: string) {
     const l = this.links.get(providerId);
-    if (!l) throw new Error(`알 수 없는 provider: ${providerId}`);
+    if (!l) throw new Error(tr({ ko: `알 수 없는 provider: ${providerId}`, en: `Unknown provider: ${providerId}` }));
     l.setModel(model);
   }
 }

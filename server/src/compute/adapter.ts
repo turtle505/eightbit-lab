@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { sshControlOpts, sshThrottle } from '../hosts.ts';
+import { tr } from '../../../shared/i18n.ts';
 import type { GpuInfo, JobState } from '../../../shared/protocol.ts';
 import type { ServerConfig } from '../config.ts';
 
@@ -31,7 +32,7 @@ export interface Exec {
 export const sshExec: Exec = (host, script, timeoutMs = 30_000) =>
   new Promise((resolve) => {
     if (!sshThrottle.allow(host)) {
-      resolve({ code: -1, stdout: '', stderr: `ssh 횟수 제한 (${host}: 분당 ${sshThrottle.limitFor(host)}회)` });
+      resolve({ code: -1, stdout: '', stderr: tr({ ko: `ssh 횟수 제한 (${host}: 분당 ${sshThrottle.limitFor(host)}회)`, en: `ssh rate limit (${host}: ${sshThrottle.limitFor(host)} per minute)` }) });
       return;
     }
     // polled every 20-60s, so it shares one master connection per host (see hosts.ts sshControlOpts)

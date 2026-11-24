@@ -9,14 +9,15 @@
   </head>
   <body>
     <header class="topbar">
-      <h1><span class="ico">🧬 </span><span class="t-game">8-BIT LAB</span><span class="t-console">8-bit Lab <span class="muted">/ console</span></span><span class="t-reports">8-bit Lab <span class="muted">/ 보고서</span></span></h1>
+      <h1><span class="ico">🧬 </span><span class="t-game">8-BIT LAB</span><span class="t-console">8-bit Lab <span class="muted">/ console</span></span><span class="t-reports">8-bit Lab <span class="muted">/ <span data-i18n="h.reports">보고서</span></span></span></h1>
       <div id="stats" class="stats"></div>
-      <button id="notify-btn" hidden title="완료·승인 요청을 데스크톱 알림으로 받기">알림 켜기</button>
-      <div class="view-toggle" role="group" aria-label="화면 전환 (단축키 `)">
-        <button type="button" data-view="game" aria-pressed="true">게임</button>
-        <button type="button" data-view="console" aria-pressed="false">콘솔</button>
-        <button type="button" data-view="reports" aria-pressed="false">보고서<span id="reports-unread" class="tab-badge" hidden></span></button>
-        <button type="button" data-view="projects" aria-pressed="false">프로젝트</button>
+      <button id="notify-btn" hidden data-i18n="notify" data-i18n-title="notify.title" title="완료·승인 요청을 데스크톱 알림으로 받기">알림 켜기</button>
+      <button id="lang-btn" type="button" class="lang-btn" title="한국어 / English">EN</button>
+      <div class="view-toggle" role="group" data-i18n-aria="view.toggle" aria-label="화면 전환 (단축키 `)">
+        <button type="button" data-view="game" aria-pressed="true" data-i18n="view.game">게임</button>
+        <button type="button" data-view="console" aria-pressed="false" data-i18n="view.console">콘솔</button>
+        <button type="button" data-view="reports" aria-pressed="false"><span data-i18n="view.reports">보고서</span><span id="reports-unread" class="tab-badge" hidden></span></button>
+        <button type="button" data-view="projects" aria-pressed="false" data-i18n="view.projects">프로젝트</button>
       </div>
     </header>
 
@@ -34,15 +35,15 @@
       <aside class="right">
         <div data-slot="todos"><section id="todos" class="panel todos" hidden></section></div>
         <section class="panel">
-          <h2>📋 작업 보드</h2>
+          <h2 data-i18n="board">📋 작업 보드</h2>
           <form id="task-form" class="task-form">
-            <input id="task-title" placeholder="새 작업 제목 (예: FrameFlow 논문 요약)" autocomplete="off" />
-            <textarea id="task-detail" rows="2" placeholder="세부 지시 (선택)"></textarea>
+            <input id="task-title" data-i18n-placeholder="task.title.long" placeholder="새 작업 제목 (예: FrameFlow 논문 요약)" autocomplete="off" />
+            <textarea id="task-detail" rows="2" data-i18n-placeholder="task.detail" placeholder="세부 지시 (선택)"></textarea>
             <div class="row">
               <select id="task-assignee"></select>
-              <button type="button" id="task-attach" class="icon-btn attach-btn" title="파일 첨부 (폼에 끌어다 놓아도 됨)">📎</button>
-              <label class="lock-opt" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="task-lock" /> 🔒 승인</label>
-              <button class="primary" type="submit">추가</button>
+              <button type="button" id="task-attach" class="icon-btn attach-btn" data-i18n-title="attach.form" title="파일 첨부 (폼에 끌어다 놓아도 됨)">📎</button>
+              <label class="lock-opt" data-i18n-title="lock.title" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="task-lock" /> <span data-i18n="lock.short">🔒 승인</span></label>
+              <button class="primary" type="submit" data-i18n="add">추가</button>
             </div>
             <div id="task-chips" class="att-chips" hidden></div>
           </form>
@@ -59,25 +60,25 @@
       <div class="c-grid">
         <div class="c-main">
           <section class="panel">
-            <div class="c-head"><h2>직원</h2><span class="muted small"><kbd>1</kbd>–<kbd>5</kbd> 선택 · <kbd>j</kbd>/<kbd>k</kbd> 이동 · <kbd>/</kbd> 지시 · <kbd>Esc</kbd> 해제 · <kbd>`</kbd> 화면 전환</span></div>
+            <div class="c-head"><h2 data-i18n="c.staff">직원</h2><span class="muted small"><kbd>1</kbd>–<kbd>5</kbd> <span data-i18n="k.select">선택</span> · <kbd>j</kbd>/<kbd>k</kbd> <span data-i18n="k.move">이동</span> · <kbd>/</kbd> <span data-i18n="k.instruct">지시</span> · <kbd>Esc</kbd> <span data-i18n="k.clear">해제</span> · <kbd>`</kbd> <span data-i18n="k.view">화면 전환</span></span></div>
             <div id="c-staff"></div>
           </section>
           <section class="panel">
-            <div class="c-head"><h2>작업</h2></div>
+            <div class="c-head"><h2 data-i18n="c.tasks">작업</h2></div>
             <form id="c-task-form" class="c-task-form">
-              <input id="c-task-title" placeholder="새 작업 제목" autocomplete="off" />
-              <input id="c-task-detail" placeholder="세부 지시 (선택)" autocomplete="off" />
+              <input id="c-task-title" data-i18n-placeholder="task.title" placeholder="새 작업 제목" autocomplete="off" />
+              <input id="c-task-detail" data-i18n-placeholder="task.detail" placeholder="세부 지시 (선택)" autocomplete="off" />
               <select id="c-task-assignee"></select>
-              <button type="button" id="c-task-attach" class="attach-btn" title="파일 첨부 (입력줄에 끌어다 놓아도 됨)">첨부</button>
-              <label class="lock-opt" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="c-task-lock" /> 승인 받기</label>
-              <button class="primary" type="submit">추가</button>
+              <button type="button" id="c-task-attach" class="attach-btn" data-i18n="attach" data-i18n-title="attach.line" title="파일 첨부 (입력줄에 끌어다 놓아도 됨)">첨부</button>
+              <label class="lock-opt" data-i18n-title="lock.title" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="c-task-lock" /> <span data-i18n="lock.long">승인 받기</span></label>
+              <button class="primary" type="submit" data-i18n="add">추가</button>
               <div id="c-task-chips" class="att-chips" hidden></div>
             </form>
             <div id="c-tasks"></div>
           </section>
           <div data-slot="report-feed"></div>
           <section class="panel">
-            <div class="c-head"><h2>활동 피드</h2></div>
+            <div class="c-head"><h2 data-i18n="c.feed">활동 피드</h2></div>
             <div id="c-feed"></div>
           </section>
         </div>

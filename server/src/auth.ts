@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { getLang, tr } from '../../shared/i18n.ts';
 
 export const COOKIE = 'office_token';
 /** the browser keeps it for half a year; this is a personal tool, not a shared service */
@@ -45,9 +46,9 @@ export const suggestToken = () => randomBytes(24).toString('base64url');
 
 /** Tiny page that asks for the token and stores it as a cookie. */
 export const loginPage = (wrong: boolean) => `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8" />
+<html lang="${getLang()}"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>8-bit Lab · 잠김</title>
+<title>8-bit Lab · ${tr({ ko: '잠김', en: 'Locked' })}</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; display: grid; place-items: center;
@@ -64,8 +65,11 @@ export const loginPage = (wrong: boolean) => `<!doctype html>
 </style></head>
 <body><form method="POST" action="/api/login">
   <h1>🧬 8-bit Lab</h1>
-  <p>사무실 토큰을 입력하세요. 이 브라우저에 저장됩니다.<br />토큰은 서버의 <code>config/office.local.yaml</code> 에 있습니다.</p>
+  <p>${tr({
+    ko: '사무실 토큰을 입력하세요. 이 브라우저에 저장됩니다.<br />토큰은 서버의 <code>config/office.local.yaml</code> 에 있습니다.',
+    en: 'Enter the office token. This browser will remember it.<br />The token is in <code>config/office.local.yaml</code> on the server.',
+  })}</p>
   <input type="password" name="token" autofocus autocomplete="current-password" placeholder="office token" />
-  ${wrong ? '<p class="bad">토큰이 올바르지 않습니다.</p>' : ''}
-  <button type="submit">들어가기</button>
+  ${wrong ? `<p class="bad">${tr({ ko: '토큰이 올바르지 않습니다.', en: 'Wrong token.' })}</p>` : ''}
+  <button type="submit">${tr({ ko: '들어가기', en: 'Enter' })}</button>
 </form></body></html>`;

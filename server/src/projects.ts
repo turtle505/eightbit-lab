@@ -1,3 +1,4 @@
+import { tr } from '../../shared/i18n.ts';
 import type { ProjectView } from '../../shared/protocol.ts';
 import type { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
@@ -46,15 +47,15 @@ export function sessionSprite(projectId: string, sessionId: string) {
 /** Tools a project session gets without asking. Everything else goes through auto mode / approval. */
 const PROJECT_AUTO_ALLOW = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite', 'mcp__lab__list_servers', 'mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log'];
 
-const prompt = (name: string, dir: string) => `당신은 "${name}" 프로젝트 폴더(${dir})에서 매니저를 돕습니다.
-이 폴더가 당신의 작업 공간입니다. 고치기 전에 기존 코드와 문서를 먼저 읽으세요.
-- 사실과 추측을 구분하고, 확인하지 못한 것은 "미확인"이라고 쓰세요.
-- 마지막 응답에 변경한 파일과 다음 단계를 짧게 남기세요.
-- 랩 서버에 닿는 호출(원격 job 제출·취소, ssh/scp)은 매니저 승인 카드가 뜹니다. 정상입니다.
-- 랩 서버 접속(ssh·scp·rsync)은 분당 횟수가 제한됩니다. 반복문으로 접속하지 말고 한 번의 접속에서 명령을 묶으세요.
-- 파일은 되도록 옮기지 마세요. 이 세션이 그 서버 안에서 돌고 있으니 제자리에서 읽으면 됩니다.
-  꼭 옮겨야 하면 하나씩 scp 하지 말고 tar 로 묶어 한 번에 보내세요 (개별 전송으로 연구실 IP 가 차단된 적이 있습니다).
-- 대용량 파일을 통째로 읽지 말고 head/grep 으로 필요한 부분만 보세요. 큰 출력은 그대로 네트워크를 탑니다.`;
+const prompt = (name: string, dir: string) => `You help the manager in the "${name}" project folder (${dir}).
+This folder is your workspace. Read the existing code and docs before changing anything.
+- Separate facts from guesses, and mark anything you could not verify as "unverified".
+- End your final reply with a short list of the files you changed and the next steps.
+- Calls that reach a lab server (submitting/cancelling remote jobs, ssh/scp) bring up an approval card for the manager. That is expected.
+- Connections to lab servers (ssh/scp/rsync) are rate-limited per minute. Don't connect in a loop; batch commands into one connection.
+- Avoid moving files. This session runs on that server, so read them in place.
+  If you must move them, don't scp them one by one: bundle them with tar and send once (individual transfers have gotten the lab's IP banned before).
+- Don't read large files whole; look at just the parts you need with head/grep. Big output goes over the network as-is.`;
 
 /**
  * Projects are folders on a host; each can hold several independent Claude Code sessions.
@@ -71,9 +72,9 @@ export class ProjectRegistry {
   /** Role for one session. Throws if its host is gone or not reachable yet. */
   private roleFor(projectId: string, sessionId: string, label: string, desk: number): RoleConfig {
     const p = this.store.getProject(projectId);
-    if (!p) throw new Error(`없는 프로젝트: ${projectId}`);
+    if (!p) throw new Error(tr({ ko: `없는 프로젝트: ${projectId}`, en: `No such project: ${projectId}` }));
     const host = this.hosts.get(p.hostId);
-    if (!host) throw new Error(`설정에 없는 host: ${p.hostId}`);
+    if (!host) throw new Error(tr({ ko: `설정에 없는 host: ${p.hostId}`, en: `Host not in config: ${p.hostId}` }));
     const cwd = host.projectDir(p.dir);
     return {
       id: sessionId,
@@ -96,7 +97,12 @@ export class ProjectRegistry {
       try {
         this.agents.addWorker(this.roleFor(s.projectId, s.id, s.label, s.desk));
       } catch (e) {
-        console.warn(`⚠️ 프로젝트 세션 ${s.id} 복구 실패: ${(e as Error).message}`);
+        console.warn(
+          tr({
+            ko: `⚠️ 프로젝트 세션 ${s.id} 복구 실패: ${(e as Error).message}`,
+            en: `⚠️ Failed to restore project session ${s.id}: ${(e as Error).message}`,
+          }),
+        );
       }
     }
   }
@@ -122,11 +128,11 @@ export class ProjectRegistry {
   /** Create a project and open its first session. The folder must already exist on the host. */
   async create(hostId: string, name: string, dir: string, label?: string) {
     const host = this.hosts.get(hostId);
-    if (!host) throw new Error(`설정에 없는 host: ${hostId}`);
-    if (!host.view.ok) throw new Error(`${host.view.name} 에 연결할 수 없습니다: ${host.view.error ?? ''}`);
+    if (!host) throw new Error(tr({ ko: `설정에 없는 host: ${hostId}`, en: `Host not in config: ${hostId}` }));
+    if (!host.view.ok) throw new Error(tr({ ko: `${host.view.name} 에 연결할 수 없습니다: ${host.view.error ?? ''}`, en: `Cannot reach ${host.view.name}: ${host.view.error ?? ''}` }));
     const clean = dir.trim().replace(/\/+$/, '');
-    if (!clean || clean.includes('..')) throw new Error('폴더 경로가 올바르지 않습니다');
-    if (!(await host.dirExists(host.projectDir(clean)))) throw new Error(`${host.view.name} 에 ${clean} 폴더가 없습니다`);
+    if (!clean || clean.includes('..')) throw new Error(tr({ ko: '폴더 경로가 올바르지 않습니다', en: 'Invalid folder path' }));
+    if (!(await host.dirExists(host.projectDir(clean)))) throw new Error(tr({ ko: `${host.view.name} 에 ${clean} 폴더가 없습니다`, en: `${host.view.name} has no folder ${clean}` }));
     const p = this.store.createProject(hostId, name.trim() || clean, clean);
     this.addSession(p.id, label);
     return p;

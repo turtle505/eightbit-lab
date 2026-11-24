@@ -4,6 +4,7 @@
 //   xxx_log:: ...                   log field (skipped)
 //   - [ ] task ↻2                   checkbox, "↻N" = carried over N times; tab-indented children
 //   	- description                 non-checkbox sub-bullet = description of the item above
+import { tr } from '../../shared/i18n.ts';
 import type { TodoItem, TodoOp, TodoProject, TodoSection } from '../../shared/protocol.ts';
 
 const SEC_RE = /^##\s+(.*)$/;
@@ -97,10 +98,11 @@ export function parseDaily(src: string): TodoSection[] {
 
 // ---------------------------------------------------------------- edits
 
-const STALE = '노트가 그새 바뀌었습니다. 다시 불러온 뒤 시도하세요.';
+const notBox = () => tr({ ko: '체크박스 줄이 아닙니다.', en: 'Not a checkbox line.' });
+const stale = () => tr({ ko: '노트가 그새 바뀌었습니다. 다시 불러온 뒤 시도하세요.', en: 'The note changed in the meantime. Reload and try again.' });
 
 function check(lines: string[], line: number, raw: string) {
-  if (line < 0 || line >= lines.length || lines[line] !== raw) throw new Error(STALE);
+  if (line < 0 || line >= lines.length || lines[line] !== raw) throw new Error(stale());
 }
 
 /** Last line of an item including its deeper-indented children/descriptions. */
@@ -129,7 +131,7 @@ function blockEnd(lines: string[], header: number): number {
 
 const oneLine = (s: string) => s.replace(/\s*\r?\n\s*/g, ' ').trim();
 
-/** Apply one edit to the note text; throws (Korean message) when the target line no longer matches. */
+/** Apply one edit to the note text; throws (message in the office language) when the target line no longer matches. */
 export function applyTodoOp(src: string, op: TodoOp): string {
   const eol = src.includes('\r\n') ? '\r\n' : '\n';
   const lines = src.split(/\r?\n/);
@@ -137,30 +139,30 @@ export function applyTodoOp(src: string, op: TodoOp): string {
     case 'toggle': {
       check(lines, op.line, op.raw);
       const m = op.raw.match(BOX_RE);
-      if (!m) throw new Error('체크박스 줄이 아닙니다.');
+      if (!m) throw new Error(notBox());
       lines[op.line] = op.raw.replace(/\[([ xX])\]/, m[2] === ' ' ? '[x]' : '[ ]');
       break;
     }
     case 'edit': {
       check(lines, op.line, op.raw);
       const m = op.raw.match(/^(\s*-\s*\[[ xX]\]\s?)(.*)$/);
-      if (!m) throw new Error('체크박스 줄이 아닙니다.');
+      if (!m) throw new Error(notBox());
       const text = oneLine(op.text);
-      if (!text) throw new Error('내용이 비어 있습니다. 지우려면 삭제를 쓰세요.');
+      if (!text) throw new Error(tr({ ko: '내용이 비어 있습니다. 지우려면 삭제를 쓰세요.', en: 'The text is empty. Use delete to remove the item.' }));
       const carry = m[2].match(CARRY_RE);
       lines[op.line] = m[1] + text + (carry ? ` ↻${carry[1]}` : '');
       break;
     }
     case 'delete': {
       check(lines, op.line, op.raw);
-      if (!BOX_RE.test(op.raw)) throw new Error('체크박스 줄이 아닙니다.');
+      if (!BOX_RE.test(op.raw)) throw new Error(notBox());
       lines.splice(op.line, subtreeEnd(lines, op.line) - op.line + 1);
       break;
     }
     case 'add': {
       check(lines, op.headerLine, op.headerRaw);
       const text = oneLine(op.text);
-      if (!text) throw new Error('내용이 비어 있습니다.');
+      if (!text) throw new Error(tr({ ko: '내용이 비어 있습니다.', en: 'The text is empty.' }));
       if (op.parentLine != null) {
         check(lines, op.parentLine, op.parentRaw ?? '');
         const lead = lines[op.parentLine].match(/^\s*/)![0];

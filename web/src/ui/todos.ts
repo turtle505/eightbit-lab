@@ -1,5 +1,6 @@
-// ✅ 오늘 할 일: checkbox items of today's Obsidian daily note — check, edit, add, delete in place.
+// ✅ Today's to-dos: checkbox items of today's Obsidian daily note — check, edit, add, delete in place.
 import type { TodayTodos, TodoItem, TodoOp, TodoProject } from '../../../shared/protocol.ts';
+import { locale, tr } from '../../../shared/i18n.ts';
 import { renderInline } from './markdown.ts';
 import { $, type Send, type UIState, changed, esc, ico } from './panels.ts';
 
@@ -34,7 +35,7 @@ const visible = (it: TodoItem): boolean => !hideDone || !it.checked || it.childr
 
 function editor(value: string, placeholder: string): string {
   return `<form class="td-edit"><input name="t" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off" />
-    <button class="primary" type="submit">저장</button><button type="button" data-act="cancel">취소</button></form>`;
+    <button class="primary" type="submit">${tr({ ko: '저장', en: 'Save' })}</button><button type="button" data-act="cancel">${tr({ ko: '취소', en: 'Cancel' })}</button></form>`;
 }
 
 function itemHtml(it: TodoItem): string {
@@ -45,18 +46,18 @@ function itemHtml(it: TodoItem): string {
   const addingChild = editing?.kind === 'add' && editing.parent === it.line;
   return `<li class="td-item ${it.checked ? 'done' : ''}" data-line="${it.line}">
     <div class="td-row">
-      <input type="checkbox" data-act="toggle" ${it.checked ? 'checked' : ''} ${pending ? 'disabled' : ''} title="완료 체크" />
+      <input type="checkbox" data-act="toggle" ${it.checked ? 'checked' : ''} ${pending ? 'disabled' : ''} title="${tr({ ko: '완료 체크', en: 'Mark done' })}" />
       ${
         isEditing
-          ? editor(it.text, '할 일')
-          : `<span class="td-text" data-act="edit" title="더블클릭해서 수정">${renderInline(it.text)}</span>
-        ${it.carry ? `<span class="td-carry ${it.carry >= 3 ? 'late' : ''}" title="${it.carry}번 이월됨">↻${it.carry}</span>` : ''}
-        ${it.notes.length ? `<button class="link small td-notes-btn" data-act="notes">${notesOpen ? '▾' : '▸'} 설명 ${it.notes.length}</button>` : ''}
-        <span class="td-actions"><button data-act="edit" title="수정">✏️</button><button data-act="sub" title="하위 할 일 추가">↳</button><button data-act="del" title="삭제">🗑️</button></span>`
+          ? editor(it.text, tr({ ko: '할 일', en: 'To-do' }))
+          : `<span class="td-text" data-act="edit" title="${tr({ ko: '더블클릭해서 수정', en: 'Double-click to edit' })}">${renderInline(it.text)}</span>
+        ${it.carry ? `<span class="td-carry ${it.carry >= 3 ? 'late' : ''}" title="${tr({ ko: `${it.carry}번 이월됨`, en: `Carried over ${it.carry}×` })}">↻${it.carry}</span>` : ''}
+        ${it.notes.length ? `<button class="link small td-notes-btn" data-act="notes">${notesOpen ? '▾' : '▸'} ${tr({ ko: '설명', en: 'notes' })} ${it.notes.length}</button>` : ''}
+        <span class="td-actions"><button data-act="edit" title="${tr({ ko: '수정', en: 'Edit' })}">✏️</button><button data-act="sub" title="${tr({ ko: '하위 할 일 추가', en: 'Add a sub-item' })}">↳</button><button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">🗑️</button></span>`
       }
     </div>
     ${notesOpen && it.notes.length ? `<ul class="td-notes">${it.notes.map((n) => `<li style="margin-left:${n.depth * 14}px">${renderInline(n.text)}</li>`).join('')}</ul>` : ''}
-    ${kids.length || addingChild ? `<ul class="td-list">${kids.map(itemHtml).join('')}${addingChild ? `<li class="td-item">${editor('', '하위 할 일')}</li>` : ''}</ul>` : ''}
+    ${kids.length || addingChild ? `<ul class="td-list">${kids.map(itemHtml).join('')}${addingChild ? `<li class="td-item">${editor('', tr({ ko: '하위 할 일', en: 'Sub-item' }))}</li>` : ''}</ul>` : ''}
   </li>`;
 }
 
@@ -67,13 +68,13 @@ function projectHtml(p: TodoProject, vault: string, fallbackTitle: string): stri
   const adding = editing?.kind === 'add' && editing.header === p.line && editing.parent == null;
   const name = p.name || fallbackTitle;
   const title = p.link
-    ? `<a href="obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(p.link)}" title="Obsidian에서 열기">${esc(name)}</a>`
+    ? `<a href="obsidian://open?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(p.link)}" title="${tr({ ko: 'Obsidian에서 열기', en: 'Open in Obsidian' })}">${esc(name)}</a>`
     : esc(name);
   return `<div class="td-proj" data-header="${p.line}">
-    <div class="td-proj-head"><b>${title}</b> <span class="muted small">${d}/${t}</span><button class="link small" data-act="add" title="할 일 추가">＋ 추가</button></div>
+    <div class="td-proj-head"><b>${title}</b> <span class="muted small">${d}/${t}</span><button class="link small" data-act="add" title="${tr({ ko: '할 일 추가', en: 'Add a to-do' })}">${tr({ ko: '＋ 추가', en: '＋ Add' })}</button></div>
     ${p.memo.filter((m) => !/^\[\[.*\]\]$/.test(m)).map((m) => `<div class="muted small td-memo">${renderInline(m)}</div>`).join('')}
-    <ul class="td-list">${shown.map(itemHtml).join('')}${adding ? `<li class="td-item">${editor('', '새 할 일')}</li>` : ''}</ul>
-    ${t && !shown.length && !adding ? '<div class="muted small">✓ 모두 완료</div>' : ''}
+    <ul class="td-list">${shown.map(itemHtml).join('')}${adding ? `<li class="td-item">${editor('', tr({ ko: '새 할 일', en: 'New to-do' }))}</li>` : ''}</ul>
+    ${t && !shown.length && !adding ? `<div class="muted small">${tr({ ko: '✓ 모두 완료', en: '✓ All done' })}</div>` : ''}
   </div>`;
 }
 
@@ -91,15 +92,15 @@ export function renderTodos(st: UIState, send: Send) {
   items = new Map();
   headers = new Map();
   const d = new Date(`${td.date}T00:00:00`);
-  const dateLabel = td.date ? d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric', weekday: 'short' }) : '';
+  const dateLabel = td.date ? d.toLocaleDateString(locale(), { month: 'numeric', day: 'numeric', weekday: 'short' }) : '';
   const all = td.sections.flatMap((s) => s.projects.flatMap((p) => p.items));
   const [done, total] = count(all);
   const openHref = `obsidian://open?vault=${encodeURIComponent(td.vaultName)}&file=${encodeURIComponent(td.relPath.replace(/\.md$/, ''))}`;
   const head = `<div class="row space td-head">
-      <h2>${ico('✅')}오늘 할 일 <span class="muted small">${esc(dateLabel)}</span></h2>
+      <h2>${ico('✅')}${tr({ ko: '오늘 할 일', en: 'Today' })} <span class="muted small">${esc(dateLabel)}</span></h2>
       <div class="row">
-        ${td.exists ? `<span class="small td-progress" title="완료/전체">${done}/${total}</span>` : ''}
-        <label class="switch small"><input type="checkbox" data-act="hide" ${hideDone ? 'checked' : ''}/> 완료 숨기기</label>
+        ${td.exists ? `<span class="small td-progress" title="${tr({ ko: '완료/전체', en: 'done/total' })}">${done}/${total}</span>` : ''}
+        <label class="switch small"><input type="checkbox" data-act="hide" ${hideDone ? 'checked' : ''}/> ${tr({ ko: '완료 숨기기', en: 'Hide done' })}</label>
         ${td.exists ? `<a class="small" href="${openHref}" title="${esc(td.relPath)}">Obsidian ↗</a>` : ''}
       </div>
     </div>`;
@@ -107,14 +108,17 @@ export function renderTodos(st: UIState, send: Send) {
   let body: string;
   if (td.error) body = `<p class="small bad">${esc(td.error)}</p>`;
   else if (!td.exists)
-    body = `<p class="muted small">오늘 노트(<code>${esc(td.relPath)}</code>)가 아직 없습니다.</p>
-      ${td.canCreate ? '<button data-act="create">오늘 노트 만들기</button>' : ''}`;
+    body = `<p class="muted small">${tr({
+      ko: `오늘 노트(<code>${esc(td.relPath)}</code>)가 아직 없습니다.`,
+      en: `Today's note (<code>${esc(td.relPath)}</code>) doesn't exist yet.`,
+    })}</p>
+      ${td.canCreate ? `<button data-act="create">${tr({ ko: '오늘 노트 만들기', en: "Create today's note" })}</button>` : ''}`;
   else {
     const parts: string[] = [];
     const idle: string[] = [];
     for (const s of td.sections) {
       for (const p of s.projects) {
-        const fallback = s.kind === 'schedule' ? '⏰ 일정' : s.title.replace(/^[^\p{L}\p{N}]+/u, '');
+        const fallback = s.kind === 'schedule' ? tr({ ko: '⏰ 일정', en: '⏰ Schedule' }) : s.title.replace(/^[^\p{L}\p{N}]+/u, '');
         const hasContent = p.items.length > 0 || (s.kind === 'schedule' && p.memo.length > 0);
         const isAddTarget = editing?.kind === 'add' && editing.header === p.line;
         // section-level blocks without content (e.g. "Study" heading links) are noise
@@ -123,8 +127,11 @@ export function renderTodos(st: UIState, send: Send) {
       }
     }
     body =
-      (parts.join('') || '<p class="muted small">오늘 노트에 할 일이 없습니다. 프로젝트의 ＋ 로 추가하세요.</p>') +
-      (idle.length ? `<details class="td-idle"><summary class="muted small">할 일 없는 프로젝트 ${idle.length}개</summary>${idle.join('')}</details>` : '');
+      (parts.join('') ||
+        `<p class="muted small">${tr({ ko: '오늘 노트에 할 일이 없습니다. 프로젝트의 ＋ 로 추가하세요.', en: "No to-dos in today's note. Add one with a project's ＋." })}</p>`) +
+      (idle.length
+        ? `<details class="td-idle"><summary class="muted small">${tr({ ko: `할 일 없는 프로젝트 ${idle.length}개`, en: `${idle.length} projects with nothing to do` })}</summary>${idle.join('')}</details>`
+        : '');
   }
   const idleOpen = box.querySelector<HTMLDetailsElement>('.td-idle')?.open;
   box.innerHTML = head + `<div class="td-body">${body}</div>`;
@@ -179,7 +186,15 @@ function bind(box: HTMLElement, st: UIState, send: Send) {
     else if (a === 'cancel') editing = null;
     else if (a === 'del' && it) {
       const kids = count(it.children)[1];
-      if (!confirm(`할 일을 삭제할까요?\n\n${it.text}${kids ? `\n(하위 항목 ${kids}개와 설명도 함께 삭제)` : ''}`)) return;
+      if (
+        !confirm(
+          tr({
+            ko: `할 일을 삭제할까요?\n\n${it.text}${kids ? `\n(하위 항목 ${kids}개와 설명도 함께 삭제)` : ''}`,
+            en: `Delete this to-do?\n\n${it.text}${kids ? `\n(its ${kids} sub-items and notes go too)` : ''}`,
+          }),
+        )
+      )
+        return;
       op({ op: 'delete', line: it.line, raw: it.raw });
     } else return;
     rerender();
@@ -208,7 +223,7 @@ function bind(box: HTMLElement, st: UIState, send: Send) {
     if (e.kind === 'edit') {
       const it = items.get(e.line);
       if (!text) {
-        if (!confirm(`내용을 비웠습니다. 이 할 일을 삭제할까요?\n\n${it?.text ?? ''}`)) return;
+        if (!confirm(tr({ ko: `내용을 비웠습니다. 이 할 일을 삭제할까요?\n\n${it?.text ?? ''}`, en: `The text is empty. Delete this to-do?\n\n${it?.text ?? ''}` }))) return;
         op({ op: 'delete', line: e.line, raw: e.raw });
       } else if (text !== it?.text) op({ op: 'edit', line: e.line, raw: e.raw, text });
     } else {

@@ -23,7 +23,7 @@ const text = (s: string, isError = false) => ({ content: [{ type: 'text' as cons
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 const CRON_HELP = '5-field cron "minute hour day-of-month month day-of-week" in local time, e.g. "0 9 * * 1-5" = weekdays 09:00 (0=Sun … 6=Sat)';
-const when = (ts: number | null) => (ts ? new Date(ts).toLocaleString('ko-KR') : null);
+const when = (ts: number | null) => (ts ? new Date(ts).toLocaleString('en-US') : null);
 const routineOut = (r: RoutineView) => ({ ...r, prompt: clip(r.prompt, 300), lastRun: when(r.lastRun), nextRun: when(r.nextRun) });
 
 /** In-process MCP server: tools appear as mcp__office__<name>. */
@@ -40,7 +40,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
     tools: [
       tool('office_status', 'Snapshot of every employee (status, current activity, task) plus open approvals count, jobs and servers.', {}, async () => {
         const emps = api.employees().map((e) => ({ id: e.id, name: e.name, title: e.title, status: e.status, activity: e.activity, taskId: e.taskId }));
-        const jobs = api.jobs().slice(-20).map((j) => ({ id: j.id, name: j.name, server: j.server, state: j.state, by: j.submittedBy, updated: new Date(j.updatedAt).toLocaleString('ko-KR') }));
+        const jobs = api.jobs().slice(-20).map((j) => ({ id: j.id, name: j.name, server: j.server, state: j.state, by: j.submittedBy, updated: new Date(j.updatedAt).toLocaleString('en-US') }));
         const servers = api.servers().map((s) => ({ name: s.name, online: s.online, gpus: s.gpus.map((g) => `${g.util}%`).join(' '), note: s.note }));
         return text(JSON.stringify({ employees: emps, jobs, servers }, null, 2));
       }),
@@ -52,7 +52,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           const ts = api.tasks().filter((t) => !state || t.state === state);
           return text(
             JSON.stringify(
-              ts.map((t) => ({ id: t.id, title: t.title, state: t.state, assignee: t.assignee, createdBy: t.createdBy, result: t.result ? clip(t.result, 600) : null, updated: new Date(t.updatedAt).toLocaleString('ko-KR') })),
+              ts.map((t) => ({ id: t.id, title: t.title, state: t.state, assignee: t.assignee, createdBy: t.createdBy, result: t.result ? clip(t.result, 600) : null, updated: new Date(t.updatedAt).toLocaleString('en-US') })),
               null,
               2,
             ),
@@ -69,10 +69,10 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           for (const l of api.logsSince(since)) {
             if (l.employeeId === selfId) continue;
             const arr = by.get(l.employeeId) ?? [];
-            arr.push(`${new Date(l.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} [${l.kind}] ${clip(l.text.replace(/\s+/g, ' '), 300)}`);
+            arr.push(`${new Date(l.ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })} [${l.kind}] ${clip(l.text.replace(/\s+/g, ' '), 300)}`);
             by.set(l.employeeId, arr);
           }
-          if (!by.size) return text('해당 기간에 다른 직원의 활동이 없습니다.');
+          if (!by.size) return text('No activity from other employees in that period.');
           return text([...by].map(([id, lines]) => `## ${id}\n${lines.slice(-60).join('\n')}`).join('\n\n'));
         },
       ),
@@ -88,7 +88,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           'Waits for the manager\'s approval; once approved, a routine running this skill gets the `allow` rules auto-allowed.',
         {
           name: z.string().describe('lowercase-kebab id, e.g. "weekly-job-report"'),
-          description: z.string().describe('one Korean sentence: what it does and when to use it'),
+          description: z.string().describe("one sentence in the manager's language: what it does and when to use it"),
           body: z.string().describe('markdown instructions (no frontmatter): goal, exact steps/commands, output paths, unattended rules, what to report'),
           allow: z
             .array(z.string())
@@ -111,7 +111,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
         'create_routine',
         'Register a new scheduled routine. With `skill`, the employee runs office:<skill> at each cron match (preferred); otherwise `prompt` is sent as-is. Only when the manager asked for it.',
         {
-          name: z.string().describe('short Korean display name, e.g. "점심 전 job 점검"'),
+          name: z.string().describe('short display name in the manager\'s language, e.g. "Pre-lunch job check"'),
           schedule: z.string().describe(CRON_HELP),
           employee: z.string().describe('employee id who runs it (may be yourself)'),
           skill: z.string().optional().describe('office skill name (from list_skills / save_skill)'),
@@ -175,17 +175,17 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           attachments: z
             .array(z.number().int())
             .optional()
-            .describe('attachment ids (#N in the "첨부 파일" section of your instructions) to hand to the assignee; they get the file paths in their task'),
+            .describe('attachment ids (#N in the "Attachments" section of your instructions) to hand to the assignee; they get the file paths in their task'),
         },
         async ({ title, detail, assignee, requireApproval, attachments }) => {
           if (assignee && !api.employees().some((e) => e.id === assignee)) return text(`unknown employee ${assignee}`, true);
-          if (assignee === selfId) return text('자기 자신에게는 위임할 수 없습니다.', true);
+          if (assignee === selfId) return text('You cannot delegate a task to yourself.', true);
           const t = api.createTask(title, detail ?? '', assignee ?? null, selfId, !!requireApproval, attachments ?? []);
           const missing = (attachments ?? []).filter((id) => !t.attachments.some((a) => a.id === id));
           return text(
-            `created task #${t.id}${assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 매 도구 승인 필요)' : ''}` +
-              (t.attachments.length ? `, 첨부 ${t.attachments.map((a) => `#${a.id}`).join(' ')}` : '') +
-              (missing.length ? ` — 없는 첨부 id 무시: ${missing.join(', ')}` : ''),
+            `created task #${t.id}${assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 every tool call needs approval)' : ''}` +
+              (t.attachments.length ? `, attachments ${t.attachments.map((a) => `#${a.id}`).join(' ')}` : '') +
+              (missing.length ? ` (ignored unknown attachment ids: ${missing.join(', ')})` : ''),
           );
         },
       ),

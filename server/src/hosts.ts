@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
+import { tr } from '../../shared/i18n.ts';
 import type { HostView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import { sq } from './compute/adapter.ts';
@@ -72,7 +73,12 @@ export function spawnRemote(cfg: HostConfig, a: SpawnArgs): SpawnedProcess {
   // so no future caller can route around the limit. Callers that can wait should call
   // sshThrottle.waitForSlot() first (which does not consume) to avoid failing needlessly.
   if (!sshThrottle.allow(cfg.ssh))
-    throw new Error(`ssh 횟수 제한 (${cfg.ssh}: 분당 ${sshThrottle.limitFor(cfg.ssh)}회) — 잠시 후 다시 시도하세요`);
+    throw new Error(
+      tr({
+        ko: `ssh 횟수 제한 (${cfg.ssh}: 분당 ${sshThrottle.limitFor(cfg.ssh)}회) — 잠시 후 다시 시도하세요`,
+        en: `ssh rate limit (${cfg.ssh}: ${sshThrottle.limitFor(cfg.ssh)} per minute). Try again shortly.`,
+      }),
+    );
   // stdio is all pipes, so stdin/stdout are non-null — ChildProcess types them as nullable
   return spawn('ssh', [...SSH_BASE, cfg.ssh, remoteCommand(cfg, a)], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedProcess;
 }
@@ -96,7 +102,7 @@ export class Host {
       projectRoot: cfg.projectRoot,
       sshUsed: 0,
       sshLimit: 0,
-      error: '확인 중…',
+      error: tr({ ko: '확인 중…', en: 'Checking…' }),
     };
     if (cfg.ssh !== 'local') sshThrottle.setLimit(cfg.ssh, cfg.sshPerMinute);
   }
@@ -104,7 +110,12 @@ export class Host {
   /** Absolute path on this host: expands a leading ~ ourselves, since quoted paths are not expanded. */
   expand(p: string): string {
     if (!p.startsWith('~')) return p;
-    if (!this.home) throw new Error(`${this.view.name} 의 홈 경로를 아직 모릅니다 (연결 확인 전)`);
+    if (!this.home) throw new Error(
+        tr({
+          ko: `${this.view.name} 의 홈 경로를 아직 모릅니다 (연결 확인 전)`,
+          en: `The home path of ${this.view.name} is not known yet (connection not checked)`,
+        }),
+      );
     return p.replace(/^~(?=\/|$)/, this.home);
   }
 
@@ -121,9 +132,17 @@ export class Host {
    * Run a short command on the host. Over ssh this is rate limited: a skipped poll is harmless,
    * being locked out of the server is not.
    */
-  private async exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string }> {
+  private async exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string; throttled?: boolean }> {
     if (!this.isLocal && !sshThrottle.allow(this.cfg.ssh))
-      return { code: -1, stdout: '', err: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.limitFor(this.cfg.ssh)}회) — 이번 확인은 건너뜁니다` };
+      return {
+        code: -1,
+        stdout: '',
+        throttled: true,
+        err: tr({
+          ko: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.limitFor(this.cfg.ssh)}회) — 이번 확인은 건너뜁니다`,
+          en: `ssh rate limit (${this.cfg.ssh}: ${sshThrottle.limitFor(this.cfg.ssh)} per minute); skipping this check`,
+        }),
+      };
     const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_SHORT, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';
@@ -149,11 +168,12 @@ export class Host {
     const [home, ...rest] = r.stdout.split('\n');
     if (r.code === 0 && home.trim()) this.home = home.trim();
     r.stdout = rest.join('\n');
-    if (r.code === -1 && r.err.startsWith('ssh 횟수 제한')) return;
+    if (r.throttled) return;
     this.refreshUsage(false);
+    const fail = (r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`;
     const next: HostView = r.code === 0
       ? { ...this.view, ok: true, claudeVersion: r.stdout.trim().split('\n').pop() ?? '', error: null }
-      : { ...this.view, ok: false, error: `claude 실행 실패: ${(r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`}` };
+      : { ...this.view, ok: false, error: tr({ ko: `claude 실행 실패: ${fail}`, en: `Failed to run claude: ${fail}` }) };
     const changed = JSON.stringify(next) !== JSON.stringify(this.view);
     this.view = next;
     if (changed) bus.send({ t: 'host', data: { ...next } });
@@ -194,7 +214,7 @@ export class Host {
    * polling only existed to keep a badge fresh, which is not worth knocking on a machine that bans
    * noisy clients. We re-check only when it failed (backing off), or on demand.
    *
-   * The cost is a badge that can go stale: if the server dies we keep showing "연결됨" until
+   * The cost is a badge that can go stale: if the server dies we keep showing "connected" until
    * something actually uses it, and then the real error is reported. Better than a confident guess.
    */
   start() {

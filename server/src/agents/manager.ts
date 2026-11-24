@@ -1,6 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentStatus, EmployeeView, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
+import { getLang, hhmm, LANG_NAME_EN, tr, type Lang } from '../../../shared/i18n.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { OfficeConfig, RoleConfig } from '../config.ts';
 import type { Store } from '../db.ts';
@@ -19,7 +20,7 @@ interface Work {
   taskId: number | null;
   /** extra auto-allow rules for this run only (an approved skill's office-allow) */
   extraAllow: string[];
-  /** short title for the report feed, e.g. "⏰ 아침 브리핑" */
+  /** short title for the report feed, e.g. "⏰ Morning briefing" */
   label: string;
   /** force 'ask' for this run (task marked 🔒 by the manager or the delegating lead) */
   requireApproval: boolean;
@@ -63,6 +64,8 @@ interface LiveSession {
   perm: PermissionSetting;
   /** provider the session was opened for (its model is baked into env at start) */
   providerModel: string | null;
+  /** office language when opened: the report-language line is part of the system prompt */
+  lang: Lang;
   /** last result.total_cost_usd — it is cumulative per session, so we bill the delta */
   lastCost: number | null;
   /** the consume loop, so close() can await it */
@@ -113,7 +116,7 @@ class Employee {
       desk: role.desk,
       sprite: role.sprite,
       status: 'idle',
-      activity: '☕ 대기 중',
+      activity: tr({ ko: '☕ 대기 중', en: '☕ Idle' }),
       taskId: null,
       sessionId,
       cwd: '',
@@ -130,8 +133,11 @@ class Employee {
   }
 }
 
+/** appended to every role prompt: prompts are English, reports follow the office language */
+export const reportLanguageLine = (lang: Lang) =>
+  `Write everything addressed to the manager (replies, reports, task results, report files) in ${LANG_NAME_EN[lang]}.`;
+
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
-const HHMM = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 /** when the limit report carries no reset time */
 const LIMIT_FALLBACK_MS = 30 * 60_000;
 
@@ -310,7 +316,7 @@ export class AgentManager {
 
   /** waiting with the session open means sitting at the desk; closed means off to the lounge */
   private idleActivity(e: Employee) {
-    return e.live ? '💺 자리에서 대기 중' : '☕ 대기 중';
+    return e.live ? tr({ ko: '💺 자리에서 대기 중', en: '💺 Waiting at the desk' }) : tr({ ko: '☕ 대기 중', en: '☕ Idle' });
   }
 
   /** push the current view to the browsers (status unchanged) */
@@ -343,7 +349,7 @@ export class AgentManager {
   instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean } = {}) {
     const e = this.emp(employeeId);
     const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
-    this.log(e, 'user', taskId ? `[작업 #${taskId}] ${text}` : text);
+    this.log(e, 'user', taskId ? `${tr({ ko: `[작업 #${taskId}]`, en: `[Task #${taskId}]` })} ${text}` : text);
     this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval });
   }
 
@@ -353,7 +359,7 @@ export class AgentManager {
     else e.inbox.push(work);
     if (!e.current && !this.waiting.includes(e)) {
       this.waiting.push(e);
-      this.set(e, 'queued', '⏳ 자리 나길 기다리는 중');
+      this.set(e, 'queued', tr({ ko: '⏳ 자리 나길 기다리는 중', en: '⏳ Waiting for a free slot' }));
     }
     this.pump();
   }
@@ -382,7 +388,7 @@ export class AgentManager {
   stop(employeeId: string) {
     const e = this.emp(employeeId);
     e.inbox = [];
-    if (this.unpark(e)) this.log(e, 'system', '⏹ 예약된 재개를 취소했습니다');
+    if (this.unpark(e)) this.log(e, 'system', tr({ ko: '⏹ 예약된 재개를 취소했습니다', en: '⏹ Cancelled the scheduled resume' }));
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
     const live = e.live;
@@ -390,7 +396,7 @@ export class AgentManager {
       if (!e.current) this.set(e, 'idle', this.idleActivity(e));
       return;
     }
-    this.log(e, 'system', '⏹ 중지됨');
+    this.log(e, 'system', tr({ ko: '⏹ 중지됨', en: '⏹ Stopped' }));
     const ended = e.endTurn;
     void live.q
       .interrupt()
@@ -402,7 +408,7 @@ export class AgentManager {
       .finally(() => setTimeout(() => ended?.(), 3_000)); // if no `result` follows, release the turn anyway
   }
 
-  /** Rename from the UI: replaces the quoted nickname in the configured name (문헌 리서처 "Ada" → 문헌 리서처 "Bo"). */
+  /** Rename from the UI: replaces the quoted nickname in the configured name (Researcher "Ada" → Researcher "Bo"). */
   rename(employeeId: string, nick: string) {
     const e = this.emp(employeeId);
     const n = nick.replace(/["“”]/g, '').trim().slice(0, 20);
@@ -415,10 +421,16 @@ export class AgentManager {
   /** UI toggle; applies from the next run (a running session keeps its mode) */
   setPermission(employeeId: string, mode: PermissionSetting) {
     const e = this.emp(employeeId);
-    if (mode !== 'auto' && mode !== 'ask') throw new Error(`잘못된 권한 모드: ${mode}`);
+    if (mode !== 'auto' && mode !== 'ask') throw new Error(tr({ ko: `잘못된 권한 모드: ${mode}`, en: `Invalid permission mode: ${mode}` }));
     this.store.setEmployeePerm(e.role.id, mode);
     e.view.permission = mode;
-    this.log(e, 'system', mode === 'auto' ? '🤖 자동 모드로 전환 (다음 지시부터)' : '✋ 승인 모드로 전환 (다음 지시부터)');
+    this.log(
+      e,
+      'system',
+      mode === 'auto'
+        ? tr({ ko: '🤖 자동 모드로 전환 (다음 지시부터)', en: '🤖 Switched to auto mode (from the next instruction)' })
+        : tr({ ko: '✋ 승인 모드로 전환 (다음 지시부터)', en: '✋ Switched to approval mode (from the next instruction)' }),
+    );
     bus.send({ t: 'employee', data: { ...e.view } });
   }
 
@@ -428,8 +440,8 @@ export class AgentManager {
     this.closeSession(e);
     e.view.sessionId = null;
     this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
-    this.log(e, 'system', '새 대화 세션으로 초기화됨');
-    this.set(e, 'idle', '☕ 새 마음으로 대기 중');
+    this.log(e, 'system', tr({ ko: '새 대화 세션으로 초기화됨', en: 'Reset to a new conversation session' }));
+    this.set(e, 'idle', tr({ ko: '☕ 새 마음으로 대기 중', en: '☕ Idle, with a fresh start' }));
   }
 
   /** Open (or reuse) the employee's long-lived session. Throws with a manager-readable message. */
@@ -438,11 +450,22 @@ export class AgentManager {
 
     // A remote host's filesystem is not ours: the folder is checked there (see checkHost), not created here.
     const host = e.role.host ? this.hosts?.get(e.role.host) : undefined;
-    if (e.role.host && !host) throw new Error(`설정에 없는 host: ${e.role.host} (office.local.yaml 의 hosts 확인)`);
-    if (host && !host.view.ok) throw new Error(`${host.view.name}에 연결할 수 없음: ${host.view.error ?? '알 수 없음'}`);
+    if (e.role.host && !host) throw new Error(
+        tr({
+          ko: `설정에 없는 host: ${e.role.host} (office.local.yaml 의 hosts 확인)`,
+          en: `Host not in config: ${e.role.host} (check hosts in office.local.yaml)`,
+        }),
+      );
+    if (host && !host.view.ok) throw new Error(
+        tr({
+          ko: `${host.view.name}에 연결할 수 없음: ${host.view.error ?? '알 수 없음'}`,
+          en: `Cannot reach ${host.view.name}: ${host.view.error ?? 'unknown'}`,
+        }),
+      );
     const cwd = host && !host.isLocal ? (e.role.cwd ?? '.') : ensureWorkspace(this.office, e.role); // throws → caller reports
     e.view.cwd = cwd;
 
+    const lang = getLang();
     const autoAllow = new Set(e.role.autoAllow);
     const mcpServers: Record<string, any> = { lab: labToolsServer(e.role.id, cwd, this.registry, this.store) };
     if (e.role.officeTools && this.officeApi) mcpServers.office = officeToolsServer(e.role.id, this.officeApi);
@@ -452,7 +475,12 @@ export class AgentManager {
     let providerModel: string | null = null;
     if (e.role.provider) {
       const link = this.providers?.get(e.role.provider);
-      const rt = link ? link.runtime() : { error: `설정에 없는 provider: ${e.role.provider} (office.local.yaml 의 providers 확인)` };
+      const rt = link ? link.runtime() : {
+            error: tr({
+              ko: `설정에 없는 provider: ${e.role.provider} (office.local.yaml 의 providers 확인)`,
+              en: `Provider not in config: ${e.role.provider} (check providers in office.local.yaml)`,
+            }),
+          };
       if ('error' in rt) throw new Error(`🖥 ${rt.error}`);
       ({ model, env } = rt);
       providerModel = rt.model;
@@ -463,7 +491,10 @@ export class AgentManager {
     // A session id only means something on the machine that recorded it.
     const hostId = sessionHostId(e.role.host);
     if (e.view.sessionId && (e.sessionHost ?? null) !== hostId) {
-      this.log(e, 'system', `이전 대화는 다른 머신(${e.sessionHost ?? '알 수 없음'})의 기록이라 여기서는 새 세션으로 시작합니다`);
+      this.log(e, 'system', tr({
+          ko: `이전 대화는 다른 머신(${e.sessionHost ?? '알 수 없음'})의 기록이라 여기서는 새 세션으로 시작합니다`,
+          en: `The previous conversation was recorded on another machine (${e.sessionHost ?? 'unknown'}), so this starts a new session here`,
+        }));
       e.view.sessionId = null;
       this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd, hostId);
     }
@@ -483,7 +514,7 @@ export class AgentManager {
         env,
         abortController: abort,
         resume: e.view.sessionId ?? undefined,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: e.role.systemPrompt },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: `${e.role.systemPrompt}\n\n${reportLanguageLine(lang)}` },
         // No `allowedTools`: a bare name there auto-approves before canUseTool and before the hook,
         // which both hides the call from our guard and makes the SDK warn. The hook below is the
         // single gate instead — it allows the whitelist itself.
@@ -513,15 +544,18 @@ export class AgentManager {
                         this.hosts?.refreshUsage();
                         return decide(
                           'deny',
-                          `${over.host} 접속이 분당 한도를 넘어 막았습니다. ${over.waitSec}초 뒤에 다시 시도하거나, 여러 명령을 한 번의 접속으로 묶으세요.`,
+                          tr({
+                            ko: `${over.host} 접속이 분당 한도를 넘어 막았습니다. ${over.waitSec}초 뒤에 다시 시도하거나, 여러 명령을 한 번의 접속으로 묶으세요.`,
+                            en: `Blocked: connections to ${over.host} are over the per-minute limit. Retry in ${over.waitSec}s, or combine several commands into one connection.`,
+                          }),
                         );
                       }
                       this.hosts?.refreshUsage();
                     }
                     // anything reaching a lab server asks, unless the manager named that exact tool/command
-                    if (!whitelisted) return decide('ask', '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.');
+                    if (!whitelisted) return decide('ask', tr({ ko: '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.', en: 'This reaches a lab server, so it needs the manager\'s approval.' }));
                   }
-                  if (whitelisted) return decide('allow', '매니저가 허용한 도구입니다.');
+                  if (whitelisted) return decide('allow', tr({ ko: '매니저가 허용한 도구입니다.', en: 'The manager has allowed this tool.' }));
                   return { continue: true }; // auto-mode classifier, then canUseTool
                 },
               ],
@@ -534,21 +568,25 @@ export class AgentManager {
         canUseTool: async (toolName, input, { signal }) => {
           if (isAutoAllowed(autoAllow, toolName)) return { behavior: 'allow', updatedInput: input };
           if (extraAllowNow().some((r) => matchesRule(r, toolName, input))) {
-            this.log(e, 'system', `🔓 스킬 권한으로 자동 허용: ${describeToolCall(toolName, input as any)}`);
+            this.log(e, 'system', tr({
+                ko: `🔓 스킬 권한으로 자동 허용: ${describeToolCall(toolName, input as any)}`,
+                en: `🔓 Auto-allowed by skill permission: ${describeToolCall(toolName, input as any)}`,
+              }));
             return { behavior: 'allow', updatedInput: input };
           }
           const prev = { status: e.view.status, activity: e.view.activity };
-          this.set(e, 'waiting_permission', `✋ 승인 필요: ${describeToolCall(toolName, input as any).slice(0, 50)}`);
-          this.log(e, 'system', `승인 요청: ${describeToolCall(toolName, input as any)}`);
+          const call = describeToolCall(toolName, input as any);
+          this.set(e, 'waiting_permission', tr({ ko: `✋ 승인 필요: ${call.slice(0, 50)}`, en: `✋ Needs approval: ${call.slice(0, 50)}` }));
+          this.log(e, 'system', tr({ ko: `승인 요청: ${call}`, en: `Approval requested: ${call}` }));
           const res = await this.broker.request(e.role.id, toolName, input, signal);
-          this.log(e, 'system', res.behavior === 'allow' ? '✅ 승인됨' : `❌ 거부됨`);
+          this.log(e, 'system', res.behavior === 'allow' ? tr({ ko: '✅ 승인됨', en: '✅ Approved' }) : tr({ ko: '❌ 거부됨', en: '❌ Denied' }));
           this.set(e, prev.status, prev.activity);
           return res;
         },
       },
     });
 
-    const live: LiveSession = { q, input, abort, cwd, perm, providerModel, lastCost: e.view.sessionId ? null : 0, done: Promise.resolve() };
+    const live: LiveSession = { q, input, abort, cwd, perm, providerModel, lang, lastCost: e.view.sessionId ? null : 0, done: Promise.resolve() };
     e.live = live;
     live.done = this.consume(e, live);
     this.sendView(e);
@@ -562,7 +600,7 @@ export class AgentManager {
     } catch (err) {
       if (!live.abort.signal.aborted) {
         this.log(e, 'error', String((err as Error).message ?? err));
-        this.set(e, 'error', '⚠️ 오류 발생 (로그 확인)');
+        this.set(e, 'error', tr({ ko: '⚠️ 오류 발생 (로그 확인)', en: '⚠️ Error (see the log)' }));
       }
     } finally {
       if (e.live === live) {
@@ -594,7 +632,13 @@ export class AgentManager {
       const wanted = this.providers?.get(providerId)?.view.model ?? null;
       if (e.live.providerModel === wanted) continue;
       if (e.current) continue; // mid-turn: the idle timer or the next open will pick the new model up
-      this.closeSession(e, `🖥 모델이 ${wanted}(으)로 바뀌어 세션을 다시 엽니다 (다음 지시부터)`);
+      this.closeSession(
+        e,
+        tr({
+          ko: `🖥 모델이 ${wanted}(으)로 바뀌어 세션을 다시 엽니다 (다음 지시부터)`,
+          en: `🖥 Model changed to ${wanted}; reopening the session (from the next instruction)`,
+        }),
+      );
     }
   }
 
@@ -604,15 +648,20 @@ export class AgentManager {
    */
   private park(e: Employee, work: Work, at: number) {
     this.unpark(e);
-    const hhmm = HHMM.format(at);
+    const when = hhmm(at);
     const timer = setTimeout(() => {
       const w = this.unpark(e);
-      if (w) this.requeue(e, w, '⏰ 사용량이 초기화되어 하던 일을 이어서 합니다', '[자동 재개] 사용량 한도로 중단됐던 작업입니다.');
+      if (w) this.requeue(
+          e,
+          w,
+          tr({ ko: '⏰ 사용량이 초기화되어 하던 일을 이어서 합니다', en: '⏰ Usage has reset; picking the work back up' }),
+          '[Auto-resume] This work stopped on the usage limit.',
+        );
     }, at - Date.now());
     e.parked = { work, timer };
     e.view.parkedUntil = at;
-    this.log(e, 'system', `⏸ 사용량 한도로 중단 — ${hhmm}에 자동으로 이어서 합니다`);
-    this.set(e, 'error', `⏸ 사용량 한도 · ${hhmm} 재개 예정`);
+    this.log(e, 'system', tr({ ko: `⏸ 사용량 한도로 중단 — ${when}에 자동으로 이어서 합니다`, en: `⏸ Stopped on the usage limit — resumes automatically at ${when}` }));
+    this.set(e, 'error', tr({ ko: `⏸ 사용량 한도 · ${when} 재개 예정`, en: `⏸ Usage limit · resumes at ${when}` }));
     this.closeSession(e);
   }
 
@@ -629,7 +678,7 @@ export class AgentManager {
   /** Put interrupted work back at the front of the queue, telling the agent not to redo what it did. */
   private requeue(e: Employee, work: Work, logText: string, note: string) {
     this.log(e, 'system', logText);
-    this.enqueue(e, { ...work, text: `${work.text}\n\n${note} 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` }, true);
+    this.enqueue(e, { ...work, text: `${work.text}\n\n${note} Don't redo what you already finished; pick up where you left off and complete it.` }, true);
   }
 
   /** Put a parked employee back to work right now, without waiting for the reset. */
@@ -637,7 +686,12 @@ export class AgentManager {
     const e = this.emp(employeeId);
     const work = this.unpark(e);
     if (!work) return false;
-    this.requeue(e, work, '▶️ 매니저가 중단된 작업을 다시 시작했습니다', '[재개] 중단됐던 작업입니다.');
+    this.requeue(
+      e,
+      work,
+      tr({ ko: '▶️ 매니저가 중단된 작업을 다시 시작했습니다', en: '▶️ The manager restarted the interrupted work' }),
+      '[Resumed] This work was interrupted.',
+    );
     return true;
   }
 
@@ -646,7 +700,13 @@ export class AgentManager {
     const ms = this.office.sessionIdleMinutes * 60_000;
     if (ms <= 0) return;
     e.idleTimer = setTimeout(() => {
-      if (!e.current && e.live) this.closeSession(e, `💤 ${this.office.sessionIdleMinutes}분 동안 일이 없어 세션을 닫았습니다 (다음 지시 때 이어서 엶)`);
+      if (!e.current && e.live) this.closeSession(
+          e,
+          tr({
+            ko: `💤 ${this.office.sessionIdleMinutes}분 동안 일이 없어 세션을 닫았습니다 (다음 지시 때 이어서 엶)`,
+            en: `💤 Closed the session after ${this.office.sessionIdleMinutes} min without work (reopens with the next instruction)`,
+          }),
+        );
     }, ms);
   }
 
@@ -655,7 +715,7 @@ export class AgentManager {
     e.current = work;
     e.view.taskId = work.taskId;
     e.lastText = '';
-    this.set(e, 'thinking', '💭 업무 파악 중');
+    this.set(e, 'thinking', tr({ ko: '💭 업무 파악 중', en: '💭 Getting up to speed' }));
     if (e.idleTimer) clearTimeout(e.idleTimer);
 
     // a remote session costs one ssh connection; queue behind the per-host budget rather than
@@ -664,13 +724,23 @@ export class AgentManager {
     if (remote && !remote.isLocal) {
       // the badge may be stale (we stopped polling); make sure before failing the manager
       if (!remote.view.ok) await this.hosts?.ensureChecked(remote.cfg.id);
-      if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', `⏳ ${remote.view.name} 접속 차례 기다리는 중`);
+      if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', tr({ ko: `⏳ ${remote.view.name} 접속 차례 기다리는 중`, en: `⏳ Waiting for a turn to connect to ${remote.view.name}` }));
       // wait without consuming — spawnRemote takes the slot, so it is counted exactly once
       if (!(await sshThrottle.waitForSlot(remote.cfg.ssh, 70_000))) {
-        this.log(e, 'error', `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.limitFor(remote.cfg.ssh)}회)으로 세션을 열지 못했습니다`);
-        this.set(e, 'error', '⚠️ ssh 횟수 제한');
+        this.log(e, 'error', tr({
+            ko: `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.limitFor(remote.cfg.ssh)}회)으로 세션을 열지 못했습니다`,
+            en: `Could not open the session: ssh rate limit (${remote.cfg.ssh}: ${sshThrottle.limitFor(remote.cfg.ssh)} per minute)`,
+          }));
+        this.set(e, 'error', tr({ ko: '⚠️ ssh 횟수 제한', en: '⚠️ ssh rate limit' }));
         return;
       }
+    }
+
+    // the report language is baked into the system prompt, so a language switch reopens the session (same conversation)
+    if (e.live && e.live.lang !== getLang()) {
+      const stale = e.live;
+      this.closeSession(e);
+      await stale.done;
     }
 
     let live: LiveSession;
@@ -678,7 +748,7 @@ export class AgentManager {
       live = this.openSession(e);
     } catch (err) {
       this.log(e, 'error', (err as Error).message);
-      this.set(e, 'error', '⚠️ 세션을 열지 못했습니다');
+      this.set(e, 'error', tr({ ko: '⚠️ 세션을 열지 못했습니다', en: '⚠️ Could not open the session' }));
       return;
     }
 
@@ -688,9 +758,9 @@ export class AgentManager {
       try {
         await live.q.setPermissionMode(perm === 'auto' ? 'auto' : 'default');
         live.perm = perm;
-        this.log(e, 'system', perm === 'auto' ? '🤖 자동 모드' : '✋ 승인 모드 (이 작업만)');
+        this.log(e, 'system', perm === 'auto' ? tr({ ko: '🤖 자동 모드', en: '🤖 Auto mode' }) : tr({ ko: '✋ 승인 모드 (이 작업만)', en: '✋ Approval mode (this task only)' }));
       } catch (err) {
-        this.log(e, 'error', `권한 모드 전환 실패: ${(err as Error).message}`);
+        this.log(e, 'error', tr({ ko: `권한 모드 전환 실패: ${(err as Error).message}`, en: `Failed to switch permission mode: ${(err as Error).message}` }));
       }
     }
 
@@ -714,7 +784,11 @@ export class AgentManager {
       this.closeSession(e);
       e.view.sessionId = null;
       this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
-      this.log(e, 'system', '이전 대화를 이 머신에서 찾을 수 없어 새 세션으로 다시 시작합니다');
+      this.log(
+        e,
+        'system',
+        tr({ ko: '이전 대화를 이 머신에서 찾을 수 없어 새 세션으로 다시 시작합니다', en: 'The previous conversation is not on this machine; starting a new session' }),
+      );
       e.current = null;
       return await this.run(e, work);
     }
@@ -728,7 +802,10 @@ export class AgentManager {
     if (limitedUntil) return this.park(e, work, Math.max(limitedUntil, Date.now() + 2_000));
 
     const ok = e.view.status !== 'error';
-    if (ok) this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
+    if (ok) {
+      const gist = clip(e.lastText.replace(/\s+/g, ' '), 50);
+      this.set(e, 'done', tr({ ko: `✅ 완료: ${gist}`, en: `✅ Done: ${gist}` }));
+    }
     bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null } satisfies RunFinished);
     if (work.taskId != null) {
       // a failed attempt stays on the board as 'doing' so it can be picked up again
@@ -747,15 +824,16 @@ export class AgentManager {
       case 'system':
         if (m.subtype === 'init') {
           const mode: string | undefined = m.permissionMode;
-          const modeKo = mode === 'auto' ? '🤖 자동 모드' : mode === 'default' ? '✋ 승인 모드' : mode ?? '?';
+          const modeLabel =
+            mode === 'auto' ? tr({ ko: '🤖 자동 모드', en: '🤖 Auto mode' }) : mode === 'default' ? tr({ ko: '✋ 승인 모드', en: '✋ Approval mode' }) : (mode ?? '?');
           if (e.view.sessionId !== m.session_id) {
-            this.log(e, 'system', `🧠 모델: ${m.model} · ${modeKo}`);
+            this.log(e, 'system', tr({ ko: `🧠 모델: ${m.model} · ${modeLabel}`, en: `🧠 Model: ${m.model} · ${modeLabel}` }));
             e.view.sessionId = m.session_id;
             e.sessionHost = sessionHostId(e.role.host);
             this.store.saveSession(e.role.id, m.session_id, e.view.costUsd, e.view.cwd, e.sessionHost);
-          } else this.log(e, 'system', modeKo);
+          } else this.log(e, 'system', modeLabel);
           if (e.wantedPermission === 'auto' && mode && mode !== 'auto')
-            this.log(e, 'system', `⚠️ 이 환경에서는 자동 모드를 쓸 수 없어 ${modeKo}로 실행합니다`);
+            this.log(e, 'system', tr({ ko: `⚠️ 이 환경에서는 자동 모드를 쓸 수 없어 ${modeLabel}로 실행합니다`, en: `⚠️ Auto mode is not available here; running in ${modeLabel}` }));
         }
         break;
       case 'assistant': {
@@ -775,7 +853,7 @@ export class AgentManager {
         break;
       }
       case 'user':
-        if (!m.parent_tool_use_id && e.view.status !== 'waiting_permission') this.set(e, 'thinking', '💭 결과 검토 중');
+        if (!m.parent_tool_use_id && e.view.status !== 'waiting_permission') this.set(e, 'thinking', tr({ ko: '💭 결과 검토 중', en: '💭 Reviewing the result' }));
         break;
       case 'result': {
         // total_cost_usd is cumulative for the session, so bill the delta. A resumed session's first
@@ -790,9 +868,12 @@ export class AgentManager {
         this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd, e.sessionHost);
         if (m.subtype === 'success') {
           if (m.result) e.lastText = m.result;
-          this.log(e, 'result', `완료 (${m.num_turns} turns, ${(m.duration_ms / 1000).toFixed(0)}s)`);
+          this.log(e, 'result', tr({
+              ko: `완료 (${m.num_turns} turns, ${(m.duration_ms / 1000).toFixed(0)}s)`,
+              en: `Done (${m.num_turns} turns, ${(m.duration_ms / 1000).toFixed(0)}s)`,
+            }));
         } else {
-          this.log(e, 'error', `종료: ${m.subtype}`);
+          this.log(e, 'error', tr({ ko: `종료: ${m.subtype}`, en: `Ended: ${m.subtype}` }));
           this.set(e, 'error', `⚠️ ${m.subtype}`);
         }
         e.endTurn?.(); // one instruction done; the session stays open for the next one
@@ -804,9 +885,11 @@ export class AgentManager {
         if (info.status === 'allowed') break;
         const pct = info.utilization != null ? ` ${Math.round(info.utilization * 100)}%` : '';
         const resetsAt = info.resetsAt ? info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1) : null;
-        const reset = resetsAt ? ` · ${HHMM.format(resetsAt)} 초기화` : '';
+        const reset = resetsAt ? tr({ ko: ` · ${hhmm(resetsAt)} 초기화`, en: ` · resets ${hhmm(resetsAt)}` }) : '';
         if (info.status === 'rejected') e.rateLimitedUntil = resetsAt ?? Date.now() + LIMIT_FALLBACK_MS;
-        this.log(e, info.status === 'rejected' ? 'error' : 'system', `⚠️ 구독 사용량 ${info.status === 'rejected' ? '한도 도달' : '한도 근접'}${pct}${reset}`);
+        this.log(e, info.status === 'rejected' ? 'error' : 'system', info.status === 'rejected'
+            ? tr({ ko: `⚠️ 구독 사용량 한도 도달${pct}${reset}`, en: `⚠️ Subscription usage limit reached${pct}${reset}` })
+            : tr({ ko: `⚠️ 구독 사용량 한도 근접${pct}${reset}`, en: `⚠️ Subscription usage near the limit${pct}${reset}` }));
         break;
       }
     }

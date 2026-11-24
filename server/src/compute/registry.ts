@@ -1,3 +1,4 @@
+import { tr } from '../../../shared/i18n.ts';
 import type { Job, ServerView } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
 import type { ServerConfig } from '../config.ts';
@@ -19,7 +20,7 @@ export class ServerRegistry {
     for (const c of configs) {
       const exec = isLocalHost(c.ssh_host) ? localExec : undefined;
       this.adapters.set(c.name, c.type === 'slurm' ? new SlurmAdapter(c, exec) : new SshAdapter(c, exec));
-      this.views.set(c.name, { name: c.name, type: c.type, online: false, gpus: [], note: '확인 전', checkedAt: 0 });
+      this.views.set(c.name, { name: c.name, type: c.type, online: false, gpus: [], note: tr({ ko: '확인 전', en: 'not checked yet' }), checkedAt: 0 });
     }
   }
 
@@ -35,7 +36,7 @@ export class ServerRegistry {
 
   get(name: string): ComputeAdapter {
     const a = this.adapters.get(name);
-    if (!a) throw new Error(`알 수 없는 서버: ${name}. 사용 가능: ${[...this.adapters.keys()].join(', ') || '(없음 — config/servers.local.yaml 설정 필요)'}`);
+    if (!a) throw new Error(`Unknown server: ${name}. Available: ${[...this.adapters.keys()].join(', ') || '(none; configure config/servers.local.yaml)'}`);
     return a;
   }
 
@@ -108,7 +109,7 @@ export class ServerRegistry {
 
   async cancel(jobId: number) {
     const job = this.store.getJob(jobId);
-    if (!job) throw new Error(`job ${jobId} 없음`);
+    if (!job) throw new Error(tr({ ko: `job ${jobId} 없음`, en: `No job ${jobId}` }));
     await this.get(job.server).cancel(job.remoteId);
     await this.refreshJob(job);
   }

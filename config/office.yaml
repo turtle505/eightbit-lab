@@ -1,35 +1,39 @@
-# 사무실 전체 설정
+# Office-wide settings
 port: 8787
-# 구독(Pro/Max) rate limit 보호: 동시에 일하는 직원 수
+# Language of the UI and of what agents report in: ko | en.
+# Prompts sent to agents are English either way; this only picks the language people read.
+# The KO/EN toggle in the header overrides it and is remembered (in the DB).
+language: en
+# Subscription (Pro/Max) rate-limit protection: how many employees may work at the same time
 maxConcurrent: 3
-# 직원 권한 모드 기본값 (role의 permissionMode, UI 직원 패널 토글로 덮어씀)
-#   auto: 분류기가 안전하다고 본 도구는 바로 실행, 애매한 것만 승인 요청 / ask: autoAllow 밖 도구는 모두 승인 요청
-# 작업 카드에 🔒(requireApproval)가 붙으면 그 작업은 항상 ask로 실행.
+# Default employee permission mode (overridden by a role's permissionMode and the UI employee panel toggle)
+#   auto: tools the classifier deems safe run right away, only unclear ones ask for approval / ask: every tool outside autoAllow asks for approval
+# A task card marked 🔒 (requireApproval) always runs as ask.
 permissionMode: auto
-# 사무실이 호스트 한 대에 ssh/scp 를 1분에 몇 번까지 실행할지. 공유 서버는 접속이 잦으면 차단하므로 낮게 둔다.
-# 상태 확인·GPU 폴링은 한도를 넘으면 그 회차를 건너뛰고, 세션 열기는 자리가 날 때까지 기다린다.
+# How many ssh/scp runs per minute the office may make to a single host. Shared servers ban clients that connect too often, so keep it low.
+# Health checks and GPU polling skip that round when over the limit; opening a session waits until a slot frees up.
 sshPerMinute: 5
-# 서버마다 다르게 두려면 hosts 항목에 sshPerMinute 를 적는다 (0 이면 그 서버는 제한 없음):
+# For a per-server value, set sshPerMinute on the hosts entry (0 = no limit for that server):
 #   - { id: master, ssh: master, projectRoot: "~/project", sshPerMinute: 3 }
-# 직원 세션을 계속 열어 두는 시간 (분). 열린 세션은 다음 지시를 바로 시작하고, 일하는 중에 보낸 지시도 즉시 전달됨.
-# 이 시간 동안 일이 없으면 닫고, 다음 지시 때 대화를 이어서 다시 연다. 0이면 닫지 않음(메모리를 계속 차지).
+# How long to keep an employee's session open (minutes). An open session starts the next instruction immediately, and instructions sent mid-work are delivered right away.
+# After this long without work it closes, and the next instruction reopens it, resuming the conversation. 0 = never close (keeps using memory).
 sessionIdleMinutes: 30
-# 기본 모델 (role에서 덮어쓸 수 있음). 비워두면 Claude Code 기본값.
+# Default model (roles can override). Empty = Claude Code default.
 model: ""
-# 직원들이 작업할 연구 코드 repo (git). 비워두면 ./workspaces/shared 를 사용.
-# 코드 수정 직원(useWorktree: true)은 이 repo의 git worktree를 각자 받는다.
+# Research code repo (git) the staff work on. Empty = use ./workspaces/shared.
+# Code-editing employees (useWorktree: true) each get a git worktree of this repo.
 researchRepo: ""
-# worktree / 공용 작업 폴더 위치
+# Location of worktrees / the shared working folder
 workspaceRoot: ./workspaces
-# 보고서 탭이 .md 파일을 모으는 추가 폴더 (기본: workspaces/<직원 폴더>/reports). 개인 경로는 office.local.yaml 에.
+# Extra folders the reports tab collects .md files from (default: workspaces/<employee folder>/reports). Personal paths go in office.local.yaml.
 # reportDirs: [../research/reports]
-# 오늘 할 일 패널: Obsidian 데일리 노트의 체크박스를 보여주고 체크/수정/추가. 개인 vault 경로는 office.local.yaml 에.
+# Today's to-dos panel: shows the checkboxes of an Obsidian daily note and lets you check/edit/add. Put your personal vault path in office.local.yaml.
 # obsidian:
 #   vault: /path/to/vault
 #   daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"      # {ddd} = Mon, Tue, ...
-#   createCommand: ["python3", ".scripts/daily_note.py", "--vault", "{vault}"]   # "오늘 노트 만들기" 버튼 (없으면 버튼 숨김)
-# Claude 구독 대신 쓸 모델 서버 (roles.yaml 에서 provider: <id> 로 연결). 지금은 kind: ollama 만 지원.
-# ssh_host 의 Ollama(127.0.0.1:remotePort)로 SSH 터널(localPort)을 열고, Anthropic 호환 API로 Claude Code 세션을 돌린다.
-# Ollama 쪽 컨텍스트는 64k 이상 필요: OLLAMA_CONTEXT_LENGTH=65536 ollama serve. 실제 호스트는 office.local.yaml 에.
+#   createCommand: ["python3", ".scripts/daily_note.py", "--vault", "{vault}"]   # "create today's note" button (hidden if unset)
+# Model servers to use instead of the Claude subscription (linked from roles.yaml with provider: <id>). Only kind: ollama is supported for now.
+# Opens an SSH tunnel (localPort) to Ollama on ssh_host (127.0.0.1:remotePort) and runs the Claude Code session over its Anthropic-compatible API.
+# Ollama needs a context of 64k or more: OLLAMA_CONTEXT_LENGTH=65536 ollama serve. Put real hosts in office.local.yaml.
 # providers:
 #   - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }

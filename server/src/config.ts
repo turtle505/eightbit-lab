@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import type { PermissionSetting } from '../../shared/protocol.ts';
+import { tr, type Lang } from '../../shared/i18n.ts';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -28,6 +29,8 @@ export interface OfficeConfig {
   authToken: string;
   /** most ssh/scp runs the office starts per host per minute (shared servers ban noisy clients) */
   sshPerMinute: number;
+  /** language of the UI and of what agents report in (prompts stay English); the UI toggle overrides it */
+  language: Lang;
 }
 
 /**
@@ -69,7 +72,7 @@ export interface ObsidianConfig {
   vault: string;
   /** daily note path inside the vault: {YYYY} {MM} {DD} {ddd}(Mon) */
   daily: string;
-  /** argv run (no shell, cwd = vault) by the "오늘 노트 만들기" button; "{vault}" is substituted. Empty = no button */
+  /** argv run (no shell, cwd = vault) by the "create today's note" button; "{vault}" is substituted. Empty = no button */
   createCommand: string[];
 }
 
@@ -181,6 +184,7 @@ export function loadOffice(): OfficeConfig {
     sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
     authToken: String(c.authToken ?? '').trim(),
     sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
+    language: c.language === 'ko' ? 'ko' : 'en',
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };
@@ -190,7 +194,12 @@ export function normalizeHosts(list: Partial<HostConfig>[]): HostConfig[] {
   const out: HostConfig[] = [];
   for (const h of list) {
     if (!h.id || !h.ssh) {
-      console.warn(`⚠️ host ${h.id ?? '(id 없음)'}: id 와 ssh 가 필요합니다 — 무시함`);
+      console.warn(
+        tr({
+          ko: `⚠️ host ${h.id ?? '(id 없음)'}: id 와 ssh 가 필요합니다 — 무시함`,
+          en: `⚠️ host ${h.id ?? '(no id)'}: id and ssh are required — ignored`,
+        }),
+      );
       continue;
     }
     out.push({
@@ -209,11 +218,16 @@ export function normalizeProviders(list: Partial<ProviderConfig>[]): ProviderCon
   const out: ProviderConfig[] = [];
   for (const p of list) {
     if (!p.id || !p.ssh_host || !p.model) {
-      console.warn(`⚠️ provider ${p.id ?? '(id 없음)'}: id, ssh_host, model 이 필요합니다 — 무시함`);
+      console.warn(
+        tr({
+          ko: `⚠️ provider ${p.id ?? '(id 없음)'}: id, ssh_host, model 이 필요합니다 — 무시함`,
+          en: `⚠️ provider ${p.id ?? '(no id)'}: id, ssh_host and model are required — ignored`,
+        }),
+      );
       continue;
     }
     if ((p.kind ?? 'ollama') !== 'ollama') {
-      console.warn(`⚠️ provider ${p.id}: 지원하지 않는 kind ${p.kind} — 무시함`);
+      console.warn(tr({ ko: `⚠️ provider ${p.id}: 지원하지 않는 kind ${p.kind} — 무시함`, en: `⚠️ provider ${p.id}: unsupported kind ${p.kind} — ignored` }));
       continue;
     }
     out.push({ id: p.id, name: p.name || p.id, kind: 'ollama', ssh_host: p.ssh_host, remotePort: p.remotePort ?? 11434, localPort: p.localPort ?? 11435, model: p.model });

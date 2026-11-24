@@ -1,15 +1,16 @@
 // Types shared by the backend and the browser.
+import { tr, type Lang } from './i18n.ts';
 
 export type AgentStatus =
-  | 'idle' // 대기 (커피)
-  | 'queued' // 동시 실행 제한으로 대기열
-  | 'thinking' // 생각 중
-  | 'typing' // 파일 읽기/쓰기 등 도구 사용
-  | 'running' // Bash 실행
-  | 'researching' // 웹 검색
-  | 'remote' // 원격 GPU 서버 작업 중
-  | 'waiting_permission' // 승인 대기
-  | 'done' // 방금 작업 완료
+  | 'idle' // idle (coffee)
+  | 'queued' // queued behind the concurrency limit
+  | 'thinking' // thinking
+  | 'typing' // using a tool (reading/writing files, …)
+  | 'running' // running Bash
+  | 'researching' // web search
+  | 'remote' // working on a remote GPU server
+  | 'waiting_permission' // waiting for approval
+  | 'done' // just finished
   | 'error';
 
 export interface EmployeeView {
@@ -19,7 +20,7 @@ export interface EmployeeView {
   desk: number;
   sprite: { hair: string; shirt: string; pants: string; skin: string };
   status: AgentStatus;
-  activity: string; // 말풍선 한 줄
+  activity: string; // one-line speech bubble
   taskId: number | null;
   sessionId: string | null;
   cwd: string;
@@ -262,7 +263,8 @@ export type TodoOp =
 /** One subscription usage meter (e.g. 5-hour session, weekly), as reported by claude.ai. */
 export interface UsageRow {
   kind: string; // 'session' | 'weekly_all' | 'weekly_scoped' | ...
-  label: string; // Korean display label
+  label: string; // display label in the office language
+  scope?: string; // model / surface name of a scoped limit (e.g. weekly_scoped), untranslated
   percent: number; // 0-100
   resetsAt: number | null; // epoch ms
   severity: string; // 'normal' | 'warning' | 'critical'
@@ -298,11 +300,15 @@ export interface Snapshot {
   providers: ProviderView[];
   hosts: HostView[];
   projects: ProjectView[];
+  /** language people read the office in (see shared/i18n.ts) */
+  language: Lang;
 }
 
 /** editable labels in the game view that are not employees: professor / manager name tags and the whiteboard text */
 export type FigureKey = 'professor' | 'manager' | 'board';
-export const FIGURE_DEFAULT_NAMES: Record<FigureKey, string> = { professor: '교수님', manager: '매니저', board: '' };
+export const FIGURE_KEYS: readonly FigureKey[] = ['professor', 'manager', 'board'];
+export const figureDefaultName = (key: FigureKey): string =>
+  key === 'professor' ? tr({ ko: '교수님', en: 'Professor' }) : key === 'manager' ? tr({ ko: '매니저', en: 'Manager' }) : '';
 export const FIGURE_MAX_LEN: Record<FigureKey, number> = { professor: 20, manager: 20, board: 60 };
 
 // server -> client
@@ -374,4 +380,6 @@ export type ClientMsg =
   /** check a host now (it is otherwise only checked at startup, to keep idle traffic at zero) */
   | { t: 'recheckHost'; hostId: string }
   /** restart work that was parked on the usage limit, without waiting for the reset */
-  | { t: 'resumeWork'; employeeId: string };
+  | { t: 'resumeWork'; employeeId: string }
+  /** switch the office language (UI, statuses, and what agents report in) */
+  | { t: 'setLanguage'; lang: Lang };

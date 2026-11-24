@@ -1,4 +1,5 @@
-import { FIGURE_DEFAULT_NAMES, type FigureKey } from '../../../shared/protocol.ts';
+import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
+import { tr } from '../../../shared/i18n.ts';
 import type { AgentStatus, EmployeeView, ServerView, Task } from '../../../shared/protocol.ts';
 import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
@@ -30,11 +31,17 @@ let PROF = { x: 346, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
 /** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
 const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
-const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: string; fromBottom?: boolean }> = {
-  professor: { tag: { x: 346, y: -82 }, box: { x0: 337, x1: 355, y0: -110, y1: -82 }, ask: '이름 (비우면 "교수님")', fromBottom: true },
-  manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: '이름 (비우면 "매니저")', fromBottom: true },
+const askName = (k: FigureKey) => {
+  const d = figureDefaultName(k);
+  return tr({ ko: `이름 (비우면 "${d}")`, en: `Name (empty = "${d}")` });
+};
+const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: () => string; fromBottom?: boolean }> = {
+  professor: { tag: { x: 346, y: -82 }, box: { x0: 337, x1: 355, y0: -110, y1: -82 }, ask: () => askName('professor'), fromBottom: true },
+  manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: () => askName('manager'), fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
-  board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)' },
+  board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: () =>
+      tr({ ko: '칠판에 쓸 문구 (최대 60자, 비우면 작업 현황 스티커 표시)', en: 'Text for the whiteboard (up to 60 chars; empty shows the task stickies)' }),
+  },
 };
 
 interface Spot {
@@ -103,7 +110,7 @@ export class OfficeScene {
       const tag = document.createElement('div');
       tag.className = FIGURES[key].tag ? `nametag figure-${key}` : `figure-${key}`;
       if (!FIGURES[key].tag) tag.hidden = true;
-      tag.textContent = FIGURE_DEFAULT_NAMES[key];
+      tag.textContent = figureDefaultName(key);
       overlay.append(tag);
       this.figureTags.set(key, tag);
     }
@@ -114,7 +121,7 @@ export class OfficeScene {
     this.canvas.addEventListener('click', (ev) => {
       const fig = this.hitFigure(ev);
       if (fig) {
-        const name = prompt(FIGURES[fig].ask, this.figureTags.get(fig)?.textContent ?? '');
+        const name = prompt(FIGURES[fig].ask(), this.figureTags.get(fig)?.textContent ?? '');
         if (name !== null) this.onRenameFigure(fig, name);
         return;
       }

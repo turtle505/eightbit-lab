@@ -1506,3 +1506,7 @@ body .md-body h4 {
 .psend { padding: 6px 10px 10px; }
 .psend textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
 .ssh-tight { color: var(--warn); white-space: nowrap; }
+
+.lang-btn {
+  padding: 3px 10px;
+}

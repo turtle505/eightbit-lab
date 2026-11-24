@@ -1,5 +1,7 @@
 import './style.css';
-import { FIGURE_DEFAULT_NAMES, type ClientMsg, type ServerMsg, type Snapshot } from '../../shared/protocol.ts';
+import { FIGURE_KEYS, figureDefaultName, type ClientMsg, type FigureKey, type ServerMsg, type Snapshot } from '../../shared/protocol.ts';
+import { getLang, initLang, applyLang } from './ui/lang.ts';
+import { tr } from '../../shared/i18n.ts';
 import { OfficeScene } from './game/office.ts';
 import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, renderUsagePanel, sortedEmployees } from './ui/console.ts';
 import {
@@ -14,7 +16,7 @@ import {
   renderJobs,
   renderRoutines,
 } from './ui/panels.ts';
-import { applyView, initialView } from './ui/view.ts';
+import { applyView, initialView, viewTitle } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
 import { initReports, onReportContent, renderReports, unreadReports } from './ui/reports.ts';
@@ -22,8 +24,9 @@ import { renderProjects, setHostDirs } from './ui/projects.ts';
 
 const FEED_MAX = 300;
 
+initLang();
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: { ...FIGURE_DEFAULT_NAMES }, providers: [], hosts: [], projects: [] } as unknown as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: Object.fromEntries(FIGURE_KEYS.map((k) => [k, figureDefaultName(k)])) as Record<FigureKey, string>, providers: [], hosts: [], projects: [] } as unknown as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
@@ -108,11 +111,13 @@ function onMsg(m: ServerMsg) {
   const s = state.snap;
   switch (m.t) {
     case 'snapshot':
+      applyLang(m.data.language);
+      document.title = viewTitle(state.view);
       state.snap = m.data;
       state.feed = [...(m.data.recentLogs ?? [])];
       scene.setEmployees(m.data.employees);
       scene.setServers(m.data.servers);
-      scene.setFigureNames(m.data.figureNames ?? FIGURE_DEFAULT_NAMES);
+      scene.setFigureNames(m.data.figureNames);
       scene.tasks = m.data.tasks;
       if (state.selected) send({ t: 'getLogs', employeeId: state.selected });
       break;
@@ -126,7 +131,7 @@ function onMsg(m: ServerMsg) {
       if (s.projects?.length) s.projects = s.projects.map((p) => ({ ...p, sessions: p.sessions.map((x) => (x.id === m.data.id ? m.data : x)) }));
       s.running = s.employees.filter((e) => !e.provider && !['idle', 'queued', 'done', 'error'].includes(e.status)).length;
       scene.upsert(m.data);
-      if (prev && prev.status !== 'done' && m.data.status === 'done') notify(`${m.data.name} 완료`, m.data.activity);
+      if (prev && prev.status !== 'done' && m.data.status === 'done') notify(tr({ ko: `${m.data.name} 완료`, en: `${m.data.name} done` }), m.data.activity);
       break;
     }
     case 'task': {
@@ -168,7 +173,7 @@ function onMsg(m: ServerMsg) {
     case 'approval': {
       s.approvals.push(m.data);
       const who = s.employees.find((e) => e.id === m.data.employeeId)?.name ?? m.data.employeeId;
-      notify('승인 요청', `${who}: ${m.data.toolName}`);
+      notify(tr({ ko: '승인 요청', en: 'Approval request' }), `${who}: ${m.data.toolName}`);
       break;
     }
     case 'approvalResolved':
@@ -211,7 +216,7 @@ function onMsg(m: ServerMsg) {
       if (i >= 0) s.feed.splice(i, 1);
       s.feed.push(m.data); // an updated report moves back to the bottom, like a new message
       if (s.feed.length > 200) s.feed.splice(0, s.feed.length - 200);
-      if (m.data.kind === 'report' && i < 0) notify('📄 새 보고서', m.data.title);
+      if (m.data.kind === 'report' && i < 0) notify(tr({ ko: '📄 새 보고서', en: '📄 New report' }), m.data.title);
       break;
     }
     case 'todos':
@@ -269,6 +274,7 @@ window.addEventListener('office-toast', (ev) => {
 document.getElementById('notify-btn')?.addEventListener('click', () => {
   if ('Notification' in window) void Notification.requestPermission().then(() => renderAll());
 });
+document.getElementById('lang-btn')?.addEventListener('click', () => send({ t: 'setLanguage', lang: getLang() === 'ko' ? 'en' : 'ko' }));
 document.querySelectorAll<HTMLButtonElement>('.view-toggle button').forEach((b) =>
   b.addEventListener('click', () => setView(b.dataset.view as ViewMode)),
 );
@@ -303,7 +309,7 @@ window.addEventListener('keydown', (ev) => {
   if (first && (ev.key === 'a' || ev.key === 'd')) {
     if (ev.key === 'a' && !confirmApprove(first, state.snap)) return;
     send({ t: 'approve', id: first.id, allow: ev.key === 'a' });
-    toast(`${ev.key === 'a' ? '승인' : '거부'}: ${first.toolName}`, ev.key === 'a' ? 'info' : 'warn');
+    toast(`${ev.key === 'a' ? tr({ ko: '승인', en: 'Approved' }) : tr({ ko: '거부', en: 'Denied' })}: ${first.toolName}`, ev.key === 'a' ? 'info' : 'warn');
   }
 });
 
@@ -312,5 +318,5 @@ bindNewTaskForm(send);
 bindConsoleTaskForm(send);
 setView(state.view);
 connect();
-// keep relative times ("n분 후 초기화", "갱신") fresh
+// keep relative times ("resets in n min", "updated") fresh
 setInterval(renderAll, 30_000);

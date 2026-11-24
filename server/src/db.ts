@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { tr } from '../../shared/i18n.ts';
 import { ROOT } from './config.ts';
 import { type AttachmentRow, toView } from './attachments.ts';
 import { isAbsolute, relative, resolve as resolvePath } from 'node:path';
@@ -111,6 +112,8 @@ export class Store {
         employeeId TEXT PRIMARY KEY, mode TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS provider_models (
         providerId TEXT PRIMARY KEY, model TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, server TEXT NOT NULL, remoteId TEXT NOT NULL,
         name TEXT NOT NULL, command TEXT NOT NULL, submittedBy TEXT, state TEXT NOT NULL,
@@ -221,7 +224,7 @@ export class Store {
     const id = `p:${projectId}:${n}`;
     this.db
       .prepare('INSERT INTO project_sessions (id, projectId, label, desk, createdAt) VALUES (?, ?, ?, -1, ?)')
-      .run(id, projectId, label?.trim() || `세션 ${n}`, Date.now());
+      .run(id, projectId, label?.trim() || tr({ ko: `세션 ${n}`, en: `Session ${n}` }), Date.now());
     return this.db.prepare('SELECT * FROM project_sessions WHERE id = ?').get(id) as unknown as ProjectSessionRow;
   }
 
@@ -321,6 +324,15 @@ export class Store {
     this.db
       .prepare('INSERT INTO employee_perm (employeeId, mode) VALUES (?, ?) ON CONFLICT(employeeId) DO UPDATE SET mode = excluded.mode')
       .run(employeeId, mode);
+  }
+
+  // ---- office-wide settings picked in the UI (override office.yaml)
+  getSetting(key: string): string | null {
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as any;
+    return r ? r.value : null;
+  }
+  setSetting(key: string, value: string) {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
   // ---- model picked in the UI per provider (overrides office.providers[].model)

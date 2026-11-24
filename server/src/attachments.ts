@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
+import { tr } from '../../shared/i18n.ts';
 import type { AttachmentView } from '../../shared/protocol.ts';
 import type { Store } from './db.ts';
 
@@ -58,10 +59,10 @@ export const toView = (r: AttachmentRow): AttachmentView => ({ id: r.id, name: r
 export function attachmentBlock(rows: AttachmentRow[]): string {
   if (!rows.length) return '';
   const lines = rows.map((r) => {
-    const extra = r.textPath ? `  (본문 텍스트: ${r.textPath})` : /\.xlsx?$/i.test(r.name) ? '  (엑셀: Bash에서 pandas/openpyxl로 읽기)' : '';
+    const extra = r.textPath ? `  (extracted text: ${r.textPath})` : /\.xlsx?$/i.test(r.name) ? '  (Excel: read it with pandas/openpyxl from Bash)' : '';
     return `- #${r.id} ${r.name} (${humanSize(r.size)}, ${r.mime}): ${r.path}${extra}`;
   });
-  return `\n\n## 첨부 파일 (읽기 전용 원본 — 고치려면 작업 폴더에 복사해서)\n${lines.join('\n')}`;
+  return `\n\n## Attachments (read-only originals: copy into your working folder to edit)\n${lines.join('\n')}`;
 }
 
 const run = (cmd: string, args: string[], ms = 120_000) =>
@@ -96,7 +97,12 @@ export class AttachmentLibrary {
   }
 
   async save(rawName: string, data: Buffer): Promise<AttachmentView> {
-    if (data.length > MAX_ATTACHMENT_BYTES) throw new Error(`파일이 너무 큽니다 (${humanSize(data.length)} > ${humanSize(MAX_ATTACHMENT_BYTES)})`);
+    if (data.length > MAX_ATTACHMENT_BYTES) throw new Error(
+        tr({
+          ko: `파일이 너무 큽니다 (${humanSize(data.length)} > ${humanSize(MAX_ATTACHMENT_BYTES)})`,
+          en: `File too large (${humanSize(data.length)} > ${humanSize(MAX_ATTACHMENT_BYTES)})`,
+        }),
+      );
     const name = safeName(rawName);
     const now = new Date();
     const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-8-bit Lab (`eightbit-lab`): a local web app that runs several Claude Agent SDK sessions ("employees") in parallel and shows them as a pixel-art office. The manager (user) gives instructions, assigns task cards, approves tool calls, and tracks remote GPU jobs. UI text, prompts and README are in Korean — keep new user-facing strings in Korean.
+8-bit Lab (`eightbit-lab`): a local web app that runs several Claude Agent SDK sessions ("employees") in parallel and shows them as a pixel-art office. The manager (user) gives instructions, assigns task cards, approves tool calls, and tracks remote GPU jobs. People-facing text is switchable Korean/English; agent-facing text is English (see **Language** below). README.md is English, README.ko.md Korean — keep both in step.
 
 ## Commands
 
@@ -20,6 +20,8 @@ npm run typecheck    # tsc --noEmit over server, web, shared
 No compile step for the server: it runs TypeScript directly via `tsx`, and imports use explicit `.ts` extensions (`allowImportingTsExtensions`). Persistence uses the built-in `node:sqlite` (`DatabaseSync`), so a recent Node is required. Auth comes from the local `claude` CLI login (Pro/Max subscription) — there is no API key.
 
 ## Architecture
+
+**Language (`shared/i18n.ts`).** One office-wide language (`Lang = 'ko' | 'en'`): DB `settings.language` (set by the header KO/EN button, `setLanguage`) > `office.language` (default `en`). It travels in `Snapshot.language`; a switch re-sends the whole snapshot so server-made text (default figure names, usage labels) is rebuilt. Both server and browser hold their own copy of the module state, so call sites never pass the language. Rules: every string a person reads goes through `tr({ ko, en })` at the call site (whole sentences — Korean particles don't swap word for word), evaluated at use time, never in a module-level constant; dates use `locale()`/`hhmm()`/`dowShort()`; never branch on translated text. Anything the model reads (prompts, instruction suffixes, tool descriptions/results, deny messages) is plain English; the only language-dependent line is `reportLanguageLine()`, appended to every role prompt in `openSession()`. Because it lives in the system prompt, `run()` reopens a live session (same conversation) whose `LiveSession.lang` no longer matches. Logs and feed rows keep the language they were written in.
 
 **Single protocol file.** `shared/protocol.ts` defines every type that crosses the wire: `Snapshot`, `ServerMsg` (server→browser), `ClientMsg` (browser→server). Adding a feature typically means: add a message variant here → handle it in the `handle()` switch in `server/src/index.ts` → send it from `web/src/main.ts` / UI code.
 

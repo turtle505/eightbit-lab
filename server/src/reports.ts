@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
+import { tr } from '../../shared/i18n.ts';
 import type { ReportFile } from '../../shared/protocol.ts';
 
 export interface ReportRoot {
@@ -100,12 +101,12 @@ export class ReportLibrary {
   /** Only paths from the last scan can be read (no arbitrary file access from the browser). */
   read(path: string): { content: string; mtime: number } {
     const f = this.files.get(path);
-    if (!f) throw new Error(`보고서를 찾을 수 없습니다: ${path}`);
+    if (!f) throw new Error(tr({ ko: `보고서를 찾을 수 없습니다: ${path}`, en: `Report not found: ${path}` }));
     const root = this.roots().find((r) => r.label === f.root);
-    if (!root || !resolve(f.abs).startsWith(resolve(root.dir) + sep)) throw new Error('허용되지 않은 경로입니다.');
+    if (!root || !resolve(f.abs).startsWith(resolve(root.dir) + sep)) throw new Error(tr({ ko: '허용되지 않은 경로입니다.', en: 'Path not allowed.' }));
     const st = statSync(f.abs);
     const buf = readFileSync(f.abs);
-    const content = buf.subarray(0, MAX_READ).toString('utf8') + (buf.length > MAX_READ ? '\n\n…(1MB 넘는 부분은 생략)' : '');
+    const content = buf.subarray(0, MAX_READ).toString('utf8') + (buf.length > MAX_READ ? tr({ ko: '\n\n…(1MB 넘는 부분은 생략)', en: '\n\n…(truncated after 1 MB)' }) : '');
     return { content, mtime: Math.round(st.mtimeMs) };
   }
 }

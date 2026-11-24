@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
+import { tr } from '../../shared/i18n.ts';
 import type { SkillView } from '../../shared/protocol.ts';
 import type { Store } from './db.ts';
 
@@ -34,7 +35,7 @@ export class SkillLibrary {
     const manifest = resolve(this.dir, '.claude-plugin/plugin.json');
     if (!existsSync(manifest)) {
       mkdirSync(resolve(this.dir, '.claude-plugin'), { recursive: true });
-      writeFileSync(manifest, JSON.stringify({ name: PLUGIN_NAME, version: '1.0.0', description: '8-bit Lab 사무실 스킬 (루틴용)' }, null, 2) + '\n');
+      writeFileSync(manifest, JSON.stringify({ name: PLUGIN_NAME, version: '1.0.0', description: '8-bit Lab office skills (for routines)' }, null, 2) + '\n');
     }
     mkdirSync(resolve(this.dir, 'skills'), { recursive: true });
   }
@@ -58,7 +59,9 @@ export class SkillLibrary {
     const allow = Array.isArray(fm['office-allow']) ? fm['office-allow'].map(String) : [];
     return {
       name,
-      description: bad ? '⚠️ SKILL.md 프런트매터(YAML)를 읽을 수 없습니다' : String(fm.description ?? ''),
+      description: bad
+        ? tr({ ko: '⚠️ SKILL.md 프런트매터(YAML)를 읽을 수 없습니다', en: '⚠️ Cannot read the SKILL.md front matter (YAML)' })
+        : String(fm.description ?? ''),
       allow,
       body: m ? m[2] : raw,
       hash: createHash('sha256').update(raw).digest('hex'),
@@ -87,9 +90,9 @@ export class SkillLibrary {
 
   /** Write (or overwrite) a skill and approve it as written. Callers must have the manager's approval. */
   save(name: string, description: string, body: string, allow: string[]): SkillView {
-    if (!NAME_RE.test(name)) throw new Error(`스킬 이름은 영문 소문자·숫자·하이픈만 (2~41자): "${name}"`);
-    if (!description.trim()) throw new Error('스킬 설명(description)이 비어 있습니다.');
-    if (!body.trim()) throw new Error('스킬 본문이 비어 있습니다.');
+    if (!NAME_RE.test(name)) throw new Error(`Skill names may use only lowercase letters, digits and hyphens (2-41 chars): "${name}"`);
+    if (!description.trim()) throw new Error('The skill description is empty.');
+    if (!body.trim()) throw new Error('The skill body is empty.');
     const fm: Record<string, unknown> = { name, description: description.trim() };
     const rules = allow.map((a) => a.trim()).filter(Boolean);
     if (rules.length) fm['office-allow'] = rules;
@@ -101,7 +104,7 @@ export class SkillLibrary {
   /** Approve the skill file as it is now (e.g. after the manager edited it by hand). */
   approve(name: string): SkillView {
     const s = this.read(name);
-    if (!s) throw new Error(`스킬 ${name}을(를) 찾을 수 없습니다.`);
+    if (!s) throw new Error(tr({ ko: `스킬 ${name}을(를) 찾을 수 없습니다.`, en: `Skill ${name} not found.` }));
     this.store.setSkillApproval(name, s.allow, s.hash);
     return this.view(name)!;
   }
