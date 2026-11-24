@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { CodexTools } from '../src/agents/codexTools.ts';
+import { codexUsageRows } from '../src/codexUsage.ts';
 import { statusForTool } from '../src/agents/status.ts';
 
 describe('Codex office tool bridge', () => {
@@ -16,6 +17,22 @@ describe('Codex office tool bridge', () => {
     } finally {
       await bridge.close();
     }
+  });
+});
+
+describe('Codex subscription usage', () => {
+  it('reads the Codex bucket and converts reset seconds to milliseconds', () => {
+    const rows = codexUsageRows({ rateLimitsByLimitId: { codex: {
+      primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+      secondary: { usedPercent: 90, windowDurationMins: 10_080, resetsAt: 1_800_100_000 },
+    } } });
+    expect(rows).toMatchObject([
+      { kind: 'session', percent: 25, resetsAt: 1_800_000_000_000, severity: 'normal' },
+      { kind: 'weekly_all', percent: 90, resetsAt: 1_800_100_000_000, severity: 'critical' },
+    ]);
+  });
+  it('leaves missing limits unavailable', () => {
+    expect(codexUsageRows({ rateLimits: {} })).toEqual([]);
   });
 });
 import { parseNvidiaSmi } from '../src/compute/adapter.ts';

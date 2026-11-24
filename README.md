@@ -86,7 +86,7 @@ For bigger jobs, add a **task card** on the board and drag it onto an employee. 
 | ✋ Hand up with `!` | Waiting for your approval |
 | ✨ Sparkle | Just finished |
 
-**Subscription usage.** The top bar shows your Claude plan's **5-hour and weekly usage** and when each resets. The number in each employee's panel is *their share* of the office's total usage, not a percentage of your limit. If the 5-hour window runs out mid-task, the employee pauses and **picks the work up again by itself** when the window resets. **▶️ Resume now** skips the wait.
+**Subscription usage.** The top bar shows your Claude plan's **5-hour and weekly usage** and Codex's **remaining quota** when available, with reset times. The number in each employee's panel is *their share* of the office's total Claude usage, not a percentage of a limit. If the Claude 5-hour window runs out mid-task, the employee pauses and **picks the work up again by itself** when the window resets. **▶️ Resume now** skips the wait.
 
 ---
 
@@ -150,7 +150,7 @@ Under each role, every prompt also gets the shared rules from the `common:` bloc
 
 ### Codex employees
 
-In an employee panel, choose **Codex** from the engine selector after the employee's current work finishes. The choice persists; switching back to Claude restores that employee's separate Claude conversation. Codex runs through its local app-server with your ChatGPT login, so install the official Codex CLI and run `codex login` on the backend machine. For a remote employee host, install and sign in there too; set `codexPath` to the CLI's absolute path in that host's `office.local.yaml` entry if a non-login SSH shell cannot find it. On a headless host, `codex login --device-auth` is an option. Codex uses the CLI model configured on the host, including when resuming an employee conversation. If the account rejects the default model, set `model = "<supported-model>"` at the top of that host's `~/.codex/config.toml`. Codex uses the same task board, report feed, approval cards, and office/lab tools. In auto mode it accepts routine Codex command and file approvals; SSH/lab access, certain destructive commands, and extra filesystem grants still ask. Its subscription usage is separate from the Claude meter in the header.
+In an employee panel, choose **Codex** from the engine selector after the employee's current work finishes. The choice persists; switching back to Claude restores that employee's separate Claude conversation. Codex runs through its local app-server with your ChatGPT login, so install the official Codex CLI and run `codex login` on the backend machine. For a remote employee host, install and sign in there too; set `codexPath` to the CLI's absolute path in that host's `office.local.yaml` entry if a non-login SSH shell cannot find it. On a headless host, `codex login --device-auth` is an option. Codex uses the CLI model configured on the host, including when resuming an employee conversation. If the account rejects the default model, set `model = "<supported-model>"` at the top of that host's `~/.codex/config.toml`. Codex uses the same task board, report feed, approval cards, and office/lab tools. In auto mode it accepts routine Codex command and file approvals; SSH/lab access, certain destructive commands, and extra filesystem grants still ask. The header shows Codex quota separately from Claude when the backend host's Codex account reports it.
 
 <details>
 <summary><b>🖥️ GPU servers (submit and track jobs)</b></summary>

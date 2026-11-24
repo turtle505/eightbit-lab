@@ -183,7 +183,8 @@ export function renderFeed(st: UIState) {
 
 export function renderUsagePanel(st: UIState, send: Send) {
   const u = st.snap.usage;
-  if (!changed('c-usage', [u, Math.floor(Date.now() / 60000)])) return;
+  const cu = st.snap.codexUsage;
+  if (!changed('c-usage', [u, cu, Math.floor(Date.now() / 60000)])) return;
   const rows = u?.available
     ? u.rows
         .map(
@@ -195,9 +196,11 @@ export function renderUsagePanel(st: UIState, send: Send) {
         )
         .join('')
     : `<p class="muted small">${esc(u?.note || tr({ ko: '확인 중', en: 'Checking…' }))}</p>`;
-  $('c-usage').innerHTML = `<div class="c-head"><h2>${tr({ ko: '구독 사용량', en: 'Subscription usage' })}${u?.plan ? ` <span class="muted small">${esc(u.plan)}</span>` : ''}</h2>
+  $('c-usage').innerHTML = `<div class="c-head"><h2>${tr({ ko: 'Claude 사용량', en: 'Claude usage' })}${u?.plan ? ` <span class="muted small">${esc(u.plan)}</span>` : ''}</h2>
       <button type="button" id="c-usage-refresh">${tr({ ko: '새로고침', en: 'Refresh' })}</button></div>
     ${rows}
+    <h3>Codex${cu?.plan ? ` <span class="muted small">${esc(cu.plan)}</span>` : ''}</h3>
+    ${cu?.available ? cu.rows.map((r) => `<div class="urow sev-${esc(r.severity)}"><div class="row space"><span>${esc(r.label)}</span><b class="mono">${100 - r.percent}% ${tr({ ko: '남음', en: 'left' })}</b></div><div class="ubar"><i style="width:${100 - r.percent}%"></i></div><div class="muted small">${esc(resetText(r.resetsAt))}</div></div>`).join('') : `<p class="muted small">${esc(cu?.note || tr({ ko: '확인 중', en: 'Checking…' }))}</p>`}
     <p class="muted small">${
       u?.fetchedAt
         ? tr({

@@ -17,6 +17,7 @@ import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
 import type { FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
+import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
 import { dueTasks, SCHEDULE_SLACK_MS } from './schedule.ts';
 import { ProviderHub } from './providers.ts';
@@ -125,9 +126,13 @@ function pollReports() {
   }
 }
 const usage = new UsageMonitor(ROOT);
+const codexUsage = new CodexUsageMonitor();
 // refresh subscription usage shortly after an employee finishes a run
 bus.on('msg', (m: ServerMsg) => {
-  if (m.t === 'employee' && (m.data.status === 'done' || m.data.status === 'error')) usage.poke();
+  if (m.t === 'employee' && (m.data.status === 'done' || m.data.status === 'error')) {
+    if (m.data.engine === 'codex') codexUsage.poke();
+    else usage.poke();
+  }
 });
 
 function assignTask(taskId: number, employeeId: string) {
@@ -236,6 +241,7 @@ function snapshot(): Snapshot {
     todos: today.load(),
     recentLogs: store.logsSince(0, 200),
     usage: usage.view,
+    codexUsage: codexUsage.view,
     running: agents.runningCount(),
     maxConcurrent: office.maxConcurrent,
     figureNames: figureNames(),
@@ -402,6 +408,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     }
     case 'refreshUsage':
       void usage.refresh();
+      void codexUsage.refresh();
       break;
     case 'listHostDirs': {
       const h = hosts.get(msg.hostId);
@@ -594,6 +601,7 @@ http.listen(office.port, '127.0.0.1', () => {
   registry.start();
   routines.start();
   usage.start();
+  codexUsage.start();
   providers.start();
   hosts.start();
   // sessions are restored once the hosts have answered, so their home dirs are known

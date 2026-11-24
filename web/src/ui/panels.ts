@@ -129,7 +129,8 @@ export function renderHeader(st: UIState, send?: Send) {
   const s = st.snap;
   const busy = s.employees.filter((e) => !e.provider && !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
   const u = s.usage;
-  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
+  const cu = s.codexUsage;
+  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, cu, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
   if (!changed('header', data)) return;
   // headline meters: session + overall weekly; model-scoped weekly rows go in the tooltip
   const main = u?.rows.filter((r) => r.kind === 'session' || r.kind === 'weekly_all') ?? [];
@@ -143,11 +144,15 @@ export function renderHeader(st: UIState, send?: Send) {
         )
         .join('') + (extra.length ? `<span class="pill muted" title="${esc(tip)}">${extra.map((r) => `${esc(usageShort(r))} ${r.percent}%`).join(' · ')}</span>` : '')
     : `<button type="button" class="pill" data-usage title="${esc(u?.note || '')}">${tr({ ko: '사용량', en: 'Usage' })} ${u?.fetchedAt ? '—' : tr({ ko: '확인 중', en: 'checking' })}</button>`;
+  const codexTip = (cu?.rows ?? []).map((r) => `${r.label}: ${100 - r.percent}% ${tr({ ko: '남음', en: 'left' })} · ${resetText(r.resetsAt)}`).join('\n') + (cu?.plan ? `\n${cu.plan}` : '');
+  const codexMeters = cu?.available && cu.rows.length
+    ? cu.rows.map((r) => `<button type="button" class="pill meter sev-${esc(r.severity)}" data-usage title="${esc(codexTip)}">${esc(r.label)} <b>${100 - r.percent}%</b> ${tr({ ko: '남음', en: 'left' })}</button>`).join('')
+    : `<button type="button" class="pill" data-usage title="${esc(cu?.note || '')}">Codex ${cu?.fetchedAt ? '—' : tr({ ko: '확인 중', en: 'checking' })}</button>`;
   $('stats').innerHTML = `
     <span class="pill ${st.connected ? 'ok' : 'bad'}">${st.connected ? tr({ ko: '● 연결됨', en: '● Online' }) : tr({ ko: '○ 연결 끊김', en: '○ Offline' })}</span>
     <span class="pill">${tr({ ko: '근무 중', en: 'Working' })} <b>${busy}</b>/${s.maxConcurrent}</span>
     <span class="pill ${s.approvals.length ? 'warn' : ''}">${tr({ ko: '승인 대기', en: 'Approvals' })} <b>${s.approvals.length}</b></span>
-    ${meters}`;
+    ${meters}${codexMeters}`;
   if (send) $('stats').querySelectorAll('[data-usage]').forEach((b) => b.addEventListener('click', () => send({ t: 'refreshUsage' })));
   const nb = document.getElementById('notify-btn');
   if (nb) nb.hidden = !('Notification' in window) || Notification.permission !== 'default';

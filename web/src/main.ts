@@ -27,7 +27,7 @@ const FEED_MAX = 300;
 
 initLang();
 const state: UIState = {
-  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: Object.fromEntries(FIGURE_KEYS.map((k) => [k, figureDefaultName(k)])) as Record<FigureKey, string>, providers: [], hosts: [], projects: [] } as unknown as Snapshot,
+  snap: { employees: [], tasks: [], approvals: [], jobs: [], servers: [], routines: [], skills: [], reports: [], feed: [], todos: { enabled: false, date: '', relPath: '', exists: false, mtime: 0, vaultName: '', canCreate: false, sections: [], error: '' }, recentLogs: [], usage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, codexUsage: { available: false, plan: null, rows: [], fetchedAt: null, note: '' }, running: 0, maxConcurrent: 0, figureNames: Object.fromEntries(FIGURE_KEYS.map((k) => [k, figureDefaultName(k)])) as Record<FigureKey, string>, providers: [], hosts: [], projects: [] } as unknown as Snapshot,
   selected: null,
   logs: new Map(),
   connected: false,
@@ -196,6 +196,9 @@ function onMsg(m: ServerMsg) {
     }
     case 'usage':
       s.usage = m.data;
+      break;
+    case 'codexUsage':
+      s.codexUsage = m.data;
       break;
     case 'figureName':
       s.figureNames = { ...s.figureNames, [m.key]: m.name };

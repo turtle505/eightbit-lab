@@ -266,7 +266,7 @@ export type TodoOp =
   | { op: 'delete'; line: number; raw: string }
   | { op: 'add'; headerLine: number; headerRaw: string; text: string; parentLine?: number; parentRaw?: string };
 
-/** One subscription usage meter (e.g. 5-hour session, weekly), as reported by claude.ai. */
+/** One subscription usage meter (e.g. 5-hour session, weekly). */
 export interface UsageRow {
   kind: string; // 'session' | 'weekly_all' | 'weekly_scoped' | ...
   label: string; // display label in the office language
@@ -299,6 +299,7 @@ export interface Snapshot {
   /** latest log lines across all employees (activity feed) */
   recentLogs: LogLine[];
   usage: UsageView;
+  codexUsage: UsageView;
   running: number;
   maxConcurrent: number;
   /** display names of the decorative figures in the game view (professor, the manager = you) */
@@ -336,6 +337,7 @@ export type ServerMsg =
   | { t: 'reportContent'; path: string; content: string; mtime: number }
   | { t: 'todos'; data: TodayTodos }
   | { t: 'usage'; data: UsageView }
+  | { t: 'codexUsage'; data: UsageView }
   | { t: 'provider'; data: ProviderView }
   | { t: 'host'; data: HostView }
   | { t: 'projects'; data: ProjectView[] }
