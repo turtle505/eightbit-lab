@@ -774,9 +774,15 @@ body.view-console .approval {
 }
 .c-task-form {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto;
+  /* title, detail, assignee, attach, schedule, ask, add — then chips and the time row on their own lines */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
   gap: 6px;
   margin-bottom: 8px;
+}
+.c-task-form .att-chips,
+.c-task-form .when-box {
+  grid-column: 1 / -1;
 }
 @media (max-width: 700px) {
   .c-task-form {
@@ -1537,3 +1543,17 @@ body .md-body h4 {
 .card-when { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 2px 0; }
 .card-when button { font-size: 11px; padding: 0 4px; cursor: pointer; }
 .when-badge { color: var(--accent); white-space: nowrap; font-size: 12px; }
+
+/* approval cards: risk marks and file-edit diffs */
+.approval.risk-high { border-left: 4px solid var(--bad); }
+.approval.risk-high .approval-head { color: var(--bad); }
+.approval.risk-high .approval-head b,
+.approval.risk-high .approval-head code { color: var(--ink); }
+.risk-chip { display: inline-block; font-size: 11px; padding: 0 5px; margin-right: 4px; border: 1px solid var(--bad); border-radius: 3px; color: var(--bad); white-space: nowrap; }
+/* grid column at least as wide as the box, wider for long lines, so the red/green bands span the scrolled width */
+.diff { display: grid; grid-template-columns: minmax(100%, max-content); max-height: 240px; overflow: auto; margin: 4px 0; padding: 4px 0; font-size: 12px; background: var(--code-bg); white-space: pre; }
+.diff span { display: block; padding: 0 6px; min-height: 1.3em; }
+.diff .d-add { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.diff .d-del { background: color-mix(in srgb, var(--bad) 18%, transparent); }
+.diff .d-ctx { color: var(--muted); }
+.diff .d-gap { color: var(--muted); text-align: center; }

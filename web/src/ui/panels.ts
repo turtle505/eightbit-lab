@@ -1,6 +1,8 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
 import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
+import { approvalRisk } from './approvalRisk.ts';
+import { lineDiff, type DiffLine } from './diff.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState, UsageRow } from '../../../shared/protocol.ts';
 import { dowShort, getLang, hhmm, locale, tr } from '../../../shared/i18n.ts';
 
@@ -170,9 +172,12 @@ export function renderApprovals(st: UIState, send: Send) {
         const routine = a.toolName.includes('_routine') ? s.routines.find((r) => r.id === inp.id) : undefined;
         const main = inp.command ?? inp.file_path ?? inp.url ?? inp.query ?? (routine ? tr({ ko: `루틴: ${routine.name} (${routine.id})`, en: `Routine: ${routine.name} (${routine.id})` }) : inp.name ?? inp.id) ?? '';
         const rest = JSON.stringify(inp, null, 2);
-        return `<div class="approval" data-id="${esc(a.id)}">
-          <div class="approval-head"><b>${esc(who ? short(who.name) : a.employeeId)}</b> → <code>${esc(a.toolName)}</code> <span class="muted">${agoText(a.createdAt)}</span></div>
+        const risk = approvalRisk(a.toolName, inp);
+        const chips = risk.reasons.map((r) => `<span class="risk-chip">${esc(r)}</span>`).join('');
+        return `<div class="approval${risk.high ? ' risk-high' : ''}" data-id="${esc(a.id)}">
+          <div class="approval-head"><b>${esc(who ? short(who.name) : a.employeeId)}</b> → <code>${esc(a.toolName)}</code> ${chips}<span class="muted">${agoText(a.createdAt)}</span></div>
           ${main ? `<pre class="cmd">${esc(main)}</pre>` : ''}
+          ${editPreview(a.toolName, inp)}
           ${inp.description ? `<div class="muted">${esc(inp.description)}</div>` : ''}
           <details><summary>${tr({ ko: '전체 입력', en: 'Full input' })}</summary><pre>${esc(rest)}</pre></details>
           <div class="row"><button class="primary" data-act="allow">${tr({ ko: '승인', en: 'Approve' })}</button><button data-act="deny">${tr({ ko: '거부', en: 'Deny' })}</button></div>
@@ -188,6 +193,32 @@ export function renderApprovals(st: UIState, send: Send) {
       send({ t: 'approve', id, allow });
     }),
   );
+}
+
+const WRITE_PREVIEW_LINES = 60;
+
+/** What a file-editing call would change, as a red/green diff instead of the JSON blob. */
+function editPreview(tool: string, inp: Record<string, unknown>): string {
+  const block = (lines: DiffLine[]) =>
+    `<pre class="diff">${lines
+      .map((l) => (l.op === '…' ? `<span class="d-gap">⋯</span>` : `<span class="${l.op === '+' ? 'd-add' : l.op === '-' ? 'd-del' : 'd-ctx'}">${l.op} ${esc(l.text)}</span>`))
+      .join('')}</pre>`;
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  if (tool === 'Edit') {
+    const note = inp.replace_all ? `<div class="muted small">${tr({ ko: '파일 안의 같은 부분을 모두 바꿈', en: 'Replaces every occurrence in the file' })}</div>` : '';
+    return note + block(lineDiff(str(inp.old_string), str(inp.new_string)));
+  }
+  if (tool === 'MultiEdit' && Array.isArray(inp.edits))
+    return (inp.edits as Record<string, unknown>[]).map((e) => block(lineDiff(str(e.old_string), str(e.new_string)))).join('');
+  if (tool === 'Write') {
+    const lines = str(inp.content).split('\n');
+    const shown: DiffLine[] = lines.slice(0, WRITE_PREVIEW_LINES).map((text) => ({ op: '+', text }));
+    const more = lines.length - shown.length;
+    return `<div class="muted small">${tr({ ko: `파일 전체를 이 내용으로 씀 (${lines.length}줄)`, en: `Writes the whole file (${lines.length} lines)` })}</div>${block(shown)}${
+      more > 0 ? `<div class="muted small">${tr({ ko: `…${more}줄 더`, en: `…${more} more lines` })}</div>` : ''
+    }`;
+  }
+  return '';
 }
 
 const COLS = (): Array<[TaskState, string]> => [

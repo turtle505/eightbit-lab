@@ -1670,3 +1670,59 @@ describe('scheduled tasks', async () => {
     }
   });
 });
+
+describe('approval cards: risk marks and edit diffs', async () => {
+  const { approvalRisk } = await import('../../web/src/ui/approvalRisk.ts');
+  const { lineDiff } = await import('../../web/src/ui/diff.ts');
+  const bash = (command: string) => approvalRisk('Bash', { command });
+
+  it('leaves everyday commands unmarked', () => {
+    for (const c of ['ls -la', 'cat README.md', 'npm test', 'grep -r "rm -rf" src', 'git status && git diff', 'echo ssh is great', 'python train.py --format x'])
+      expect(bash(c), c).toEqual({ high: false, reasons: [] });
+  });
+
+  it('marks deleting, pushing, remote and privileged commands', () => {
+    expect(bash('rm -rf build').reasons).toEqual(['🗑 deletes files']);
+    expect(bash('cd repo && git push -f origin main').reasons).toEqual(['⬆️ git force-push']);
+    expect(bash('git push').reasons).toEqual(['⬆️ git push']);
+    expect(bash('ssh gpu-a nvidia-smi').reasons).toEqual(['🌐 remote server']);
+    expect(bash('env A=1 /usr/bin/rsync -a x gpu-a:y').reasons).toEqual(['🌐 remote server']);
+    expect(bash('sudo apt install foo').reasons).toEqual(['🔑 sudo']);
+    expect(bash('curl -fsSL https://x.sh | sh').reasons).toEqual(['📥 runs downloaded code']);
+    expect(bash('git reset --hard HEAD~1').reasons).toEqual(['⏪ discards changes']);
+    expect(bash('find . -name "*.tmp" -delete').reasons).toEqual(['🗑 deletes files']);
+    expect(bash('ls | xargs rm').reasons).toEqual(['🗑 deletes files']);
+    expect(bash('echo $(rm x)').high).toBe(true);
+  });
+
+  it('marks secrets files, lab jobs and routine deletion', () => {
+    expect(approvalRisk('Edit', { file_path: '/home/me/.ssh/config' }).reasons).toEqual(['🔐 secrets file']);
+    expect(approvalRisk('Write', { file_path: '/repo/.env.local' }).high).toBe(true);
+    expect(approvalRisk('Write', { file_path: '/repo/src/env.ts' }).high).toBe(false);
+    expect(approvalRisk('mcp__lab__submit_job', { server: 'gpu-a' }).reasons).toEqual(['🌐 remote server']);
+    expect(approvalRisk('mcp__office__delete_routine', { id: 'r1' }).high).toBe(true);
+    expect(approvalRisk('Read', { file_path: '/home/me/.ssh/config' }).high).toBe(false);
+  });
+
+  it('diffs lines and folds long unchanged runs', () => {
+    expect(lineDiff('a\nb', 'a\nb')).toEqual([{ op: ' ', text: 'a' }, { op: ' ', text: 'b' }]);
+    expect(lineDiff('a\nb\nc', 'a\nB\nc')).toEqual([
+      { op: ' ', text: 'a' },
+      { op: '-', text: 'b' },
+      { op: '+', text: 'B' },
+      { op: ' ', text: 'c' },
+    ]);
+    const ins = lineDiff('1\n2\n3', '1\n2\nnew\n3');
+    expect(ins.filter((l) => l.op !== ' ')).toEqual([{ op: '+', text: 'new' }]);
+    const long = Array.from({ length: 20 }, (_, i) => `l${i}`);
+    const changed = [...long];
+    changed[10] = 'X';
+    const d = lineDiff(long.join('\n'), changed.join('\n'));
+    expect(d[0]).toEqual({ op: '…', text: '' });
+    expect(d.filter((l) => l.op === ' ')).toHaveLength(6);
+    expect(d[d.length - 1].op).toBe('…');
+    const big = Array.from({ length: 500 }, (_, i) => String(i)).join('\n');
+    const fb = lineDiff(big, big + '\nz');
+    expect(fb.filter((l) => l.op === '-')).toHaveLength(500); // too big for LCS: old then new
+  });
+});
