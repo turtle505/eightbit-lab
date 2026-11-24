@@ -667,25 +667,19 @@ export class OfficeScene {
       const half = 7 + Math.floor(r / 3);
       const dx = r > 5 ? sway : 0;
       g.fillStyle = '#8e1a2e';
-      g.fillRect(cx - half + dx, y + 9 + r, half * 2, 1);
+      g.fillRect(cx - half + dx, y + 10 + r, half * 2, 1);
       g.fillStyle = '#e8c55a';
-      g.fillRect(cx - half + dx, y + 9 + r, 1, 1);
-      g.fillRect(cx + half - 1 + dx, y + 9 + r, 1, 1);
+      g.fillRect(cx - half + dx, y + 10 + r, 1, 1);
+      g.fillRect(cx + half - 1 + dx, y + 10 + r, 1, 1);
     }
     // high standing collar of the cape, framing the head
     g.fillStyle = '#b3203a';
-    g.fillRect(x, y + 5, 2, 5);
-    g.fillRect(x + MANAGER_W - 2, y + 5, 2, 5);
+    g.fillRect(x, y + 7, 2, 4);
+    g.fillRect(x + MANAGER_W - 2, y + 7, 2, 4);
     g.fillStyle = '#ff5a6e';
-    g.fillRect(x, y + 4, 1, 6);
-    g.fillRect(x + MANAGER_W - 1, y + 4, 1, 6);
-    g.drawImage(managerSprite(), x, y);
-    // a glint sweeps across the aviators every ~3 s
-    const gl = t % 180;
-    if (gl < 10) {
-      g.fillStyle = '#ffffff';
-      g.fillRect(x + 3 + gl, y + 4, 1, 1);
-    }
+    g.fillRect(x, y + 6, 1, 5);
+    g.fillRect(x + MANAGER_W - 1, y + 6, 1, 5);
+    g.drawImage(managerSprite(t % 240 < 6), x, y);
     // sparkles twinkling around, each on its own phase
     const spots = [[-13, 2], [12, -3], [-10, 14], [14, 10], [0, -6]];
     spots.forEach(([sx, sy], k) => {
