@@ -20,6 +20,8 @@ export interface EmployeeView {
   id: string;
   /** execution harness selected for this employee (a task may override it for one turn: Task.engine) */
   engine: Engine;
+  /** engine of the turn in progress when a task overrides the default (shown instead of `engine` until it ends); null otherwise */
+  turnEngine: Engine | null;
   name: string;
   title: string;
   desk: number;

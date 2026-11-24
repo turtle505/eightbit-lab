@@ -123,6 +123,7 @@ class Employee {
     this.view = {
       id: role.id,
       engine: 'claude',
+      turnEngine: null,
       name: role.name,
       title: role.title,
       desk: role.desk,
@@ -900,6 +901,8 @@ export class AgentManager {
   private async runOverride(e: Employee, work: Work, engine: Engine): Promise<void> {
     this.log(e, 'system', engine === 'codex' ? tr({ ko: '🔀 Codex로 실행 (이 작업만)', en: '🔀 Running on Codex (this task only)' }) : tr({ ko: '🔀 Claude로 실행 (이 작업만)', en: '🔀 Running on Claude (this task only)' }));
     const saved = { sessionId: e.view.sessionId, host: e.sessionHost };
+    e.view.turnEngine = engine; // the panel shows the engine actually working, not the default
+    this.sendView(e);
     if (engine === 'codex') e.view.sessionId = this.store.getSetting(codexThreadKey(e.role)) || null;
     else {
       const s = this.store.getSession(e.role.id);
@@ -911,6 +914,7 @@ export class AgentManager {
     } finally {
       e.view.sessionId = saved.sessionId;
       e.sessionHost = saved.host;
+      e.view.turnEngine = null;
       this.sendView(e);
     }
   }

@@ -391,12 +391,23 @@ export function renderEmployeePanel(st: UIState, send: Send) {
     });
   }
   const prov = providerOf(st, e);
+  // while a task runs on the other engine, show that one (locked) — it switches back when the task ends
+  const engineNow = e.turnEngine ?? e.engine;
+  const engineName = (x: string) => (x === 'codex' ? 'Codex' : 'Claude');
+  const engineTitle = e.turnEngine
+    ? tr({
+        ko: `이 작업만 ${engineName(e.turnEngine)}로 실행 중입니다. 끝나면 기본 실행기(${engineName(e.engine)})로 돌아갑니다.`,
+        en: `Running this task on ${engineName(e.turnEngine)}; back to the default (${engineName(e.engine)}) when it ends.`,
+      })
+    : tr({ ko: '실행기 (작업이 끝난 뒤 바꿀 수 있음)', en: 'Agent engine (switch after the current work)' });
   if (changed('emp-head', [e, st.view, st.snap.employees.map((x) => x.costUsd), prov, st.snap.hosts])) {
     $('emp-head').innerHTML = `
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
         <b>${esc(e.name)}</b> <button type="button" id="emp-rename" class="icon-btn" title="${tr({ ko: '이름 바꾸기', en: 'Rename' })}">✏️</button> <span class="muted">${esc(e.title)}</span>
         <span class="status s-${e.status}">${statusLabel(e.status)}</span>
-        <select id="emp-engine" aria-label="${tr({ ko: '실행기', en: 'Agent engine' })}" ${e.provider ? 'disabled' : ''}><option value="claude" ${e.engine === 'claude' ? 'selected' : ''}>Claude</option><option value="codex" ${e.engine === 'codex' ? 'selected' : ''}>Codex</option></select>
+        <select id="emp-engine" class="${e.turnEngine ? 'engine-turn' : ''}" aria-label="${tr({ ko: '실행기', en: 'Agent engine' })}" title="${esc(engineTitle)}" ${e.provider || e.turnEngine ? 'disabled' : ''}><option value="claude" ${engineNow === 'claude' ? 'selected' : ''}>Claude</option><option value="codex" ${engineNow === 'codex' ? 'selected' : ''}>Codex</option></select>${
+          e.turnEngine ? `<span class="engine-badge e-${e.turnEngine}" title="${esc(engineTitle)}">${tr({ ko: '이 작업만', en: 'this task' })}</span>` : ''
+        }
         <button type="button" id="emp-perm" class="perm-btn perm-${e.permission}" title="${
           e.permission === 'auto'
             ? tr({
@@ -447,7 +458,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
             })
       }">${e.live ? tr({ ko: '🟢 세션 열림', en: '🟢 Session open' }) : tr({ ko: '⚪ 세션 대기', en: '⚪ Session idle' })}</span> ${
         e.sessionId ? esc(e.sessionId.slice(0, 8)) : tr({ ko: '새로 시작', en: 'fresh start' })
-      } · ${e.engine === 'codex' ? tr({ ko: 'Codex 구독', en: 'Codex subscription' }) : e.provider ? tr({ ko: '구독 사용 안 함', en: 'no subscription use' }) : tr({ ko: `사무실 사용 비중 ${usageShare(st, e.costUsd)}`, en: `share of office usage ${usageShare(st, e.costUsd)}` })}</div>`;
+      } · ${engineNow === 'codex' ? tr({ ko: 'Codex 구독', en: 'Codex subscription' }) : e.provider ? tr({ ko: '구독 사용 안 함', en: 'no subscription use' }) : tr({ ko: `사무실 사용 비중 ${usageShare(st, e.costUsd)}`, en: `share of office usage ${usageShare(st, e.costUsd)}` })}</div>`;
     document.getElementById('emp-model')?.addEventListener('change', (ev) => {
       if (prov) send({ t: 'setProviderModel', providerId: prov.id, model: (ev.target as HTMLSelectElement).value });
     });

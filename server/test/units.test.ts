@@ -981,10 +981,16 @@ describe('live sessions', async () => {
     const claudeSession = m.views()[0].sessionId;
     store.setSetting('codex-thread:lit:backend:' + (await import('node:os')).hostname(), 'th-1');
     const seen: (string | null)[] = [];
-    (m as any).runCodex = async (e: any) => void seen.push(e.view.sessionId);
+    const shown: (string | null)[] = [];
+    (m as any).runCodex = async (e: any) => {
+      seen.push(e.view.sessionId);
+      shown.push(e.view.turnEngine);
+    };
     m.instruct('lit', 'review this', null, { engine: 'codex' });
     await settle();
     expect(seen).toEqual(['th-1']); // ran on Codex, resuming the Codex thread
+    expect(shown).toEqual(['codex']); // the panel showed Codex while it ran…
+    expect(m.views()[0].turnEngine).toBeNull(); // …and the default again afterwards
     expect(sdk.prompts).toEqual(['warm up']); // the Claude session got nothing
     expect(m.views()[0].engine).toBe('claude');
     expect(m.views()[0].sessionId).toBe(claudeSession);

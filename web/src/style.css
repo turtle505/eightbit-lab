@@ -1577,3 +1577,4 @@ body .md-body h4 {
 .engine-badge { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 4px; border-radius: 3px; border: 1px solid currentColor; vertical-align: 1px; }
 .engine-badge.e-codex { color: var(--ok); }
 .engine-badge.e-claude { color: var(--accent); }
+#emp-engine.engine-turn { opacity: 1; border-color: currentColor; }
