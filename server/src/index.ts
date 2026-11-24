@@ -386,6 +386,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       if (!isLang(msg.lang) || msg.lang === getLang()) break;
       setLang(msg.lang);
       store.setSetting('language', msg.lang);
+      agents.relabelIdle();
       // server-made text (statuses, default names, usage labels) is rebuilt in the new language
       bus.send({ t: 'snapshot', data: snapshot() });
       break;

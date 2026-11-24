@@ -319,6 +319,11 @@ export class AgentManager {
     return e.live ? tr({ ko: '💺 자리에서 대기 중', en: '💺 Waiting at the desk' }) : tr({ ko: '☕ 대기 중', en: '☕ Idle' });
   }
 
+  /** Rewrite idle bubbles in the new language (other statuses are replaced by the next event anyway). */
+  relabelIdle() {
+    for (const e of this.emps.values()) if (!e.current && e.view.status === 'idle') e.view.activity = this.idleActivity(e);
+  }
+
   /** push the current view to the browsers (status unchanged) */
   private sendView(e: Employee) {
     e.view.live = !!e.live;
