@@ -343,6 +343,11 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'closeProjectSession':
       projects.closeSession(msg.id);
       break;
+    case 'resumeWork': {
+      const ok = agents.resumeNow(msg.employeeId);
+      bus.send({ t: 'notice', level: ok ? 'info' : 'warn', text: ok ? '▶️ 중단된 작업을 다시 시작했습니다' : '이어서 할 작업이 없습니다' });
+      break;
+    }
     case 'recheckHost':
       void hosts.get(msg.hostId)?.recheck();
       break;

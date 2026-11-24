@@ -100,6 +100,10 @@ class Employee {
   resumeMissing = false;
   /** host whose transcript store holds view.sessionId */
   sessionHost: string | null = null;
+  /** epoch ms the subscription limit lifts, when the last turn died on it */
+  rateLimitedUntil: number | null = null;
+  /** work parked until the limit lifts, so an overnight run picks itself back up */
+  parked: { work: Work; timer: NodeJS.Timeout } | null = null;
 
   constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number, permission: PermissionSetting) {
     this.view = {
@@ -321,9 +325,13 @@ export class AgentManager {
 
   /** Transcripts live on the machine that ran them, so a session id does not travel between hosts. */
   private static readonly NO_SESSION = /No conversation found with session ID/i;
+  /** the CLI reports the limit as plain text too, e.g. "You've hit your 5-hour limit · resets 4:10am" */
+  private static readonly RATE_LIMIT = /rate_limit|hit your .*limit|usage limit/i;
 
   private log(e: Employee, kind: LogLine['kind'], text: string) {
     if (kind === 'error' && AgentManager.NO_SESSION.test(text)) e.resumeMissing = true;
+    if (kind === 'error' && AgentManager.RATE_LIMIT.test(text) && !e.rateLimitedUntil) e.rateLimitedUntil = Date.now() + 30 * 60_000;
+    if (kind === 'error' && AgentManager.RATE_LIMIT.test(text)) e.rateLimitedUntil = Math.max(e.rateLimitedUntil ?? 0, Date.now() + 2_000);
     const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text };
     this.store.addLog(line);
     bus.send({ t: 'log', data: line });
@@ -366,6 +374,11 @@ export class AgentManager {
   stop(employeeId: string) {
     const e = this.emp(employeeId);
     e.inbox = [];
+    if (e.parked) {
+      clearTimeout(e.parked.timer);
+      e.parked = null;
+      this.log(e, 'system', '⏹ 예약된 재개를 취소했습니다');
+    }
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
     const live = e.live;
@@ -581,6 +594,47 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Hold a piece of work until `at`, then put it back at the front of the inbox. Used when the
+   * subscription window is spent — the employee says when it will resume rather than looking stuck.
+   */
+  private park(e: Employee, work: Work, at: number) {
+    if (e.parked) clearTimeout(e.parked.timer);
+    const hhmm = new Date(at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const timer = setTimeout(() => {
+      e.parked = null;
+      e.rateLimitedUntil = null;
+      e.view.parkedUntil = undefined;
+      this.log(e, 'system', '⏰ 사용량이 초기화되어 하던 일을 이어서 합니다');
+      e.inbox.unshift({ ...work, text: `${work.text}\n\n[자동 재개] 사용량 한도로 중단됐던 작업입니다. 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` });
+      if (!this.waiting.includes(e)) this.waiting.push(e);
+      this.pump();
+    }, Math.max(1_000, at - Date.now()));
+    e.parked = { work, timer };
+    e.view.parkedUntil = at;
+    this.log(e, 'system', `⏸ 사용량 한도로 중단 — ${hhmm}에 자동으로 이어서 합니다`);
+    this.set(e, 'error', `⏸ 사용량 한도 · ${hhmm} 재개 예정`);
+    this.closeSession(e);
+  }
+
+  /** Put a parked (or stalled) employee back to work right now, without waiting for the reset. */
+  resumeNow(employeeId: string): boolean {
+    const e = this.emp(employeeId);
+    const work = e.parked?.work;
+    if (e.parked) {
+      clearTimeout(e.parked.timer);
+      e.parked = null;
+    }
+    e.rateLimitedUntil = null;
+    e.view.parkedUntil = undefined;
+    if (!work) return false;
+    this.log(e, 'system', '▶️ 매니저가 중단된 작업을 다시 시작했습니다');
+    e.inbox.unshift({ ...work, text: `${work.text}\n\n[재개] 중단됐던 작업입니다. 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` });
+    if (!this.waiting.includes(e)) this.waiting.push(e);
+    this.pump();
+    return true;
+  }
+
   private armIdleTimer(e: Employee) {
     if (e.idleTimer) clearTimeout(e.idleTimer);
     const ms = this.office.sessionIdleMinutes * 60_000;
@@ -659,11 +713,21 @@ export class AgentManager {
       return await this.run(e, work);
     }
     e.resumeMissing = false;
+
+    // The subscription ran out mid-turn: park the work and pick it up when the window resets,
+    // so an overnight run resumes itself instead of being found stalled in the morning.
+    if (e.rateLimitedUntil && e.rateLimitedUntil > Date.now()) {
+      this.park(e, work, e.rateLimitedUntil);
+      return;
+    }
+    e.rateLimitedUntil = null;
+
     const ok = e.view.status !== 'error';
     if (ok) this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
     bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null } satisfies RunFinished);
     if (work.taskId != null) {
-      const t = this.store.updateTask(work.taskId, { state: 'review', result: e.lastText || null });
+      // a failed attempt stays on the board as 'doing' so it can be picked up again
+      const t = this.store.updateTask(work.taskId, ok ? { state: 'review', result: e.lastText || null } : { result: e.lastText || null });
       if (t) bus.send({ t: 'task', data: t });
     }
     this.armIdleTimer(e);
@@ -734,7 +798,10 @@ export class AgentManager {
         const info = m.rate_limit_info;
         if (info.status === 'allowed') break;
         const pct = info.utilization != null ? ` ${Math.round(info.utilization * 100)}%` : '';
-        const reset = info.resetsAt ? ` · ${new Date(info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 초기화` : '';
+        const resetsAt = info.resetsAt ? info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1) : null;
+        const reset = resetsAt ? ` · ${new Date(resetsAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 초기화` : '';
+        // resetsAt comes in seconds, so it can round into the past; never park for less than a moment
+        if (info.status === 'rejected') e.rateLimitedUntil = Math.max(resetsAt ?? Date.now() + 30 * 60_000, Date.now() + 2_000);
         this.log(e, info.status === 'rejected' ? 'error' : 'system', `⚠️ 구독 사용량 ${info.status === 'rejected' ? '한도 도달' : '한도 근접'}${pct}${reset}`);
         break;
       }

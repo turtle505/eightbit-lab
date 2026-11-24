@@ -33,6 +33,8 @@ export interface EmployeeView {
   permission: PermissionSetting;
   /** a session is open right now (the next instruction skips process start) */
   live: boolean;
+  /** work is parked until the usage window resets (epoch ms), and will resume by itself */
+  parkedUntil?: number;
   /** machine this employee's sessions run on (HostView.id); unset = the machine the backend runs on */
   hostId?: string;
   /** 'staff' sit in the office; 'project' sessions live in the projects tab */
@@ -370,4 +372,6 @@ export type ClientMsg =
   /** give a session a desk in the office, or send it back to the projects tab */
   | { t: 'setSessionInOffice'; id: string; inOffice: boolean }
   /** check a host now (it is otherwise only checked at startup, to keep idle traffic at zero) */
-  | { t: 'recheckHost'; hostId: string };
+  | { t: 'recheckHost'; hostId: string }
+  /** restart work that was parked (usage limit) or left stalled, without waiting for the reset */
+  | { t: 'resumeWork'; employeeId: string };

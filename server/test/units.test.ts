@@ -1355,3 +1355,90 @@ describe('ssh budget: nothing routes around it', async () => {
     expect(t.limitFor('other')).toBe(5);
   });
 });
+
+describe('usage limit: park and resume', async () => {
+  const { AgentManager } = await import('../src/agents/manager.ts');
+  const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  /** a session that fails the first turn on the usage limit, then succeeds */
+  function limitedSdk() {
+    const prompts: string[] = [];
+    let turn = 0;
+    const queryFn: any = ({ prompt }: any) => {
+      const out: any[] = [];
+      let wake: any = null;
+      let closed = false;
+      const emit = (m: any) => { out.push(m); wake?.(); };
+      void (async () => {
+        for await (const m of prompt as AsyncIterable<any>) {
+          prompts.push(String(m.message.content));
+          emit({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude', permissionMode: 'auto' });
+          if (++turn === 1) {
+            emit({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: Math.floor(Date.now() / 1000) + 1 } });
+            emit({ type: 'result', subtype: 'error_during_execution', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+          } else {
+            emit({ type: 'assistant', message: { content: [{ type: 'text', text: '이어서 완료' }] } });
+            emit({ type: 'result', subtype: 'success', result: '이어서 완료', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+          }
+        }
+        closed = true; wake?.();
+      })();
+      return {
+        async *[Symbol.asyncIterator]() { for (;;) { while (out.length) yield out.shift(); if (closed) return; await new Promise<void>((r) => (wake = r)); wake = null; } },
+        setPermissionMode: async () => {}, setModel: async () => {}, interrupt: async () => {},
+        close: () => { closed = true; wake?.(); },
+      };
+    };
+    return { queryFn, prompts };
+  }
+
+  const make = (sdk: any) => {
+    const office: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: mkdtempSync(join(tmpdir(), 'office-rl-')), reportDirs: [], obsidian: null, providers: [], hosts: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787, authToken: '', sshPerMinute: 5 };
+    const role: any = { id: 'lit', name: 'Ada', title: 'R', desk: 0, sprite: {}, useWorktree: false, autoAllow: [], systemPrompt: '' };
+    const store = new Store(':memory:');
+    const m = new AgentManager(office, [role], store, new Broker(), { list: () => [], isRemote: () => true } as any);
+    m.queryFn = sdk.queryFn;
+    return { m, store };
+  };
+  const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('parks the work instead of leaving the employee looking busy, then resumes itself', async () => {
+    const sdk = limitedSdk();
+    const { m } = make(sdk);
+    m.instruct('lit', '조사해줘', 1);
+    await settle(60);
+    const parked = m.views()[0];
+    expect(parked.status).toBe('error'); // not stuck on "thinking"
+    expect(parked.activity).toContain('사용량 한도');
+    expect(parked.parkedUntil).toBeGreaterThan(0);
+
+    await settle(2600); // the reset time passes
+    expect(sdk.prompts).toHaveLength(2);
+    expect(sdk.prompts[1]).toContain('[자동 재개]'); // told not to redo what it already did
+    expect(m.views()[0].parkedUntil).toBeUndefined();
+  });
+
+  it('a task that failed stays on the board as doing, not moved to review', async () => {
+    const sdk = limitedSdk();
+    const { m, store } = make(sdk);
+    const t = store.createTask('조사', '', 'lit');
+    store.updateTask(t.id, { assignee: 'lit', state: 'doing' });
+    m.instruct('lit', '조사해줘', t.id);
+    await settle(60);
+    expect(store.getTask(t.id)!.state).toBe('doing'); // still claimed, so it can be picked up again
+  });
+
+  it('resumeNow() restarts parked work without waiting for the reset', async () => {
+    const sdk = limitedSdk();
+    const { m } = make(sdk);
+    m.instruct('lit', '조사해줘');
+    await settle(60);
+    expect(m.resumeNow('lit')).toBe(true);
+    await settle(60);
+    expect(sdk.prompts[1]).toContain('[재개]');
+    expect(m.resumeNow('lit')).toBe(false); // nothing left parked
+  });
+});
