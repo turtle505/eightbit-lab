@@ -373,5 +373,5 @@ export type ClientMsg =
   | { t: 'setSessionInOffice'; id: string; inOffice: boolean }
   /** check a host now (it is otherwise only checked at startup, to keep idle traffic at zero) */
   | { t: 'recheckHost'; hostId: string }
-  /** restart work that was parked (usage limit) or left stalled, without waiting for the reset */
+  /** restart work that was parked on the usage limit, without waiting for the reset */
   | { t: 'resumeWork'; employeeId: string };

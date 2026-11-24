@@ -356,7 +356,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       }
       ${
         e.parkedUntil
-          ? `<div class="small emp-prov"><span class="prov off">⏸ 사용량 한도 · ${new Date(e.parkedUntil).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}에 자동 재개</span>
+          ? `<div class="small emp-prov"><span class="prov off">⏸ 사용량 한도 · ${resetText(e.parkedUntil)} → 자동 재개</span>
              <button type="button" id="emp-resume" title="기다리지 않고 지금 이어서 하기">▶️ 지금 이어서</button></div>`
           : ''
       }

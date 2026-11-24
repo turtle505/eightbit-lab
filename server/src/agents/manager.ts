@@ -102,7 +102,7 @@ class Employee {
   sessionHost: string | null = null;
   /** epoch ms the subscription limit lifts, when the last turn died on it */
   rateLimitedUntil: number | null = null;
-  /** work parked until the limit lifts, so an overnight run picks itself back up */
+  /** work parked until the limit lifts, so an overnight run picks itself back up (`view.parkedUntil` mirrors it) */
   parked: { work: Work; timer: NodeJS.Timeout } | null = null;
 
   constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number, permission: PermissionSetting) {
@@ -131,6 +131,9 @@ class Employee {
 }
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+const HHMM = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+/** when the limit report carries no reset time */
+const LIMIT_FALLBACK_MS = 30 * 60_000;
 
 /** Exact tool name, or a server-level rule like "mcp__office" that covers every "mcp__office__*" tool. */
 export function isAutoAllowed(rules: Iterable<string>, toolName: string): boolean {
@@ -330,8 +333,7 @@ export class AgentManager {
 
   private log(e: Employee, kind: LogLine['kind'], text: string) {
     if (kind === 'error' && AgentManager.NO_SESSION.test(text)) e.resumeMissing = true;
-    if (kind === 'error' && AgentManager.RATE_LIMIT.test(text) && !e.rateLimitedUntil) e.rateLimitedUntil = Date.now() + 30 * 60_000;
-    if (kind === 'error' && AgentManager.RATE_LIMIT.test(text)) e.rateLimitedUntil = Math.max(e.rateLimitedUntil ?? 0, Date.now() + 2_000);
+    if (kind === 'error' && AgentManager.RATE_LIMIT.test(text)) e.rateLimitedUntil ??= Date.now() + LIMIT_FALLBACK_MS;
     const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text };
     this.store.addLog(line);
     bus.send({ t: 'log', data: line });
@@ -341,8 +343,14 @@ export class AgentManager {
   instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean } = {}) {
     const e = this.emp(employeeId);
     const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
-    e.inbox.push({ text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval });
     this.log(e, 'user', taskId ? `[작업 #${taskId}] ${text}` : text);
+    this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval });
+  }
+
+  /** Add work to an employee's inbox (`front` = before anything already waiting) and let the queue run. */
+  private enqueue(e: Employee, work: Work, front = false) {
+    if (front) e.inbox.unshift(work);
+    else e.inbox.push(work);
     if (!e.current && !this.waiting.includes(e)) {
       this.waiting.push(e);
       this.set(e, 'queued', '⏳ 자리 나길 기다리는 중');
@@ -374,11 +382,7 @@ export class AgentManager {
   stop(employeeId: string) {
     const e = this.emp(employeeId);
     e.inbox = [];
-    if (e.parked) {
-      clearTimeout(e.parked.timer);
-      e.parked = null;
-      this.log(e, 'system', '⏹ 예약된 재개를 취소했습니다');
-    }
+    if (this.unpark(e)) this.log(e, 'system', '⏹ 예약된 재개를 취소했습니다');
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
     const live = e.live;
@@ -599,17 +603,12 @@ export class AgentManager {
    * subscription window is spent — the employee says when it will resume rather than looking stuck.
    */
   private park(e: Employee, work: Work, at: number) {
-    if (e.parked) clearTimeout(e.parked.timer);
-    const hhmm = new Date(at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    this.unpark(e);
+    const hhmm = HHMM.format(at);
     const timer = setTimeout(() => {
-      e.parked = null;
-      e.rateLimitedUntil = null;
-      e.view.parkedUntil = undefined;
-      this.log(e, 'system', '⏰ 사용량이 초기화되어 하던 일을 이어서 합니다');
-      e.inbox.unshift({ ...work, text: `${work.text}\n\n[자동 재개] 사용량 한도로 중단됐던 작업입니다. 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` });
-      if (!this.waiting.includes(e)) this.waiting.push(e);
-      this.pump();
-    }, Math.max(1_000, at - Date.now()));
+      const w = this.unpark(e);
+      if (w) this.requeue(e, w, '⏰ 사용량이 초기화되어 하던 일을 이어서 합니다', '[자동 재개] 사용량 한도로 중단됐던 작업입니다.');
+    }, at - Date.now());
     e.parked = { work, timer };
     e.view.parkedUntil = at;
     this.log(e, 'system', `⏸ 사용량 한도로 중단 — ${hhmm}에 자동으로 이어서 합니다`);
@@ -617,21 +616,28 @@ export class AgentManager {
     this.closeSession(e);
   }
 
-  /** Put a parked (or stalled) employee back to work right now, without waiting for the reset. */
+  /** Drop the parked slot and its timer; returns the work that was parked, if any. */
+  private unpark(e: Employee): Work | undefined {
+    const p = e.parked;
+    if (!p) return undefined;
+    clearTimeout(p.timer);
+    e.parked = null;
+    e.view.parkedUntil = undefined;
+    return p.work;
+  }
+
+  /** Put interrupted work back at the front of the queue, telling the agent not to redo what it did. */
+  private requeue(e: Employee, work: Work, logText: string, note: string) {
+    this.log(e, 'system', logText);
+    this.enqueue(e, { ...work, text: `${work.text}\n\n${note} 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` }, true);
+  }
+
+  /** Put a parked employee back to work right now, without waiting for the reset. */
   resumeNow(employeeId: string): boolean {
     const e = this.emp(employeeId);
-    const work = e.parked?.work;
-    if (e.parked) {
-      clearTimeout(e.parked.timer);
-      e.parked = null;
-    }
-    e.rateLimitedUntil = null;
-    e.view.parkedUntil = undefined;
+    const work = this.unpark(e);
     if (!work) return false;
-    this.log(e, 'system', '▶️ 매니저가 중단된 작업을 다시 시작했습니다');
-    e.inbox.unshift({ ...work, text: `${work.text}\n\n[재개] 중단됐던 작업입니다. 이미 한 부분은 다시 하지 말고 이어서 마무리하세요.` });
-    if (!this.waiting.includes(e)) this.waiting.push(e);
-    this.pump();
+    this.requeue(e, work, '▶️ 매니저가 중단된 작업을 다시 시작했습니다', '[재개] 중단됐던 작업입니다.');
     return true;
   }
 
@@ -716,11 +722,10 @@ export class AgentManager {
 
     // The subscription ran out mid-turn: park the work and pick it up when the window resets,
     // so an overnight run resumes itself instead of being found stalled in the morning.
-    if (e.rateLimitedUntil && e.rateLimitedUntil > Date.now()) {
-      this.park(e, work, e.rateLimitedUntil);
-      return;
-    }
+    // resetsAt comes in seconds and can round into the past; never park for less than a moment.
+    const limitedUntil = e.rateLimitedUntil;
     e.rateLimitedUntil = null;
+    if (limitedUntil) return this.park(e, work, Math.max(limitedUntil, Date.now() + 2_000));
 
     const ok = e.view.status !== 'error';
     if (ok) this.set(e, 'done', `✅ 완료: ${clip(e.lastText.replace(/\s+/g, ' '), 50)}`);
@@ -799,9 +804,8 @@ export class AgentManager {
         if (info.status === 'allowed') break;
         const pct = info.utilization != null ? ` ${Math.round(info.utilization * 100)}%` : '';
         const resetsAt = info.resetsAt ? info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1) : null;
-        const reset = resetsAt ? ` · ${new Date(resetsAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 초기화` : '';
-        // resetsAt comes in seconds, so it can round into the past; never park for less than a moment
-        if (info.status === 'rejected') e.rateLimitedUntil = Math.max(resetsAt ?? Date.now() + 30 * 60_000, Date.now() + 2_000);
+        const reset = resetsAt ? ` · ${HHMM.format(resetsAt)} 초기화` : '';
+        if (info.status === 'rejected') e.rateLimitedUntil = resetsAt ?? Date.now() + LIMIT_FALLBACK_MS;
         this.log(e, info.status === 'rejected' ? 'error' : 'system', `⚠️ 구독 사용량 ${info.status === 'rejected' ? '한도 도달' : '한도 근접'}${pct}${reset}`);
         break;
       }

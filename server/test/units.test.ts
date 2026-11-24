@@ -1429,6 +1429,7 @@ describe('usage limit: park and resume', async () => {
     m.instruct('lit', '조사해줘', t.id);
     await settle(60);
     expect(store.getTask(t.id)!.state).toBe('doing'); // still claimed, so it can be picked up again
+    m.stop('lit'); // don't leave the parked timer running past the test
   });
 
   it('resumeNow() restarts parked work without waiting for the reset', async () => {
