@@ -461,6 +461,8 @@ function handleApi(req: import('node:http').IncomingMessage, res: import('node:h
     return;
   }
 
+  if (url.pathname === '/api/busy' && req.method === 'GET') return json(200, agents.busy());
+
   const m = url.pathname.match(/^\/api\/attachments\/(\d+)$/);
   if (m && req.method === 'GET') {
     const r = attachments.rows([Number(m[1])])[0];

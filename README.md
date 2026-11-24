@@ -1,5 +1,7 @@
 **English** | [한국어](README.ko.md)
 
+[![CI](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml)
+
 # 👾 8-bit Lab
 
 **A pixel-art office where your AI agents work.** 8-bit Lab runs several Claude Code agents ("employees") side by side, and shows them as little characters at their desks. You're the manager: you hand out work, approve anything risky, and read their reports.
@@ -26,7 +28,7 @@ It runs locally on your machine and uses your own **Claude Pro/Max subscription*
 
 ### What you need
 
-- **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag.
+- **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag. With nvm, `nvm use` picks the right one (`.nvmrc`); `npm start` refuses older versions with a clear message.
 - **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
 - macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
 
@@ -187,6 +189,8 @@ hosts:
 - The host badge shows ⏳ when the budget is nearly spent.
 
 **Moving the backend to a server:** `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`. Copy `data/office.db` and `workspaces/` across to keep tasks, routines and attachments. Don't run two backends at once, or routines will fire twice.
+
+**Updating it later:** `npm run update` on that machine. It checks that no employee is mid-work (a restart would cut them off), then pulls, rebuilds and restarts the systemd service. `npm run update -- --force` skips the check.
 </details>
 
 <details>

@@ -1,5 +1,7 @@
 [English](README.md) | **한국어**
 
+[![CI](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml)
+
 # 👾 8-bit Lab
 
 **AI 에이전트들이 일하는 픽셀아트 사무실.** 8-bit Lab은 Claude Code 에이전트("직원") 여러 명을 동시에 돌리고, 각자 책상에서 일하는 작은 캐릭터로 보여줍니다. 나는 매니저입니다. 일을 나눠 주고, 위험한 작업은 승인하고, 보고를 받습니다.
@@ -26,7 +28,7 @@
 
 ### 준비물
 
-- **Node.js 22.13 이상** (24 권장): 내장 `node:sqlite`를 쓰는데, 그보다 낮은 버전에서는 플래그를 켜야만 쓸 수 있습니다.
+- **Node.js 22.13 이상** (24 권장): 내장 `node:sqlite`를 쓰는데, 그보다 낮은 버전에서는 플래그를 켜야만 쓸 수 있습니다. nvm을 쓴다면 `nvm use`로 맞는 버전이 잡히고(`.nvmrc`), 버전이 낮으면 `npm start`가 분명한 안내와 함께 멈춥니다.
 - **Claude Code CLI**에 Pro 또는 Max 요금제로 로그인. `claude`를 한 번 실행해 로그인하고, `claude --version`으로 확인하세요.
 - macOS 또는 Linux. macOS에서는 Word/RTF 첨부를 자동으로 텍스트로 바꿔 줍니다.
 
@@ -189,6 +191,8 @@ hosts:
 - 예산이 거의 다 차면 호스트 배지에 ⏳가 뜹니다.
 
 **백엔드를 서버로 옮기기:** `git clone` → `npm ci` → `npm run build` → `deploy/eightbit-lab.service` 참고. 작업·루틴·첨부를 그대로 가져가려면 `data/office.db`와 `workspaces/`를 복사하세요. 백엔드를 두 곳에서 동시에 돌리면 루틴이 두 번 돌므로 하나만 켜 두세요.
+
+**나중에 업데이트할 때:** 그 컴퓨터에서 `npm run update`. 일하는 직원이 없는지 먼저 확인하고(재시작하면 하던 일이 끊기므로), pull → 빌드 → systemd 서비스 재시작까지 해 줍니다. 확인을 건너뛰려면 `npm run update -- --force`.
 </details>
 
 <details>

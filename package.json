@@ -21,13 +21,17 @@
   },
   "license": "MIT",
   "description": "8-bit Lab: a pixel-art office for running Claude Code agents on research and daily tasks",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "tsx watch server/src/index.ts",
+    "dev:server": "node scripts/check-node.mjs && tsx watch server/src/index.ts",
     "dev:web": "vite web",
     "build": "vite build web",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p .",
-    "start": "tsx server/src/index.ts"
+    "start": "node scripts/check-node.mjs && tsx server/src/index.ts",
+    "update": "tsx scripts/update.ts"
   }
 }

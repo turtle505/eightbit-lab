@@ -14,10 +14,11 @@ npm run build        # vite build web → dist/
 npm start            # backend serves dist/ + websocket → http://127.0.0.1:8787
 npm test             # vitest run (server/test/units.test.ts)
 npx vitest run -t "parsers"   # run a single describe/it by name
-npm run typecheck    # tsc --noEmit over server, web, shared
+npm run typecheck    # tsc --noEmit over server, web, shared, scripts
+npm run update       # deployed machine: refuse if anyone is mid-turn (GET /api/busy), else git pull → npm ci if the lock changed → build → systemctl --user restart eightbit-lab
 ```
 
-No compile step for the server: it runs TypeScript directly via `tsx`, and imports use explicit `.ts` extensions (`allowImportingTsExtensions`). Persistence uses the built-in `node:sqlite` (`DatabaseSync`), so a recent Node is required. Auth comes from the local `claude` CLI login (Pro/Max subscription) — there is no API key.
+No compile step for the server: it runs TypeScript directly via `tsx`, and imports use explicit `.ts` extensions (`allowImportingTsExtensions`). Persistence uses the built-in `node:sqlite` (`DatabaseSync`), so Node ≥22.13 is required — `scripts/check-node.mjs` runs before `start`/`dev:server` because ESM evaluates that import before any code in `index.ts` could check. CI (`.github/workflows/ci.yml`) runs typecheck, test and build on Node 22 and 24. Auth comes from the local `claude` CLI login (Pro/Max subscription) — there is no API key.
 
 ## Architecture
 

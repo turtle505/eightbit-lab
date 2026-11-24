@@ -324,6 +324,12 @@ export class AgentManager {
     for (const e of this.emps.values()) if (!e.current && e.view.status === 'idle') e.view.activity = this.idleActivity(e);
   }
 
+  /** Who is mid-turn and how many wait for a slot: a restart now would cut them off (`npm run update` asks). */
+  busy() {
+    const working = [...this.emps.values()].filter((e) => e.current).map((e) => ({ id: e.role.id, name: e.view.name }));
+    return { working, queued: this.waiting.length };
+  }
+
   /** push the current view to the browsers (status unchanged) */
   private sendView(e: Employee) {
     e.view.live = !!e.live;

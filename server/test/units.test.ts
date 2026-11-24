@@ -917,6 +917,16 @@ describe('live sessions', async () => {
     expect(sdk.calls[1].resume).toBe('sess-1'); // same conversation, new process
   });
 
+  it('busy() lists who is mid-turn, for `npm run update` to wait on', async () => {
+    const sdk = fakeSdk();
+    const { m } = makeManager(sdk);
+    expect(m.busy()).toEqual({ working: [], queued: 0 });
+    m.instruct('lit', 'go');
+    expect(m.busy().working).toEqual([{ id: 'lit', name: 'Ada' }]);
+    await settle();
+    expect(m.busy()).toEqual({ working: [], queued: 0 }); // the open session alone doesn't count
+  });
+
   it('stop() interrupts the turn but keeps the session open', async () => {
     const sdk = fakeSdk();
     const { m } = makeManager(sdk);

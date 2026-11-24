@@ -10,5 +10,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["server/src", "server/test", "web/src", "shared"]
+  "include": ["server/src", "server/test", "web/src", "shared", "scripts"]
 }

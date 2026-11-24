@@ -7,6 +7,8 @@
 ;   systemctl --user enable --now eightbit-lab
 ;   journalctl --user -u eightbit-lab -f
 ;
+; To update later: npm run update (waits for idle staff, then pull → build → restart this unit).
+;
 ; To keep it alive across logout and reboot (needs sudo, once):
 ;   sudo loginctl enable-linger $USER
 ;
