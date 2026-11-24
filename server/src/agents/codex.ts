@@ -17,11 +17,11 @@ export class CodexTurn {
   private threadId = '';
   private turnId = '';
   private stderr = '';
-  private complete!: (v: { threadId: string; text: string; status: string }) => void;
+  private complete!: (v: { threadId: string; text: string; status: string; error?: string }) => void;
   private failed!: (e: Error) => void;
   private finished = false;
   private text = '';
-  readonly done: Promise<{ threadId: string; text: string; status: string }>;
+  readonly done: Promise<{ threadId: string; text: string; status: string; error?: string }>;
 
   constructor(private employeeId: string, private broker: PermissionBroker, private tools: CodexTools, private callTool: (namespace: string, tool: string, args: Record<string, unknown>) => Promise<{ contentItems: { type: string; text: string }[]; success: boolean }>, host?: HostConfig) {
     if (host && host.ssh !== 'local') {
@@ -98,7 +98,7 @@ export class CodexTurn {
     if (msg.method === 'item/completed' && item?.type === 'agentMessage' && item.text) this.text = item.text;
     if (msg.method === 'turn/completed' && !this.finished) {
       this.finished = true;
-      this.complete({ threadId: this.threadId, text: this.text, status: msg.params?.turn?.status ?? 'failed' });
+      this.complete({ threadId: this.threadId, text: this.text, status: msg.params?.turn?.status ?? 'failed', error: msg.params?.turn?.error?.message });
       this.proc.kill();
     }
     this.onEvent?.(msg.method, msg.params ?? {});

@@ -823,8 +823,9 @@ export class AgentManager {
       this.store.setSetting(codexThreadKey(e.role), result.threadId);
       e.lastText = result.text || e.lastText;
       const ok = result.status === 'completed';
-      this.log(e, ok ? 'result' : 'error', ok ? tr({ ko: 'Codex 작업 완료', en: 'Codex turn completed' }) : `Codex: ${result.status}`);
-      this.set(e, ok ? 'done' : 'error', ok ? tr({ ko: '✅ 완료', en: '✅ Done' }) : `⚠️ ${result.status}`);
+      const failure = result.error || result.status;
+      this.log(e, ok ? 'result' : 'error', ok ? tr({ ko: 'Codex 작업 완료', en: 'Codex turn completed' }) : `Codex: ${failure}`);
+      this.set(e, ok ? 'done' : 'error', ok ? tr({ ko: '✅ 완료', en: '✅ Done' }) : `⚠️ ${clip(failure, 55)}`);
       bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId } satisfies RunFinished);
       if (work.taskId != null) {
         const task = this.store.updateTask(work.taskId, ok ? { state: 'review', result: e.lastText || null } : { result: e.lastText || null });
