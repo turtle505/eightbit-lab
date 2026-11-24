@@ -467,7 +467,9 @@ export class AgentManager {
 
     const lang = getLang();
     const autoAllow = new Set(e.role.autoAllow);
-    const mcpServers: Record<string, any> = { lab: labToolsServer(e.role.id, cwd, this.registry, this.store) };
+    const mcpServers: Record<string, any> = {};
+    // no GPU servers configured → no lab tools, so agents aren't offered jobs on machines that don't exist
+    if (this.registry.list().length) mcpServers.lab = labToolsServer(e.role.id, cwd, this.registry, this.store);
     if (e.role.officeTools && this.officeApi) mcpServers.office = officeToolsServer(e.role.id, this.officeApi);
 
     let model = e.role.model || this.office.model || undefined;

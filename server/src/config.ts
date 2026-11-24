@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import type { PermissionSetting } from '../../shared/protocol.ts';
 import { tr, type Lang } from '../../shared/i18n.ts';
+import { DEFAULT_NOTE_FORMAT, type NoteFormat } from './obsidian.ts';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -31,6 +32,8 @@ export interface OfficeConfig {
   sshPerMinute: number;
   /** language of the UI and of what agents report in (prompts stay English); the UI toggle overrides it */
   language: Lang;
+  /** what the team works on, one line; put in front of every prompt as "About this team: …" (empty = left out) */
+  domain: string;
 }
 
 /**
@@ -68,9 +71,10 @@ export interface ProviderConfig {
   model: string;
 }
 
-export interface ObsidianConfig {
+/** `sections` / `schedule` (NoteFormat): which "## " headings are read, and which of them are a schedule */
+export interface ObsidianConfig extends NoteFormat {
   vault: string;
-  /** daily note path inside the vault: {YYYY} {MM} {DD} {ddd}(Mon) */
+  /** daily note path inside the vault: {YYYY} {MM} {DD} {ddd}(Mon); default Obsidian's own "{YYYY}-{MM}-{DD}.md" */
   daily: string;
   /** argv run (no shell, cwd = vault) by the "create today's note" button; "{vault}" is substituted. Empty = no button */
   createCommand: string[];
@@ -176,8 +180,10 @@ export function loadOffice(): OfficeConfig {
     obsidian: c.obsidian?.vault
       ? {
           vault: resolve(ROOT, c.obsidian.vault),
-          daily: c.obsidian.daily || 'Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md',
+          daily: c.obsidian.daily || '{YYYY}-{MM}-{DD}.md',
           createCommand: c.obsidian.createCommand ?? [],
+          sections: (c.obsidian.sections ?? DEFAULT_NOTE_FORMAT.sections).map(String),
+          schedule: (c.obsidian.schedule ?? DEFAULT_NOTE_FORMAT.schedule).map(String),
         }
       : null,
     permissionMode: c.permissionMode === 'ask' ? 'ask' : 'auto',
@@ -185,6 +191,7 @@ export function loadOffice(): OfficeConfig {
     authToken: String(c.authToken ?? '').trim(),
     sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
     language: c.language === 'ko' ? 'ko' : 'en',
+    domain: String(c.domain ?? '').trim(),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),
   };
@@ -235,15 +242,25 @@ export function normalizeProviders(list: Partial<ProviderConfig>[]): ProviderCon
   return out;
 }
 
-/** Rules every employee gets, from the `common:` block in roles.yaml, prepended to each role prompt. */
-export function commonPrompt(): string {
-  const base = readYaml<{ common?: string }>('config/roles.yaml', {}).common ?? '';
-  const local = readYaml<{ common?: string }>('config/roles.local.yaml', {}).common;
+/** A top-level text block of roles.yaml (`common`, `servers`); roles.local.yaml replaces it whole, "" turns it off. */
+function rolesBlock(key: 'common' | 'servers'): string {
+  const base = readYaml<Record<string, string>>('config/roles.yaml', {})[key] ?? '';
+  const local = readYaml<Record<string, string>>('config/roles.local.yaml', {})[key];
   return (local ?? base).trim();
 }
 
-export function loadRoles(): RoleConfig[] {
-  const common = commonPrompt();
+/**
+ * What every session's prompt starts with: the team's field (office.domain), the shared rules (`common`), and the
+ * remote-server etiquette (`servers`) only when there are servers to be careful with.
+ */
+export function teamPrompt(domain: string, withServers: boolean): string {
+  return [domain && `About this team: ${domain}`, rolesBlock('common'), withServers ? rolesBlock('servers') : '']
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function loadRoles(domain = '', withServers = false): RoleConfig[] {
+  const common = teamPrompt(domain, withServers);
   return readLayered<RoleConfig>('roles', 'employees', 'id').map((r) => ({
     ...r,
     autoAllow: r.autoAllow ?? [],

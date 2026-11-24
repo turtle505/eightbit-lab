@@ -10,7 +10,7 @@ servers:
     workdir: ~/office-jobs   # remote folder for job logs/scripts
     setup: |                 # setup commands run before every job
       source ~/miniconda3/etc/profile.d/conda.sh
-      conda activate protein
+      conda activate myenv
 
   - name: cluster-b
     type: slurm
@@ -19,7 +19,7 @@ servers:
     setup: |
       module load cuda/12.4
       source ~/miniconda3/etc/profile.d/conda.sh
-      conda activate protein
+      conda activate myenv
     slurm:
       partition: gpu
       gres: "gpu:1"
@@ -35,4 +35,4 @@ servers:
     workdir: /scratch/me/office-jobs
     setup: |
       source ~/miniconda3/etc/profile.d/conda.sh
-      conda activate protein
+      conda activate myenv

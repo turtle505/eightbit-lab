@@ -7,7 +7,7 @@ import { getLang, isLang, setLang, tr } from '../../shared/i18n.ts';
 import { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
 import { ServerRegistry } from './compute/registry.ts';
-import { ROOT, loadOffice, loadRoles, loadRoutines, loadServers } from './config.ts';
+import { ROOT, loadOffice, loadRoles, loadRoutines, loadServers, teamPrompt } from './config.ts';
 import { Store } from './db.ts';
 import { PermissionBroker } from './permissions/broker.ts';
 import { RoutineScheduler } from './routines.ts';
@@ -26,14 +26,17 @@ import { ProjectRegistry } from './projects.ts';
 import { mkdirSync } from 'node:fs';
 
 const office = loadOffice();
-const roles = loadRoles();
+const servers = loadServers();
+// the remote-server etiquette and the lab tools only make sense when there is a remote machine to reach
+const withServers = servers.length > 0 || office.hosts.some((h) => h.ssh !== 'local');
+const roles = loadRoles(office.domain, withServers);
 const store = new Store();
 {
   const saved = store.getSetting('language');
   setLang(isLang(saved) ? saved : office.language);
 }
 const broker = new PermissionBroker();
-const registry = new ServerRegistry(loadServers(), store);
+const registry = new ServerRegistry(servers, store);
 const agents = new AgentManager(office, roles, store, broker, registry);
 const skills = new SkillLibrary(resolve(office.workspaceRoot, 'office-skills'), store);
 skills.ensure();
@@ -61,7 +64,7 @@ for (const r of roles)
       }),
     );
 hosts.bindLiveness((hostId) => agents.views().some((v) => v.hostId === hostId && v.live));
-const projects = new ProjectRegistry(store, agents, hosts);
+const projects = new ProjectRegistry(store, agents, hosts, teamPrompt(office.domain, withServers));
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;
 for (const r of roles)
@@ -534,7 +537,7 @@ bus.on('msg', (m: ServerMsg) => {
 });
 
 http.listen(office.port, '127.0.0.1', () => {
-  console.log(`🧬 8-bit Lab backend: http://127.0.0.1:${office.port}  (employees: ${roles.length}, servers: ${registry.list().length}, providers: ${office.providers.map((p) => p.id).join(',') || '-'}, maxConcurrent: ${office.maxConcurrent})`);
+  console.log(`👾 8-bit Lab backend: http://127.0.0.1:${office.port}  (employees: ${roles.length}, servers: ${registry.list().length}, providers: ${office.providers.map((p) => p.id).join(',') || '-'}, maxConcurrent: ${office.maxConcurrent})`);
   registry.start();
   routines.start();
   usage.start();
@@ -554,8 +557,8 @@ http.listen(office.port, '127.0.0.1', () => {
     );
   else console.warn(
       tr({
-        ko: `🔓 사무실에 토큰 잠금이 없습니다. desktop 에 SSH 로 들어올 수 있는 사람은 누구나 직원을 조종할 수 있습니다.\n   켜려면 config/office.local.yaml 에:  authToken: "${suggestToken()}"`,
-        en: `🔓 The office has no token lock. Anyone who can SSH into this desktop can drive the employees.\n   To turn it on, in config/office.local.yaml:  authToken: "${suggestToken()}"`,
+        ko: `🔓 사무실에 토큰 잠금이 없습니다. 이 기기에 SSH 로 들어올 수 있는 사람은 누구나 직원을 조종할 수 있습니다.\n   켜려면 config/office.local.yaml 에:  authToken: "${suggestToken()}"`,
+        en: `🔓 The office has no token lock. Anyone who can SSH into this machine can drive the employees.\n   To turn it on, in config/office.local.yaml:  authToken: "${suggestToken()}"`,
       }),
     );
   console.log(`⏰ routines: ${routines.list().map((r) => `${r.name}(${r.schedule}${r.enabled ? '' : ', off'})`).join(', ') || '(none)'}`);

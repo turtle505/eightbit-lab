@@ -15,7 +15,7 @@ const STATIC: Record<string, { ko: string; en: string }> = {
   'view.reports': { ko: '보고서', en: 'Reports' },
   'view.projects': { ko: '프로젝트', en: 'Projects' },
   board: { ko: '📋 작업 보드', en: '📋 Task board' },
-  'task.title.long': { ko: '새 작업 제목 (예: FrameFlow 논문 요약)', en: 'New task title (e.g. Summarize the FrameFlow paper)' },
+  'task.title.long': { ko: '새 작업 제목 (예: 첨부한 논문 요약)', en: 'New task title (e.g. Summarize the attached paper)' },
   'task.title': { ko: '새 작업 제목', en: 'New task title' },
   'task.detail': { ko: '세부 지시 (선택)', en: 'Details (optional)' },
   'attach.form': { ko: '파일 첨부 (폼에 끌어다 놓아도 됨)', en: 'Attach files (or drop them on the form)' },

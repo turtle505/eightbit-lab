@@ -1,10 +1,10 @@
 [English](README.md) | **한국어**
 
-# 🧬 8-bit Lab
+# 👾 8-bit Lab
 
 **AI 에이전트들이 일하는 픽셀아트 사무실.** 8-bit Lab은 Claude Code 에이전트("직원") 여러 명을 동시에 돌리고, 각자 책상에서 일하는 작은 캐릭터로 보여줍니다. 나는 매니저입니다. 일을 나눠 주고, 위험한 작업은 승인하고, 보고를 받습니다.
 
-단백질 구조 딥러닝 연구실용으로 만들어서 원격 GPU 서버에 job을 올리고 지켜보는 기능도 있습니다. 하지만 일반적인 리서치나 일상 업무에도 그대로 쓸 수 있습니다.
+연구실에서 시작해서 원격 GPU 서버에 job을 올리고 지켜보는 기능도 있지만, 특정 분야를 전제하지 않습니다. 우리 팀이 하는 일을 한 줄로 알려 주면 직원들이 거기에 맞춰 일합니다.
 
 - 🧑‍💻 **기본 직원 6명**: 문헌 리서처, 평가 분석가, 연구 보조 둘, 비서, 그리고 다른 직원에게 일을 나눠 줄 수 있는 실행 팀장.
 - 👀 **누가 뭘 하는지 한눈에**: 타이핑 중인지, 명령을 실행 중인지, 웹을 찾는 중인지, 내 승인을 기다리는지.
@@ -41,7 +41,7 @@ npm run dev
 
 ### 처음 5분
 
-1. **직원을 클릭**하고(또는 <kbd>1</kbd>–<kbd>6</kbd>) 아래 입력칸에 지시를 적습니다. 예: *"단백질 구조 diffusion 모델 최신 논문 3편 찾아서 요약해줘."*
+1. **직원을 클릭**하고(또는 <kbd>1</kbd>–<kbd>6</kbd>) 아래 입력칸에 지시를 적습니다. 예: *"retrieval-augmented generation 최신 논문 3편 찾아서 요약해줘."*
 2. 일하는 모습을 지켜보세요. 말풍선에 지금 하는 일이 나옵니다.
 3. **`!`를 띄우고 손을 들면** 내 허락이 필요하다는 뜻입니다. 노란 승인 패널에서 승인하거나 거부하세요.
 4. 끝나면 답이 **📨 보고** 피드에 도착합니다(데스크톱 알림을 켜 두면 알림도 옵니다).
@@ -94,6 +94,7 @@ npm run dev
 
 ```yaml
 # config/office.local.yaml (흔한 예)
+domain: "a computer-vision lab working on video understanding"   # 우리 팀이 하는 일, 한 줄 (영어 권장: 프롬프트가 영어)
 language: ko              # ko | en: 화면 언어이자 직원들이 보고하는 언어
 maxConcurrent: 3          # 동시에 일하는 직원 수 (구독 rate limit 보호)
 researchRepo: ~/research/my-model   # 선택: 엔지니어마다 이 저장소의 git worktree를 따로 줌
@@ -102,14 +103,14 @@ authToken: ""             # 선택: 사무실에 비밀번호 걸기 ("안전장
 
 | 파일 | 하는 일 |
 |---|---|
-| `config/office.yaml` | 동시 실행 수, 모델, 언어, 유휴 시간, 호스트, 로컬 모델 |
+| `config/office.yaml` | 우리 분야(`domain`), 동시 실행 수, 모델, 언어, 유휴 시간, 호스트, 로컬 모델 |
 | `config/roles.yaml` | 직원: 이름, 역할 프롬프트, 승인 없이 쓸 도구(`autoAllow`), 캐릭터 색 |
 | `config/routines.yaml` | 시작용 루틴: 평일 09:00 아침 브리핑, 평일 18:00 저녁 리포트, 금 17:00 주간 회고(꺼짐) |
 | `config/servers.local.yaml` | 내 GPU 서버 (`servers.example.yaml` 복사) |
 
 **작업 폴더.** `researchRepo`를 정하면 엔지니어마다 자기 git worktree(브랜치 `office/<id>`)에서 일하므로 서로 충돌하지 않습니다. 정하지 않으면 모두 `workspaces/shared`를 같이 씁니다. 보고서는 `workspaces/<직원>/reports/`에 쌓입니다.
 
-**팀.** `roles.yaml` 맨 위 `common:` 블록은 모두에게 공통입니다: 정직하게 보고하기, 바꾸기 전에 읽기, 랩 서버 예절, 보고 형식. 그 위에 각자 역할이 붙습니다.
+**팀.** 모든 직원의 프롬프트는 `About this team: <domain>`으로 시작하고, 그다음 `roles.yaml`의 `common:` 블록(정직하게 보고하기, 바꾸기 전에 읽기, 보고 형식), 그리고 GPU 서버나 원격 호스트가 있을 때만 `servers:` 블록(원격 서버 예절)이 붙습니다. 그 위에 각자 역할이 붙습니다. 특정 직원을 더 전문화하려면(예: 평가 분석가가 우리 분야 지표를 알게) `config/roles.local.yaml`에서 그 직원의 `systemPrompt`를 덮어쓰세요. `id`로 합쳐지며 `autoAllow`도 같습니다(예: 설치해 둔 논문 검색 MCP 서버 추가). 표 아래 예시를 참고하세요.
 
 | id | 누구 | 하는 일 |
 |---|---|---|
@@ -118,6 +119,17 @@ authToken: ""             # 선택: 사무실에 비밀번호 걸기 ("안전장
 | `aide1`, `aide2` | Finn, Mira | 넘겨받은 일은 뭐든 하는 연구 보조 |
 | `sec` | Hana | 비서: 루틴, 사무실 현황, 보고서 정리 |
 | `exec` | Linus 👑 | 실행 팀장: 직접 구현하고 GPU job을 돌리며 다른 직원에게 일을 나눔 |
+
+```yaml
+# config/roles.local.yaml
+employees:
+  - id: lit
+    autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite, mcp__arxiv]   # + 내 MCP 서버
+  - id: eval
+    systemPrompt: |
+      ## Your role: Evaluation Analyst
+      You compute and interpret mAP, IoU and per-class recall for our detection models …
+```
 
 `roles.yaml`에서 직원을 빼도 그 직원의 작업 카드는 사라지지 않고 *미배정*으로 돌아갑니다.
 
@@ -176,13 +188,17 @@ hosts:
 <details>
 <summary><b>✅ Obsidian 오늘 할 일</b></summary>
 
-볼트를 지정하면 **✅ 오늘 할 일** 패널에 오늘 데일리 노트가 나옵니다. 체크, 수정(더블클릭), 추가, 삭제가 되고, 변경은 노트 파일에 바로 쓰이며 Obsidian에서 고친 내용도 몇 초 안에 반영됩니다. 그사이 Obsidian에서 그 줄이 바뀌었으면 덮어쓰지 않고 거부합니다.
+볼트를 지정하면 **✅ 오늘 할 일** 패널에 오늘 데일리 노트의 체크박스가 나옵니다. 체크, 수정(더블클릭), 추가, 삭제가 되고, 변경은 노트 파일에 바로 쓰이며 Obsidian에서 고친 내용도 몇 초 안에 반영됩니다. 그사이 Obsidian에서 그 줄이 바뀌었으면 덮어쓰지 않고 거부합니다.
 
 ```yaml
 obsidian:
   vault: /path/to/vault
-  daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"
+  daily: "{YYYY}-{MM}-{DD}.md"     # Obsidian 기본값. 연도별 폴더면 예: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"
+  # sections: [Today, Projects]    # 이 "## " 제목만 읽기 (기본: 전부)
+  # schedule: [Schedule, 일정]      # 일반 bullet(약속)도 보여줄 일정 제목
 ```
+
+평범한 노트면 됩니다: `## ` 제목 아래의 `- [ ]`가 제목별로 묶여 나오고, 제목이 없는 노트는 통째로 한 목록으로 읽습니다. 선택적으로, **굵은 글씨만 있는 줄**은 섹션 안의 이름 붙은 묶음이 되고, 항목 끝의 `↻3`은 "3번 이월됨"으로 표시됩니다.
 </details>
 
 <details>
@@ -203,7 +219,7 @@ obsidian:
 
 ```yaml
 providers:
-  - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
+  - { id: workstation, name: "🖥 workstation", kind: ollama, ssh_host: workstation, remotePort: 11434, localPort: 11435, model: "qwen3:8b" }
 ```
 
 - ssh 터널은 사무실이 직접 열고 상태를 확인합니다.

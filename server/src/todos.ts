@@ -38,7 +38,7 @@ export class TodayNote {
       base.relPath = rel;
       if (!existsSync(abs)) return base;
       const text = readFileSync(abs, 'utf8');
-      return { ...base, exists: true, mtime: Math.round(statSync(abs).mtimeMs), sections: parseDaily(text) };
+      return { ...base, exists: true, mtime: Math.round(statSync(abs).mtimeMs), sections: parseDaily(text, this.cfg!) };
     } catch (e) {
       return { ...base, error: (e as Error).message };
     }

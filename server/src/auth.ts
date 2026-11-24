@@ -64,7 +64,7 @@ export const loginPage = (wrong: boolean) => `<!doctype html>
   @media (prefers-color-scheme: dark) { .bad { color: #ff7b6b; } }
 </style></head>
 <body><form method="POST" action="/api/login">
-  <h1>🧬 8-bit Lab</h1>
+  <h1>👾 8-bit Lab</h1>
   <p>${tr({
     ko: '사무실 토큰을 입력하세요. 이 브라우저에 저장됩니다.<br />토큰은 서버의 <code>config/office.local.yaml</code> 에 있습니다.',
     en: 'Enter the office token. This browser will remember it.<br />The token is in <code>config/office.local.yaml</code> on the server.',

@@ -1,8 +1,10 @@
-// Today's to-dos from an Obsidian daily note (format of research_notebook/.scripts/daily_note.py):
-//   ## ⏰ Schedule / Appointments | ## 🧬 Active Project | ## 📚 Study   (a section ends at "---" or the next "## ")
-//   **[[Link|Project]]**            project header
-//   xxx_log:: ...                   log field (skipped)
-//   - [ ] task ↻2                   checkbox, "↻N" = carried over N times; tab-indented children
+// Today's to-dos from an Obsidian daily note. Plain Markdown works; the rest are optional conventions:
+//   ## Any heading                  a section (ends at "---" or the next "## "); `format.sections` picks which ones are read,
+//                                   `format.schedule` which ones also show plain bullets (appointments).
+//                                   A note with no "## " heading at all is read whole, as one untitled block.
+//   **Group** / **[[Link|Group]]**  optional: a bold-only line starts a named group inside a section
+//   xxx_log:: ...                   optional: Dataview log field (skipped)
+//   - [ ] task ↻2                   checkbox; optional "↻N" = carried over N times; indented children
 //   	- description                 non-checkbox sub-bullet = description of the item above
 import { tr } from '../../shared/i18n.ts';
 import type { TodoItem, TodoOp, TodoProject, TodoSection } from '../../shared/protocol.ts';
@@ -17,11 +19,27 @@ const CARRY_RE = /\s*↻(\d+)\s*$/;
 const indentOf = (ln: string) => (ln.match(/^\s*/)![0].replace(/\t/g, '    ').length);
 const isBoundary = (ln: string) => SEC_RE.test(ln) || HEAD_RE.test(ln) || ln.trim() === '---';
 
-function sectionKind(title: string): TodoSection['kind'] | null {
-  if (/Schedule/i.test(title)) return 'schedule';
-  if (/Active Project/i.test(title)) return 'project';
-  if (/Study/i.test(title)) return 'study';
-  return null;
+/** Which "## " sections are read, and which of them are a schedule. Matching is by substring, ignoring case. */
+export interface NoteFormat {
+  /** headings to read; empty = every section */
+  sections: string[];
+  /** headings whose plain bullets (appointments) are shown, not just checkboxes */
+  schedule: string[];
+}
+export const DEFAULT_NOTE_FORMAT: NoteFormat = { sections: [], schedule: ['Schedule', '일정'] };
+
+const hasAny = (title: string, words: string[]) => words.some((w) => w && title.toLowerCase().includes(w.toLowerCase()));
+
+function sectionKind(title: string, fmt: NoteFormat): TodoSection['kind'] | null {
+  if (fmt.sections.length && !hasAny(title, fmt.sections)) return null;
+  return hasAny(title, fmt.schedule) ? 'schedule' : 'tasks';
+}
+
+/** Index of the first line after a leading YAML front-matter block (0 if there is none). */
+function bodyStart(lines: string[]): number {
+  if (lines[0]?.trim() !== '---') return 0;
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  return end < 0 ? 0 : end + 1;
 }
 
 /** "[[a/b|c]]" → c, "[[x]]" → x */
@@ -32,18 +50,27 @@ function splitCarry(text: string): { text: string; carry: number } {
   return m ? { text: text.replace(CARRY_RE, ''), carry: Number(m[1]) } : { text: text.trimEnd(), carry: 0 };
 }
 
-export function parseDaily(src: string): TodoSection[] {
+export function parseDaily(src: string, fmt: NoteFormat = DEFAULT_NOTE_FORMAT): TodoSection[] {
   const lines = src.split(/\r?\n/);
+  const start = bodyStart(lines);
   const sections: TodoSection[] = [];
   let sec: TodoSection | null = null;
   let proj: TodoProject | null = null;
   // open checkbox items by indentation, for nesting
   let stack: Array<{ item: TodoItem; indent: number }> = [];
 
+  // no headings at all: the whole note is one untitled block (line -1 = "add" appends at the end of the note)
+  if (!lines.some((ln) => SEC_RE.test(ln))) {
+    proj = { name: '', link: null, line: -1, raw: '', memo: [], items: [] };
+    sec = { kind: 'tasks', title: '', line: -1, projects: [proj] };
+    sections.push(sec);
+  }
+
   lines.forEach((ln, i) => {
+    if (i < start) return;
     const sm = ln.match(SEC_RE);
     if (sm) {
-      const kind = sectionKind(sm[1]);
+      const kind = sectionKind(sm[1], fmt);
       sec = kind ? { kind, title: sm[1].trim(), line: i, projects: [] } : null;
       if (sec) {
         sections.push(sec);
@@ -54,7 +81,7 @@ export function parseDaily(src: string): TodoSection[] {
       return;
     }
     if (!sec || !proj) return;
-    if (ln.trim() === '---') {
+    if (ln.trim() === '---' && sec.line >= 0) {
       sec = null;
       proj = null;
       stack = [];
@@ -160,13 +187,18 @@ export function applyTodoOp(src: string, op: TodoOp): string {
       break;
     }
     case 'add': {
-      check(lines, op.headerLine, op.headerRaw);
+      if (op.headerLine !== -1) check(lines, op.headerLine, op.headerRaw);
       const text = oneLine(op.text);
       if (!text) throw new Error(tr({ ko: '내용이 비어 있습니다.', en: 'The text is empty.' }));
       if (op.parentLine != null) {
         check(lines, op.parentLine, op.parentRaw ?? '');
         const lead = lines[op.parentLine].match(/^\s*/)![0];
         lines.splice(subtreeEnd(lines, op.parentLine) + 1, 0, `${lead}\t- [ ] ${text}`);
+      } else if (op.headerLine === -1) {
+        // the untitled block of a note without headings: after its last non-empty line
+        let last = lines.length - 1;
+        while (last >= 0 && !lines[last].trim()) last--;
+        lines.splice(last + 1, 0, `- [ ] ${text}`);
       } else {
         lines.splice(blockEnd(lines, op.headerLine) + 1, 0, `- [ ] ${text}`);
       }
@@ -180,7 +212,7 @@ export function applyTodoOp(src: string, op: TodoOp): string {
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md" for a local date. */
+/** Fill a path template like "{YYYY}-{MM}-{DD}.md" or "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md" for a local date. */
 export function dailyPath(template: string, d: Date): string {
   const p2 = (n: number) => String(n).padStart(2, '0');
   return template

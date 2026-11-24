@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 describe('statusForTool', () => {
   it('maps tools to character states', () => {
     expect(statusForTool('Bash', { command: 'ls' }).status).toBe('running');
-    expect(statusForTool('WebSearch', { query: 'FrameFlow' }).status).toBe('researching');
+    expect(statusForTool('WebSearch', { query: 'diffusion models' }).status).toBe('researching');
     expect(statusForTool('Edit', { file_path: '/a/b/model.py' }).activity).toContain('model.py');
     const r = statusForTool('mcp__lab__submit_job', { server: 'gpu-a', name: 'train' });
     expect(r.status).toBe('remote');
@@ -147,10 +147,10 @@ describe('cron', () => {
 
 describe('isAutoAllowed', () => {
   it('exact and server-level rules', () => {
-    const r = ['Read', 'mcp__plugin_bio-research_biorxiv'];
+    const r = ['Read', 'mcp__plugin_acme_papers'];
     expect(isAutoAllowed(r, 'Read')).toBe(true);
-    expect(isAutoAllowed(r, 'mcp__plugin_bio-research_biorxiv__search_preprints')).toBe(true);
-    expect(isAutoAllowed(r, 'mcp__plugin_bio-research_biorxiv_evil__x')).toBe(false);
+    expect(isAutoAllowed(r, 'mcp__plugin_acme_papers__search_preprints')).toBe(true);
+    expect(isAutoAllowed(r, 'mcp__plugin_acme_papers_evil__x')).toBe(false);
     expect(isAutoAllowed(r, 'Bash')).toBe(false);
   });
 });
@@ -461,116 +461,139 @@ import { TodayNote } from '../src/todos.ts';
 const NOTE = [
   '#daily ', //                                    0
   '## ⏰ Schedule / Appointments', //               1
-  '- 14:00 랩미팅', //                              2
+  '- 14:00 Team meeting', //                              2
   '', //                                            3
   '---', //                                         4
   '', //                                            5
   '## 🧬 Active Project', //                        6
-  '**[[Lab meeting]]**', //                         7
-  'lab_log:: ', //                                  8
+  '**[[Weekly sync]]**', //                         7
+  'sync_log:: ', //                                  8
   '', //                                            9
-  '**[[Tau oligomer binder design]]**', //         10
-  'tau_log::', //                                  11
-  '- [ ] 전략 정하기 ↻1', //                         12
-  '- [x] backbone design 시도 ↻3', //               13
+  '**[[Grant report]]**', //         10
+  'grant_log::', //                                  11
+  '- [ ] Outline the report ↻1', //                         12
+  '- [x] Collect budget numbers ↻3', //               13
   '', //                                           14
-  '**EGFR 논문 작성**', //                          15
-  'egfr_log::', //                                 16
-  '무조건 이번주까지..!!', //                         17
-  '- [ ] **구조 figure 만들기** ↻1', //              18
-  '\t- RFdiffusion figure 요청.', //               19
-  '\t  - Noise → backbone 과정', //                 20
-  '\t- [ ] pose 시각화', //                         21
-  '- [ ] method 다시 작성', //                       22
+  '**Paper draft**', //                          15
+  'paper_log::', //                                 16
+  'Due this week!', //                         17
+  '- [ ] **Make the figures** ↻1', //              18
+  '\t- Requested by the advisor.', //               19
+  '\t  - Pipeline overview first', //                 20
+  '\t- [ ] Results plot', //                         21
+  '- [ ] Rewrite the methods', //                       22
   '', //                                           23
-  '**기타**', //                                    24
+  '**Misc**', //                                    24
   '', //                                           25
   '', //                                           26
   '---', //                                        27
   '## 📚 Study', //                                28
   '[[Study/Study|Study]]', //                      29
-  '**[[Proteins; Structure and Function]]**', //   30
+  '**[[Statistics course]]**', //   30
   '', //                                           31
   '---', //                                        32
-  '## 🏢 Office board — 진행 중 작업', //            33
-  '- [ ] 무시돼야 함', //                             34
+  '## 🏢 Office board', //            33
+  '- [ ] should be ignored', //                             34
   '',
 ].join('\n');
 
 describe('Obsidian daily note', () => {
-  it('parses sections, projects, carry markers, children and descriptions', () => {
-    const secs = parseDaily(NOTE);
-    expect(secs.map((s) => s.kind)).toEqual(['schedule', 'project', 'study']);
-    expect(secs[0].projects[0].memo).toEqual(['- 14:00 랩미팅']);
+  const PICKED = { sections: ['Schedule', 'Active Project', 'Study'], schedule: ['Schedule'] };
+
+  it('parses picked sections, groups, carry markers, children and descriptions', () => {
+    const secs = parseDaily(NOTE, PICKED);
+    expect(secs.map((s) => s.kind)).toEqual(['schedule', 'tasks', 'tasks']);
+    expect(secs[0].projects[0].memo).toEqual(['- 14:00 Team meeting']);
     const proj = secs[1].projects;
-    expect(proj.map((p) => p.name)).toEqual(['', 'Lab meeting', 'Tau oligomer binder design', 'EGFR 논문 작성', '기타']);
-    expect(proj[1]).toMatchObject({ link: 'Lab meeting', items: [] });
-    const tau = proj[2];
-    expect(tau.items.map((i) => [i.text, i.checked, i.carry, i.line])).toEqual([
-      ['전략 정하기', false, 1, 12],
-      ['backbone design 시도', true, 3, 13],
+    expect(proj.map((p) => p.name)).toEqual(['', 'Weekly sync', 'Grant report', 'Paper draft', 'Misc']);
+    expect(proj[1]).toMatchObject({ link: 'Weekly sync', items: [] });
+    const grant = proj[2];
+    expect(grant.items.map((i) => [i.text, i.checked, i.carry, i.line])).toEqual([
+      ['Outline the report', false, 1, 12],
+      ['Collect budget numbers', true, 3, 13],
     ]);
-    const egfr = proj[3];
-    expect(egfr.link).toBeNull();
-    expect(egfr.memo).toEqual(['무조건 이번주까지..!!']);
-    expect(egfr.items.map((i) => i.text)).toEqual(['**구조 figure 만들기**', 'method 다시 작성']);
-    expect(egfr.items[0].notes).toEqual([
-      { depth: 0, text: 'RFdiffusion figure 요청.' },
-      { depth: 1, text: 'Noise → backbone 과정' },
+    const paper = proj[3];
+    expect(paper.link).toBeNull();
+    expect(paper.memo).toEqual(['Due this week!']);
+    expect(paper.items.map((i) => i.text)).toEqual(['**Make the figures**', 'Rewrite the methods']);
+    expect(paper.items[0].notes).toEqual([
+      { depth: 0, text: 'Requested by the advisor.' },
+      { depth: 1, text: 'Pipeline overview first' },
     ]);
-    expect(egfr.items[0].children.map((c) => [c.text, c.line])).toEqual([['pose 시각화', 21]]);
-    expect(secs[2].projects.map((p) => p.name)).toEqual(['', 'Proteins; Structure and Function']);
-    expect(JSON.stringify(secs)).not.toContain('무시돼야 함');
+    expect(paper.items[0].children.map((c) => [c.text, c.line])).toEqual([['Results plot', 21]]);
+    expect(secs[2].projects.map((p) => p.name)).toEqual(['', 'Statistics course']);
+    expect(JSON.stringify(secs)).not.toContain('should be ignored');
   });
 
   it('toggles and edits one line, keeping indentation and ↻N', () => {
-    const t1 = applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 전략 정하기 ↻1' });
-    expect(t1.split('\n')[12]).toBe('- [x] 전략 정하기 ↻1');
-    expect(applyTodoOp(t1, { op: 'toggle', line: 12, raw: '- [x] 전략 정하기 ↻1' })).toBe(NOTE);
-    const t2 = applyTodoOp(NOTE, { op: 'edit', line: 21, raw: '\t- [ ] pose 시각화', text: ' 결합 pose\n시각화 ' });
-    expect(t2.split('\n')[21]).toBe('\t- [ ] 결합 pose 시각화');
-    const t3 = applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '구조 figure 3개' });
-    expect(t3.split('\n')[18]).toBe('- [ ] 구조 figure 3개 ↻1');
-    expect(() => applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1', text: '  ' })).toThrow(/empty/);
+    const t1 = applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] Outline the report ↻1' });
+    expect(t1.split('\n')[12]).toBe('- [x] Outline the report ↻1');
+    expect(applyTodoOp(t1, { op: 'toggle', line: 12, raw: '- [x] Outline the report ↻1' })).toBe(NOTE);
+    const t2 = applyTodoOp(NOTE, { op: 'edit', line: 21, raw: '\t- [ ] Results plot', text: ' Results\nplot v2 ' });
+    expect(t2.split('\n')[21]).toBe('\t- [ ] Results plot v2');
+    const t3 = applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **Make the figures** ↻1', text: 'Three figures' });
+    expect(t3.split('\n')[18]).toBe('- [ ] Three figures ↻1');
+    expect(() => applyTodoOp(NOTE, { op: 'edit', line: 18, raw: '- [ ] **Make the figures** ↻1', text: '  ' })).toThrow(/empty/);
   });
 
   it('adds to the end of a block or under a parent, and deletes whole subtrees', () => {
-    const a = applyTodoOp(NOTE, { op: 'add', headerLine: 10, headerRaw: '**[[Tau oligomer binder design]]**', text: '새 할 일' }).split('\n');
-    expect(a.slice(12, 16)).toEqual(['- [ ] 전략 정하기 ↻1', '- [x] backbone design 시도 ↻3', '- [ ] 새 할 일', '']);
-    const empty = applyTodoOp(NOTE, { op: 'add', headerLine: 24, headerRaw: '**기타**', text: '메일 답장' }).split('\n');
-    expect(empty.slice(24, 27)).toEqual(['**기타**', '- [ ] 메일 답장', '']);
-    const lab = applyTodoOp(NOTE, { op: 'add', headerLine: 7, headerRaw: '**[[Lab meeting]]**', text: '발표 준비' }).split('\n');
-    expect(lab.slice(7, 10)).toEqual(['**[[Lab meeting]]**', 'lab_log:: ', '- [ ] 발표 준비']);
+    const a = applyTodoOp(NOTE, { op: 'add', headerLine: 10, headerRaw: '**[[Grant report]]**', text: 'New to-do' }).split('\n');
+    expect(a.slice(12, 16)).toEqual(['- [ ] Outline the report ↻1', '- [x] Collect budget numbers ↻3', '- [ ] New to-do', '']);
+    const empty = applyTodoOp(NOTE, { op: 'add', headerLine: 24, headerRaw: '**Misc**', text: 'Reply to email' }).split('\n');
+    expect(empty.slice(24, 27)).toEqual(['**Misc**', '- [ ] Reply to email', '']);
+    const lab = applyTodoOp(NOTE, { op: 'add', headerLine: 7, headerRaw: '**[[Weekly sync]]**', text: 'Prepare slides' }).split('\n');
+    expect(lab.slice(7, 10)).toEqual(['**[[Weekly sync]]**', 'sync_log:: ', '- [ ] Prepare slides']);
     const sub = applyTodoOp(NOTE, {
-      op: 'add', headerLine: 15, headerRaw: '**EGFR 논문 작성**', text: 'surface 렌더', parentLine: 18, parentRaw: '- [ ] **구조 figure 만들기** ↻1',
+      op: 'add', headerLine: 15, headerRaw: '**Paper draft**', text: 'Error bars', parentLine: 18, parentRaw: '- [ ] **Make the figures** ↻1',
     }).split('\n');
-    expect(sub.slice(21, 24)).toEqual(['\t- [ ] pose 시각화', '\t- [ ] surface 렌더', '- [ ] method 다시 작성']);
-    const del = applyTodoOp(NOTE, { op: 'delete', line: 18, raw: '- [ ] **구조 figure 만들기** ↻1' }).split('\n');
-    expect(del.slice(17, 20)).toEqual(['무조건 이번주까지..!!', '- [ ] method 다시 작성', '']);
+    expect(sub.slice(21, 24)).toEqual(['\t- [ ] Results plot', '\t- [ ] Error bars', '- [ ] Rewrite the methods']);
+    const del = applyTodoOp(NOTE, { op: 'delete', line: 18, raw: '- [ ] **Make the figures** ↻1' }).split('\n');
+    expect(del.slice(17, 20)).toEqual(['Due this week!', '- [ ] Rewrite the methods', '']);
   });
 
   it('refuses stale edits and keeps CRLF / trailing newline', () => {
-    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] 다른 내용' })).toThrow(/changed/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 12, raw: '- [ ] something else' })).toThrow(/changed/);
     expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 999, raw: 'x' })).toThrow(/changed/);
-    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 17, raw: '무조건 이번주까지..!!' })).toThrow(/checkbox/);
+    expect(() => applyTodoOp(NOTE, { op: 'toggle', line: 17, raw: 'Due this week!' })).toThrow(/checkbox/);
     const crlf = NOTE.replace(/\n/g, '\r\n');
-    const out = applyTodoOp(crlf, { op: 'toggle', line: 12, raw: '- [ ] 전략 정하기 ↻1' });
-    expect(out).toBe(crlf.replace('- [ ] 전략 정하기 ↻1', '- [x] 전략 정하기 ↻1'));
+    const out = applyTodoOp(crlf, { op: 'toggle', line: 12, raw: '- [ ] Outline the report ↻1' });
+    expect(out).toBe(crlf.replace('- [ ] Outline the report ↻1', '- [x] Outline the report ↻1'));
     expect(out.endsWith('\r\n')).toBe(true);
+  });
+
+  it('reads every section by default, and a note without headings as one block', () => {
+    const secs = parseDaily(NOTE);
+    expect(secs.map((s) => [s.kind, s.title])).toEqual([
+      ['schedule', '⏰ Schedule / Appointments'],
+      ['tasks', '🧬 Active Project'],
+      ['tasks', '📚 Study'],
+      ['tasks', '🏢 Office board'],
+    ]);
+    expect(secs[3].projects[0].items.map((i) => i.text)).toEqual(['should be ignored']);
+    expect(parseDaily(NOTE, { sections: [], schedule: [] })[0].kind).toBe('tasks');
+
+    const plain = ['---', 'tags: [daily]', '---', '# 2026-11-24', '- [ ] Buy milk', '- [x] Call Sam', '', 'Notes go here.'].join('\n');
+    const [only] = parseDaily(plain);
+    expect(only).toMatchObject({ kind: 'tasks', title: '', line: -1 });
+    expect(only.projects[0].items.map((i) => [i.text, i.checked, i.line])).toEqual([['Buy milk', false, 4], ['Call Sam', true, 5]]);
+    const added = applyTodoOp(plain, { op: 'add', headerLine: -1, headerRaw: '', text: 'Water plants' }).split('\n');
+    expect(added.slice(-2)).toEqual(['Notes go here.', '- [ ] Water plants']);
+    // an empty note still offers its block, so the first to-do can be added
+    expect(parseDaily('')[0].projects[0].line).toBe(-1);
   });
 
   it('builds the daily path and reads/writes today\'s note', () => {
     expect(dailyPath('Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md', new Date(2026, 10, 23))).toBe('Daily/2026/2026.11.23.Mon.md');
     const vault = mkdtempSync(join(tmpdir(), 'vault-'));
-    const note = new TodayNote({ vault, daily: 'Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md', createCommand: [] }, () => new Date(2026, 10, 23, 9));
+    const note = new TodayNote({ vault, daily: 'Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md', createCommand: [], ...PICKED }, () => new Date(2026, 10, 23, 9));
     expect(note.load()).toMatchObject({ enabled: true, exists: false, relPath: 'Daily/2026/2026.11.23.Mon.md', vaultName: vault.split('/').pop(), canCreate: false });
     mkdirSync(join(vault, 'Daily/2026'), { recursive: true });
     writeFileSync(join(vault, 'Daily/2026/2026.11.23.Mon.md'), NOTE);
     expect(note.poll()?.exists).toBe(true);
     expect(note.poll()).toBeNull();
-    const after = note.apply({ op: 'toggle', line: 22, raw: '- [ ] method 다시 작성' });
+    const after = note.apply({ op: 'toggle', line: 22, raw: '- [ ] Rewrite the methods' });
     expect(after.sections[1].projects[3].items[1].checked).toBe(true);
-    expect(readFileSync(join(vault, 'Daily/2026/2026.11.23.Mon.md'), 'utf8').split('\n')[22]).toBe('- [x] method 다시 작성');
+    expect(readFileSync(join(vault, 'Daily/2026/2026.11.23.Mon.md'), 'utf8').split('\n')[22]).toBe('- [x] Rewrite the methods');
     expect(new TodayNote(null).load().enabled).toBe(false);
   });
 });
@@ -700,14 +723,14 @@ describe('attachments', async () => {
     const { writeFileSync } = await import('node:fs');
     const root = mkdtempSync(join(tmpdir(), 'office-att-'));
     const src = join(root, 'src.txt');
-    writeFileSync(src, '단백질 구조 메모');
+    writeFileSync(src, '회의 메모');
     execFileSync('textutil', ['-convert', 'docx', '-output', join(root, 'memo.docx'), src]);
     const store = new Store(':memory:');
     const lib = new AttachmentLibrary(root, store);
     const v = await lib.save('memo.docx', readFileSync(join(root, 'memo.docx')));
     expect(v.hasText).toBe(true);
     const r = lib.rows([v.id])[0];
-    expect(readFileSync(r.textPath!, 'utf8')).toContain('단백질 구조 메모');
+    expect(readFileSync(r.textPath!, 'utf8')).toContain('회의 메모');
     expect(attachmentBlock([r])).toContain('extracted text');
   });
 });
@@ -909,16 +932,16 @@ describe('remote hosts', async () => {
   const { remoteCommand, forwardEnv, SSH_BASE } = await import('../src/hosts.ts');
   const { normalizeHosts } = await import('../src/config.ts');
 
-  const cfg: any = { id: 'desktop', name: 'desktop', ssh: 'desktop', projectRoot: '~/project', claudePath: '/home/ybshin/.local/bin/claude' };
+  const cfg: any = { id: 'desktop', name: 'desktop', ssh: 'desktop', projectRoot: '~/project', claudePath: '/home/me/.local/bin/claude' };
 
   it('forwards only the session env, never the local shell env', () => {
-    const env = forwardEnv({ PATH: '/opt/homebrew/bin', HOME: '/Users/ybshin', SHELL: '/bin/zsh', ANTHROPIC_BASE_URL: 'http://127.0.0.1:11435', CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.5:9b', ANTHROPIC_API_KEY: '', NOPE: undefined });
+    const env = forwardEnv({ PATH: '/opt/homebrew/bin', HOME: '/Users/me', SHELL: '/bin/zsh', ANTHROPIC_BASE_URL: 'http://127.0.0.1:11435', CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.5:9b', ANTHROPIC_API_KEY: '', NOPE: undefined });
     expect(env).toEqual({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:11435', CLAUDE_CODE_SUBAGENT_MODEL: 'qwen3.5:9b' });
   });
 
   it('cds into the session folder and execs the absolute CLI path', () => {
-    const cmd = remoteCommand(cfg, { command: '/opt/homebrew/bin/claude', args: ['--output-format', 'stream-json'], cwd: '/home/ybshin/project/rna', env: {} });
-    expect(cmd).toBe("cd '/home/ybshin/project/rna' && exec env '/home/ybshin/.local/bin/claude' '--output-format' 'stream-json'");
+    const cmd = remoteCommand(cfg, { command: '/opt/homebrew/bin/claude', args: ['--output-format', 'stream-json'], cwd: '/home/me/project/beta', env: {} });
+    expect(cmd).toBe("cd '/home/me/project/beta' && exec env '/home/me/.local/bin/claude' '--output-format' 'stream-json'");
     expect(cmd).not.toContain('/opt/homebrew'); // the local path would not exist there
   });
 
@@ -956,9 +979,9 @@ describe('remote hosts', async () => {
   it('remembers which machine a session id belongs to', () => {
     const store = new Store(':memory:');
     expect(store.getSession('exec')).toMatchObject({ sessionId: null, hostId: null });
-    store.saveSession('exec', 'sess-remote', 0.5, '/home/ybshin/project', 'desktop');
-    expect(store.getSession('exec')).toMatchObject({ sessionId: 'sess-remote', cwd: '/home/ybshin/project', hostId: 'desktop' });
-    store.saveSession('exec', 'sess-local', 0.5, '/Users/ybshin/x', null); // moved back to this machine
+    store.saveSession('exec', 'sess-remote', 0.5, '/home/me/project', 'desktop');
+    expect(store.getSession('exec')).toMatchObject({ sessionId: 'sess-remote', cwd: '/home/me/project', hostId: 'desktop' });
+    store.saveSession('exec', 'sess-local', 0.5, '/Users/me/x', null); // moved back to this machine
     expect(store.getSession('exec').hostId).toBeNull();
   });
 
@@ -1005,7 +1028,7 @@ describe('portability (moving the backend to another machine)', async () => {
 
   it('a session id is tied to the machine that recorded it, backend moves included', () => {
     // same role, two different backend machines → different ids, so the stale session is not resumed
-    expect(sessionHostId(undefined, 'Shins-MacBook-Air.local')).not.toBe(sessionHostId(undefined, 'desktop'));
+    expect(sessionHostId(undefined, 'laptop.local')).not.toBe(sessionHostId(undefined, 'desktop'));
     // a role pinned to a host keeps that host's id wherever the backend runs
     expect(sessionHostId('desktop', 'mac')).toBe(sessionHostId('desktop', 'desktop'));
     expect(sessionHostId('desktop', 'mac')).toBe('desktop');
@@ -1091,16 +1114,16 @@ describe('project sessions', async () => {
   it('resolves a project folder on the host, expanding ~ ourselves', () => {
     const h = new Host({ id: 'd', name: 'd', ssh: 'desktop', projectRoot: '~/project' } as any);
     // every path we send is quoted, so the remote shell never expands ~ for us
-    expect(() => h.projectDir('bio2token')).toThrow(); // home not known until the health check answers
-    (h as any).home = '/home/ybshin';
-    expect(h.projectDir('bio2token')).toBe('/home/ybshin/project/bio2token');
-    expect(h.projectDir('~/elsewhere')).toBe('/home/ybshin/elsewhere');
+    expect(() => h.projectDir('alpha')).toThrow(); // home not known until the health check answers
+    (h as any).home = '/home/me';
+    expect(h.projectDir('alpha')).toBe('/home/me/project/alpha');
+    expect(h.projectDir('~/elsewhere')).toBe('/home/me/elsewhere');
     expect(h.projectDir('/data/shared')).toBe('/data/shared'); // absolute stays put
   });
 
   it('gives each session its own id and never reuses one', () => {
     const s = new Store(':memory:');
-    const p = s.createProject('desktop', 'bio2token', 'bio2token');
+    const p = s.createProject('desktop', 'alpha', 'alpha');
     const a = s.addProjectSession(p.id);
     const b = s.addProjectSession(p.id);
     expect([a.id, b.id]).toEqual([`p:${p.id}:1`, `p:${p.id}:2`]);
@@ -1114,9 +1137,9 @@ describe('project sessions', async () => {
 
   it('closing a session drops its conversation, archiving a project closes them all', () => {
     const s = new Store(':memory:');
-    const p = s.createProject('desktop', 'rna', 'rna');
+    const p = s.createProject('desktop', 'beta', 'beta');
     const one = s.addProjectSession(p.id);
-    s.saveSession(one.id, 'sess-abc', 0.3, '/home/ybshin/project/rna', 'desktop');
+    s.saveSession(one.id, 'sess-abc', 0.3, '/home/me/project/beta', 'desktop');
     expect(s.getSession(one.id).sessionId).toBe('sess-abc');
     s.closeProjectSession(one.id);
     expect(s.getSession(one.id).sessionId).toBeNull();
@@ -1157,7 +1180,7 @@ describe('office seating', async () => {
 
   it('a session only takes a desk once it is let into the office, and gives it back', () => {
     const s = new Store(':memory:');
-    const p = s.createProject('desktop', 'rna', 'rna');
+    const p = s.createProject('desktop', 'beta', 'beta');
     const a = s.addProjectSession(p.id, '학습');
     const b = s.addProjectSession(p.id);
     expect([a.desk, b.desk]).toEqual([-1, -1]); // tab only
@@ -1289,8 +1312,8 @@ describe('ssh budget for agent commands', async () => {
     expect(SshThrottle.targetOf('ssh -p 10300 -o BatchMode=yes desktop ls')).toBe('desktop');
     expect(SshThrottle.targetOf('cd /tmp && ssh srv1 ls')).toBe('srv1');
     expect(SshThrottle.targetOf('scp a.txt gpu1:~/out/')).toBe('gpu1');
-    expect(SshThrottle.targetOf('rsync -a ./out ybshin@gpu2:~/out')).toBe('gpu2');
-    expect(SshThrottle.targetOf('ssh ybshin@srv3 "nvidia-smi"')).toBe('srv3');
+    expect(SshThrottle.targetOf('rsync -a ./out me@gpu2:~/out')).toBe('gpu2');
+    expect(SshThrottle.targetOf('ssh me@srv3 "nvidia-smi"')).toBe('srv3');
   });
 
   it('stays out of the way when it cannot tell', () => {
@@ -1444,6 +1467,18 @@ describe('usage limit: park and resume', async () => {
   });
 });
 
+describe('team prompt', async () => {
+  const { teamPrompt } = await import('../src/config.ts');
+  it('starts with the field when one is set, and adds server etiquette only with servers', () => {
+    const plain = teamPrompt('', false);
+    expect(plain).not.toContain('About this team');
+    expect(plain).not.toContain('Remote server etiquette');
+    const full = teamPrompt('a robotics lab', true);
+    expect(full.startsWith('About this team: a robotics lab\n\n')).toBe(true);
+    expect(full).toContain('Remote server etiquette');
+  });
+});
+
 describe('language', async () => {
   const { AgentManager, reportLanguageLine } = await import('../src/agents/manager.ts');
   const { getLang, setLang, tr } = await import('../../shared/i18n.ts');
@@ -1475,8 +1510,10 @@ describe('language', async () => {
   it('prompts tell the agent which language to report in, and a switch reopens the session', async () => {
     const before = getLang();
     const appends: string[] = [];
+    const mcpNames: string[][] = [];
     const queryFn: any = ({ prompt, options }: any) => {
       appends.push(options.systemPrompt.append);
+      mcpNames.push(Object.keys(options.mcpServers ?? {}));
       const out: any[] = [];
       let wake: any = null;
       let closed = false;
@@ -1511,6 +1548,7 @@ describe('language', async () => {
       await settle(60);
       expect(appends).toHaveLength(2);
       expect(appends[1]).toContain('in English');
+      expect(mcpNames[0]).not.toContain('lab'); // no GPU servers configured → no lab tools
     } finally {
       setLang(before);
       m.stop('lit');

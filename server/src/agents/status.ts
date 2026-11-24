@@ -79,10 +79,6 @@ export function statusForTool(name: string, input: Record<string, any>): { statu
     const label = officeLabel(name.slice('mcp__office__'.length), input);
     return { status: 'typing', activity: label ?? tr({ ko: '📋 사무실 업무', en: '📋 Office work' }) };
   }
-  if (name.startsWith('mcp__plugin_bio-research_') || name.startsWith('mcp__plugin_research-desk_')) {
-    const src = name.split('__')[1]?.replace(/^plugin_[^_]+_/, '');
-    return { status: 'researching', activity: tr({ ko: `📚 ${src} 검색 중`, en: `📚 Searching ${src}` }) };
-  }
   if (name === 'ToolSearch') return { status: 'thinking', activity: tr({ ko: '🧰 도구 준비 중', en: '🧰 Getting tools ready' }) };
   if (name.startsWith('mcp__lab__')) {
     const tool = name.slice('mcp__lab__'.length);
@@ -91,7 +87,7 @@ export function statusForTool(name: string, input: Record<string, any>): { statu
       const job = clip(String(input.name ?? ''), 30);
       return { status: 'remote', activity: tr({ ko: `🖥️ ${server}에 job 제출: ${job}`, en: `🖥️ Submitting job to ${server}: ${job}` }) };
     }
-    return { status: 'remote', activity: tr({ ko: `🖥️ 서버실: ${tool}`, en: `🖥️ Server room: ${tool}` }) };
+    return { status: 'remote', activity: tr({ ko: `🖥️ 원격 서버: ${tool}`, en: `🖥️ Remote server: ${tool}` }) };
   }
   return { status: 'typing', activity: `🔧 ${clip(name, 40)}` };
 }

@@ -286,17 +286,16 @@ export class OfficeScene {
     g.fillRect(104, 4, 112, 28);
     g.fillStyle = '#fbfbf7';
     g.fillRect(106, 6, 108, 24);
-    // poster: protein ribbon
+    // poster: a bar chart
     g.fillStyle = '#2e3440';
     g.fillRect(236, 6, 40, 24);
-    const helix = '#ff7b7b';
-    for (let i = 0; i < 18; i++) {
-      g.fillStyle = i % 6 < 3 ? helix : '#ffd27b';
-      g.fillRect(240 + i * 2, 18 + Math.round(Math.sin(i * 0.9) * 5), 2, 2);
-    }
-    g.fillStyle = '#7bc4ff';
-    g.fillRect(242, 26, 10, 2);
-    g.fillRect(258, 26, 12, 2);
+    const bars = [6, 10, 8, 14, 12, 17];
+    bars.forEach((h, i) => {
+      g.fillStyle = i === bars.length - 1 ? '#ffd27b' : '#7bc4ff';
+      g.fillRect(241 + i * 5, 27 - h, 3, h);
+    });
+    g.fillStyle = '#d8dee9';
+    g.fillRect(239, 27, 34, 1);
     // ceiling lights: a pool of warm light under each one
     for (const lx of COL_X.map((x) => x + 30)) {
       g.fillStyle = '#6e6456';

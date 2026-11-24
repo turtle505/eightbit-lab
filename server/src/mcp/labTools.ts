@@ -49,7 +49,7 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
     alwaysLoad: true,
     version: '1.0.0',
     instructions:
-      'Remote GPU servers of the protein lab. Check gpu_status before submit_job. Jobs run in a fresh directory on the server; ' +
+      'Remote GPU servers this office can submit jobs to. Check gpu_status before submit_job. Jobs run in a fresh directory on the server; ' +
       'use absolute paths or cd into the project inside `command`. Results stay on the server unless you call fetch_results.',
     tools: [
       tool('list_servers', 'List the lab GPU servers with type (ssh/slurm), online status and GPU usage.', {}, async () =>

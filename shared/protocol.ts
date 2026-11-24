@@ -222,7 +222,7 @@ export interface TodoItem {
   notes: Array<{ depth: number; text: string }>;
 }
 
-/** A "**[[Project]]**" block (name '' = lines directly under the section heading). */
+/** A block of to-dos: a "**Group**" inside a section, or (name '') the lines directly under the heading. */
 export interface TodoProject {
   name: string;
   /** Obsidian note the header links to, if any */
@@ -235,7 +235,9 @@ export interface TodoProject {
 }
 
 export interface TodoSection {
-  kind: 'schedule' | 'project' | 'study';
+  /** 'schedule' sections also show plain bullets (appointments); see obsidian.schedule */
+  kind: 'schedule' | 'tasks';
+  /** '' and line -1 = a note without headings, read whole */
   title: string;
   line: number;
   projects: TodoProject[];

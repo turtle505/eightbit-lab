@@ -118,19 +118,23 @@ export function renderTodos(st: UIState, send: Send) {
     const idle: string[] = [];
     for (const s of td.sections) {
       for (const p of s.projects) {
-        const fallback = s.kind === 'schedule' ? tr({ ko: '⏰ 일정', en: '⏰ Schedule' }) : s.title.replace(/^[^\p{L}\p{N}]+/u, '');
+        const fallback =
+          s.kind === 'schedule'
+            ? tr({ ko: '⏰ 일정', en: '⏰ Schedule' })
+            : s.title.replace(/^[^\p{L}\p{N}]+/u, '') || tr({ ko: '📝 할 일', en: '📝 To-dos' });
         const hasContent = p.items.length > 0 || (s.kind === 'schedule' && p.memo.length > 0);
         const isAddTarget = editing?.kind === 'add' && editing.header === p.line;
-        // section-level blocks without content (e.g. "Study" heading links) are noise
-        if (!p.name && !hasContent && !isAddTarget) continue;
+        // section-level blocks without content (e.g. a heading of links) are noise — but a note without headings
+        // has only its untitled block (line -1), which must stay so there is a ＋ to add the first to-do
+        if (!p.name && !hasContent && !isAddTarget && p.line !== -1) continue;
         (hasContent || isAddTarget ? parts : idle).push(projectHtml(p, td.vaultName, fallback));
       }
     }
     body =
       (parts.join('') ||
-        `<p class="muted small">${tr({ ko: '오늘 노트에 할 일이 없습니다. 프로젝트의 ＋ 로 추가하세요.', en: "No to-dos in today's note. Add one with a project's ＋." })}</p>`) +
+        `<p class="muted small">${tr({ ko: '오늘 노트에 할 일이 없습니다. 섹션의 ＋ 로 추가하세요.', en: "No to-dos in today's note. Add one with a section's ＋." })}</p>`) +
       (idle.length
-        ? `<details class="td-idle"><summary class="muted small">${tr({ ko: `할 일 없는 프로젝트 ${idle.length}개`, en: `${idle.length} projects with nothing to do` })}</summary>${idle.join('')}</details>`
+        ? `<details class="td-idle"><summary class="muted small">${tr({ ko: `할 일 없는 묶음 ${idle.length}개`, en: `${idle.length} groups with nothing to do` })}</summary>${idle.join('')}</details>`
         : '');
   }
   const idleOpen = box.querySelector<HTMLDetailsElement>('.td-idle')?.open;

@@ -4,6 +4,10 @@ port: 8787
 # Prompts sent to agents are English either way; this only picks the language people read.
 # The KO/EN toggle in the header overrides it and is remembered (in the DB).
 language: en
+# What your team works on, in one line. Every employee's prompt starts with "About this team: <domain>",
+# and the morning briefing picks new papers in this field. Empty = no field assumed.
+#   domain: "a deep-learning lab working on 3D protein structure"
+domain: ""
 # Subscription (Pro/Max) rate-limit protection: how many employees may work at the same time
 maxConcurrent: 3
 # Default employee permission mode (overridden by a role's permissionMode and the UI employee panel toggle)
@@ -14,7 +18,7 @@ permissionMode: auto
 # Health checks and GPU polling skip that round when over the limit; opening a session waits until a slot frees up.
 sshPerMinute: 5
 # For a per-server value, set sshPerMinute on the hosts entry (0 = no limit for that server):
-#   - { id: master, ssh: master, projectRoot: "~/project", sshPerMinute: 3 }
+#   - { id: gpu-a, ssh: gpu-a, projectRoot: "~/project", sshPerMinute: 3 }
 # How long to keep an employee's session open (minutes). An open session starts the next instruction immediately, and instructions sent mid-work are delivered right away.
 # After this long without work it closes, and the next instruction reopens it, resuming the conversation. 0 = never close (keeps using memory).
 sessionIdleMinutes: 30
@@ -30,10 +34,12 @@ workspaceRoot: ./workspaces
 # Today's to-dos panel: shows the checkboxes of an Obsidian daily note and lets you check/edit/add. Put your personal vault path in office.local.yaml.
 # obsidian:
 #   vault: /path/to/vault
-#   daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"      # {ddd} = Mon, Tue, ...
-#   createCommand: ["python3", ".scripts/daily_note.py", "--vault", "{vault}"]   # "create today's note" button (hidden if unset)
+#   daily: "{YYYY}-{MM}-{DD}.md"          # path inside the vault (default: Obsidian's own). Tokens: {YYYY} {MM} {DD} {ddd}=Mon, Tue, ...
+#   sections: []                          # "## " headings to read (substring, any case). Empty = every section; a note without headings is read whole
+#   schedule: [Schedule, 일정]             # headings treated as a schedule: plain bullets (appointments) are shown too, not just checkboxes
+#   createCommand: ["python3", "scripts/new_daily.py", "{vault}"]   # "create today's note" button: argv, no shell, cwd = vault (hidden if unset)
 # Model servers to use instead of the Claude subscription (linked from roles.yaml with provider: <id>). Only kind: ollama is supported for now.
 # Opens an SSH tunnel (localPort) to Ollama on ssh_host (127.0.0.1:remotePort) and runs the Claude Code session over its Anthropic-compatible API.
 # Ollama needs a context of 64k or more: OLLAMA_CONTEXT_LENGTH=65536 ollama serve. Put real hosts in office.local.yaml.
 # providers:
-#   - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
+#   - { id: workstation, name: "🖥 workstation", kind: ollama, ssh_host: workstation, remotePort: 11434, localPort: 11435, model: "qwen3:8b" }

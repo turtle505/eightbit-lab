@@ -2,7 +2,7 @@ import { tr } from '../../shared/i18n.ts';
 import type { ProjectView } from '../../shared/protocol.ts';
 import type { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
-import { commonPrompt, type RoleConfig } from './config.ts';
+import type { RoleConfig } from './config.ts';
 import type { Store } from './db.ts';
 import type { HostRegistry } from './hosts.ts';
 
@@ -67,6 +67,8 @@ export class ProjectRegistry {
     private store: Store,
     private agents: AgentManager,
     private hosts: HostRegistry,
+    /** teamPrompt(): the field, shared rules and server etiquette every session starts with */
+    private team = '',
   ) {}
 
   /** Role for one session. Throws if its host is gone or not reachable yet. */
@@ -84,7 +86,7 @@ export class ProjectRegistry {
       sprite: sessionSprite(projectId, sessionId),
       useWorktree: false,
       autoAllow: [...PROJECT_AUTO_ALLOW],
-      systemPrompt: [commonPrompt(), prompt(p.name, cwd)].filter(Boolean).join('\n\n'),
+      systemPrompt: [this.team, prompt(p.name, cwd)].filter(Boolean).join('\n\n'),
       cwd,
       host: p.hostId,
       kind: 'project',

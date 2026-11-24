@@ -16,8 +16,8 @@ routines:
       Prepare the morning briefing.
       1. Use mcp__office__office_status and mcp__office__list_tasks to get the state of staff, the task board, jobs and GPU servers
       2. Use mcp__office__office_activity (hours: 18) to summarise what staff did since yesterday evening
-      3. From bioRxiv preprints posted in the last 1-2 days, pick up to 5 related to protein structure representation/prediction/generation
-         (diffusion, flow matching, equivariant, AlphaFold family, protein design) and introduce each in one line (with link)
+      3. If your prompt says what this team works on ("About this team"), pick up to 5 papers or preprints from the last 1-2 days
+         in that field and introduce each in one line (with link). If it doesn't, skip this step.
       4. Save to reports/daily/<today's date>-morning.md
       5. Final reply: 3 key lines + up to 3 "decisions for the manager today". Don't delegate to staff; only suggest.
 

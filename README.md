@@ -1,10 +1,10 @@
 **English** | [한국어](README.ko.md)
 
-# 🧬 8-bit Lab
+# 👾 8-bit Lab
 
 **A pixel-art office where your AI agents work.** 8-bit Lab runs several Claude Code agents ("employees") side by side, and shows them as little characters at their desks. You're the manager: you hand out work, approve anything risky, and read their reports.
 
-It was built for a protein-structure deep-learning lab, so it also knows how to submit and watch GPU jobs on remote servers. But it works fine for any research or day-to-day work.
+It started in a research lab, so it also knows how to submit and watch GPU jobs on remote servers, but nothing assumes a field: tell it what your team works on in one line, and the employees take it from there.
 
 - 🧑‍💻 **Six employees out of the box**: a literature researcher, an evaluation analyst, two research aides, an assistant, and a lead engineer who can hand work to the others.
 - 👀 **See what everyone is doing**: who's typing, running commands, searching the web, or waiting for you.
@@ -39,7 +39,7 @@ Open **http://localhost:5173**. That's it: no config is needed to start.
 
 ### Your first five minutes
 
-1. **Click an employee** (or press <kbd>1</kbd>–<kbd>6</kbd>) and type an instruction in the box at the bottom, e.g. *"Find three recent papers on protein structure diffusion models and summarise them."*
+1. **Click an employee** (or press <kbd>1</kbd>–<kbd>6</kbd>) and type an instruction in the box at the bottom, e.g. *"Find three recent papers on retrieval-augmented generation and summarise them."*
 2. Watch them work. The speech bubble shows what they're doing right now.
 3. If they **raise a hand with a `!`**, they need your OK: approve or deny in the yellow approval panel.
 4. When they finish, the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
@@ -92,6 +92,7 @@ Everything lives in `config/`. **Don't edit the committed files for personal set
 
 ```yaml
 # config/office.local.yaml (a typical one)
+domain: "a computer-vision lab working on video understanding"   # what your team works on, in one line
 language: en              # en | ko: UI and the language employees report in
 maxConcurrent: 3          # employees working at the same time (protects your subscription's rate limit)
 researchRepo: ~/research/my-model   # optional: each engineer gets their own git worktree of this repo
@@ -100,14 +101,14 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 
 | File | What it controls |
 |---|---|
-| `config/office.yaml` | Concurrency, model, language, idle timeout, hosts, local models |
+| `config/office.yaml` | Your field (`domain`), concurrency, model, language, idle timeout, hosts, local models |
 | `config/roles.yaml` | The employees: name, role prompt, tools they may use without asking (`autoAllow`), sprite colours |
 | `config/routines.yaml` | Starter routines: weekday 09:00 morning briefing, weekday 18:00 evening report, Friday 17:00 weekly review (off) |
 | `config/servers.local.yaml` | Your GPU servers (copy `servers.example.yaml`) |
 
 **Workspaces.** With `researchRepo` set, each engineer works in their own git worktree (branch `office/<id>`), so they don't step on each other. Without it, everyone shares `workspaces/shared`. Reports go to `workspaces/<employee>/reports/`.
 
-**The team.** The `common:` block at the top of `roles.yaml` is shared by everyone: report honestly, read before changing, be polite to lab servers, use the report format. Each employee then adds their own role:
+**The team.** Every employee's prompt starts with `About this team: <domain>`, then the `common:` block of `roles.yaml` (report honestly, read before changing, use the report format), and — only if you have GPU servers or remote hosts — the `servers:` block of remote-server etiquette. Each employee then adds their own role. To specialise someone further (say, the evaluation analyst should know your field's metrics), override their `systemPrompt` in `config/roles.local.yaml`; it's merged by `id`, and the same goes for `autoAllow` (e.g. an MCP server you've installed for paper search), as in the example below.
 
 | id | Who | What they do |
 |---|---|---|
@@ -116,6 +117,17 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
 | `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
+
+```yaml
+# config/roles.local.yaml
+employees:
+  - id: lit
+    autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite, mcp__arxiv]   # + your MCP server
+  - id: eval
+    systemPrompt: |
+      ## Your role: Evaluation Analyst
+      You compute and interpret mAP, IoU and per-class recall for our detection models …
+```
 
 Removing an employee from `roles.yaml` doesn't lose their task cards. They go back to *unassigned*.
 
@@ -174,13 +186,17 @@ hosts:
 <details>
 <summary><b>✅ Today's to-dos from Obsidian</b></summary>
 
-Point the office at your vault and the **✅ Today's to-dos** panel shows today's daily note. You can tick, edit (double-click), add and delete items. Changes are written straight to the note, and edits made in Obsidian show up within seconds. If the line changed in Obsidian meanwhile, the office refuses your edit rather than overwrite it.
+Point the office at your vault and the **✅ Today's to-dos** panel shows the checkboxes in today's daily note. You can tick, edit (double-click), add and delete items. Changes are written straight to the note, and edits made in Obsidian show up within seconds. If the line changed in Obsidian meanwhile, the office refuses your edit rather than overwrite it.
 
 ```yaml
 obsidian:
   vault: /path/to/vault
-  daily: "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md"
+  daily: "{YYYY}-{MM}-{DD}.md"     # Obsidian's default; e.g. "Daily/{YYYY}/{YYYY}.{MM}.{DD}.{ddd}.md" for a folder per year
+  # sections: [Today, Projects]    # only these "## " headings (default: all of them)
+  # schedule: [Schedule, 일정]      # headings whose plain bullets are appointments, shown too
 ```
+
+Any plain note works: every `- [ ]` under a `## ` heading is shown, grouped by heading, and a note without headings is read as one list. Optionally, a line that is only **bold text** starts a named group inside a section, and a trailing `↻3` on an item is shown as "carried over 3 times".
 </details>
 
 <details>
@@ -201,7 +217,7 @@ Any employee can run on an Ollama model instead of your subscription, which is g
 
 ```yaml
 providers:
-  - { id: desktop, name: "🖥 desktop", kind: ollama, ssh_host: desktop, remotePort: 11434, localPort: 11435, model: "qwen3.5:9b" }
+  - { id: workstation, name: "🖥 workstation", kind: ollama, ssh_host: workstation, remotePort: 11434, localPort: 11435, model: "qwen3:8b" }
 ```
 
 - The office opens the ssh tunnel itself and health-checks it.

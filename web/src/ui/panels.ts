@@ -104,7 +104,7 @@ export function providerOf(st: UIState, e: EmployeeView) {
   return e.provider ? (st.snap.providers ?? []).find((p) => p.id === e.provider) ?? null : null;
 }
 
-/** "🖥 desktop · qwen3.5:9b · connected" — plain text when `plainText` (console table) */
+/** "🖥 workstation · qwen3:8b · connected" — plain text when `plainText` (console table) */
 export function providerBadge(st: UIState, e: EmployeeView, plainText = false): string {
   if (!e.provider) return '';
   const p = providerOf(st, e);
