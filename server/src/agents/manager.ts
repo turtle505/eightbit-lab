@@ -819,10 +819,12 @@ export class AgentManager {
         this.set(e, 'idle', tr({ ko: '☕ 대기 중', en: '☕ Idle' }));
         return;
       }
-      e.view.sessionId = result.threadId;
-      this.store.setSetting(codexThreadKey(e.role), result.threadId);
       e.lastText = result.text || e.lastText;
       const ok = result.status === 'completed';
+      if (ok) {
+        e.view.sessionId = result.threadId;
+        this.store.setSetting(codexThreadKey(e.role), result.threadId);
+      }
       const failure = result.error || result.status;
       this.log(e, ok ? 'result' : 'error', ok ? tr({ ko: 'Codex 작업 완료', en: 'Codex turn completed' }) : `Codex: ${failure}`);
       this.set(e, ok ? 'done' : 'error', ok ? tr({ ko: '✅ 완료', en: '✅ Done' }) : `⚠️ ${clip(failure, 55)}`);

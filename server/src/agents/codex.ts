@@ -110,12 +110,14 @@ export class CodexTurn {
     const approvalPolicy = ask ? 'untrusted' : 'on-request';
     await this.request('initialize', { clientInfo: { name: 'eightbit_lab', title: '8-bit Lab', version: '1.0.0' }, capabilities: { experimentalApi: true } });
     this.write({ method: 'initialized', params: {} });
+    const config = await this.request('config/read', { cwd });
+    const model = typeof config.config?.model === 'string' ? config.config.model : undefined;
     const response = priorThread
-      ? await this.request('thread/resume', { threadId: priorThread, excludeTurns: true, dynamicTools: this.tools.specs })
-      : await this.request('thread/start', { cwd, approvalPolicy, sandbox: 'workspace-write', serviceName: 'eightbit_lab', dynamicTools: this.tools.specs });
+      ? await this.request('thread/resume', { threadId: priorThread, model, excludeTurns: true, dynamicTools: this.tools.specs })
+      : await this.request('thread/start', { cwd, model, approvalPolicy, sandbox: 'workspace-write', serviceName: 'eightbit_lab', dynamicTools: this.tools.specs });
     this.threadId = response.thread?.id;
     if (!this.threadId) throw new Error('Codex did not return a thread id');
-    const started = await this.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: prompt }], cwd, approvalPolicy, sandboxPolicy: { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: false } });
+    const started = await this.request('turn/start', { threadId: this.threadId, input: [{ type: 'text', text: prompt }], model, cwd, approvalPolicy, sandboxPolicy: { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: false } });
     this.turnId = started.turn?.id ?? '';
     return this.done;
   }
