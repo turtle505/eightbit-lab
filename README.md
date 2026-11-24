@@ -1,26 +1,28 @@
-**English** | [한국어](README.ko.md)
+<p align="center"><img src="docs/readme-hero.svg" alt="Pixel-art illustration of the 8-bit Lab office" width="100%"></p>
 
-[![CI](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml)
+<h1 align="center">👾 8-bit Lab</h1>
 
-# 👾 8-bit Lab
+<p align="center"><strong>A pixel-art office for your AI team.</strong><br>Assign work to Claude Code or Codex agents, watch them work, approve requests, and collect their reports in one place.</p>
 
-**A pixel-art office where your AI agents work.** 8-bit Lab runs several Claude Code agents ("employees") side by side, and shows them as little characters at their desks. You're the manager: you hand out work, approve anything risky, and read their reports.
+<p align="center">
+  <a href="https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml"><img src="https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6fa3dc" alt="MIT license"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/Node.js-22.13%2B-5fae7d?logo=nodedotjs&amp;logoColor=white" alt="Node.js 22.13 or newer"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&amp;logoColor=white" alt="TypeScript 7"></a>
+  <a href="README.ko.md"><img src="https://img.shields.io/badge/language-EN%20%2F%20KO-f0c050" alt="English and Korean"></a>
+</p>
 
-**Why not just open a few `claude` terminals?** Because here they work as a team you can manage: one place to approve what they want to do, a board of tasks and who has them, GPU jobs that report back when they finish, and their reports collected in one feed — while you watch the office instead of tabbing between terminals.
+<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#quick-start">Quick start</a> · <a href="#everyday-use">Everyday use</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
 
-It started in a research lab, so it also knows how to submit and watch GPU jobs on remote servers, but nothing assumes a field: tell it what your team works on in one line, and the employees take it from there.
+| Your team | Your desk |
+|---|---|
+| 🧑‍💻 **Six employees** for research, evaluation, engineering, and coordination. Choose Claude Code or Codex per employee. | 👀 **Live pixel office** shows who's thinking, editing, running commands, or waiting for you. |
+| 📋 **Task board & reports** keep assignments, results, and saved Markdown reports together. | ✋ **Approval cards** put sensitive actions in front of you; remote lab access always asks. |
+| ⏰ **Routines** schedule recurring work through the assistant. | 🖥️ **GPU jobs** run on SSH or Slurm servers and report back when finished. |
 
-- 🧑‍💻 **Six employees out of the box**: a literature researcher, an evaluation analyst, two research aides, an assistant, and a lead engineer who can hand work to the others.
-- 👀 **See what everyone is doing**: who's typing, running commands, searching the web, or waiting for you.
-- ✋ **You stay in control**: anything that reaches a remote server always asks first; other unclear actions come to you as approval cards, and a 🔒 task asks for everything (see [Safety](#safety)).
-- 📨 **Reports come to you**: finished work and saved report files appear in a chat-like feed.
-- ⏰ **Routines**: "every weekday at 9, brief me on new papers". Just ask the assistant.
-- 🖥️ **GPU jobs**: submit, watch and fetch jobs on ssh or Slurm servers. The employee who submitted a job reports back when it finishes.
-- 🌐 **Korean / English**: switch the whole office with one button.
+Runs locally on macOS or Linux using your own CLI login. Claude Code requires a Claude Pro/Max plan; Codex uses a ChatGPT login. The app does not need an API key. Set your team's field in one line, or use the defaults.
 
-It runs locally on your machine and uses your own **Claude Pro/Max subscription** through the `claude` CLI login. There's no API key.
-
-> **Status:** a personal project, used daily but young — expect rough edges. It is not affiliated with or endorsed by Anthropic.
+> **Project status:** Built for daily use and still evolving. Independent of Anthropic and OpenAI.
 
 ---
 

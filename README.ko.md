@@ -1,26 +1,28 @@
-[English](README.md) | **한국어**
+<p align="center"><img src="docs/readme-hero.svg" alt="8-bit Lab 픽셀 사무실 그림" width="100%"></p>
 
-[![CI](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml)
+<h1 align="center">👾 8-bit Lab</h1>
 
-# 👾 8-bit Lab
+<p align="center"><strong>AI 팀이 일하는 픽셀아트 사무실.</strong><br>Claude Code 또는 Codex 직원에게 일을 맡기고, 진행 상황을 보고, 필요한 작업을 승인하고, 보고를 한곳에서 받으세요.</p>
 
-**AI 에이전트들이 일하는 픽셀아트 사무실.** 8-bit Lab은 Claude Code 에이전트("직원") 여러 명을 동시에 돌리고, 각자 책상에서 일하는 작은 캐릭터로 보여줍니다. 나는 매니저입니다. 일을 나눠 주고, 위험한 작업은 승인하고, 보고를 받습니다.
+<p align="center">
+  <a href="https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml"><img src="https://github.com/turtle505/eightbit-lab/actions/workflows/ci.yml/badge.svg" alt="CI 상태"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6fa3dc" alt="MIT 라이선스"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/Node.js-22.13%2B-5fae7d?logo=nodedotjs&amp;logoColor=white" alt="Node.js 22.13 이상"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&amp;logoColor=white" alt="TypeScript 7"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/language-EN%20%2F%20KO-f0c050" alt="영어와 한국어"></a>
+</p>
 
-**그냥 터미널에서 `claude`를 여러 개 띄우면 안 되나요?** 여기서는 관리할 수 있는 팀으로 일합니다. 하려는 작업을 한곳에서 승인하고, 어떤 일을 누가 맡았는지 보드로 보고, GPU job이 끝나면 알아서 보고가 오고, 보고서가 한 피드에 모입니다. 터미널 탭을 오가는 대신 사무실을 지켜보면 됩니다.
+<p align="center"><a href="README.md">English</a> · <strong>한국어</strong> &nbsp;|&nbsp; <a href="#빠른-시작">빠른 시작</a> · <a href="#평소에-쓰는-법">사용법</a> · <a href="#추가-기능">기능</a> · <a href="#안전장치">안전장치</a></p>
 
-연구실에서 시작해서 원격 GPU 서버에 job을 올리고 지켜보는 기능도 있지만, 특정 분야를 전제하지 않습니다. 우리 팀이 하는 일을 한 줄로 알려 주면 직원들이 거기에 맞춰 일합니다.
+| 우리 팀 | 내 책상 |
+|---|---|
+| 🧑‍💻 **기본 직원 6명**이 리서치·평가·개발·조율을 맡습니다. 직원마다 Claude Code와 Codex를 고를 수 있습니다. | 👀 **실시간 픽셀 사무실**에서 생각·편집·명령 실행·승인 대기 상태를 봅니다. |
+| 📋 **작업 보드와 보고서**에 담당자, 결과, 저장된 Markdown 보고서가 모입니다. | ✋ **승인 카드**에서 민감한 작업을 확인합니다. 원격 랩 접근은 항상 묻습니다. |
+| ⏰ **루틴**으로 반복 작업을 예약합니다. | 🖥️ **GPU 작업**을 SSH·Slurm 서버에서 실행하고 끝나면 결과를 보고받습니다. |
 
-- 🧑‍💻 **기본 직원 6명**: 문헌 리서처, 평가 분석가, 연구 보조 둘, 비서, 그리고 다른 직원에게 일을 나눠 줄 수 있는 실행 팀장.
-- 👀 **누가 뭘 하는지 한눈에**: 타이핑 중인지, 명령을 실행 중인지, 웹을 찾는 중인지, 내 승인을 기다리는지.
-- ✋ **통제권은 나에게**: 원격 서버에 닿는 작업은 항상 먼저 묻고, 그 밖에 애매한 작업은 승인 카드로 올라오며, 🔒 작업은 모든 도구를 묻습니다([안전장치](#안전장치) 참고).
-- 📨 **보고가 알아서 도착**: 끝난 일과 저장된 보고서가 채팅처럼 피드에 쌓입니다.
-- ⏰ **루틴**: "평일 9시마다 새 논문 브리핑해줘" — 비서에게 말만 하면 됩니다.
-- 🖥️ **GPU job**: ssh·Slurm 서버에 job을 올리고, 지켜보고, 결과를 가져옵니다. job이 끝나면 올린 직원이 결과를 보고합니다.
-- 🌐 **한국어 / 영어**: 버튼 하나로 사무실 전체 언어를 바꿉니다.
+macOS 또는 Linux에서 로컬로 실행하며 CLI 로그인으로 사용합니다. Claude Code는 Claude Pro/Max 요금제, Codex는 ChatGPT 로그인을 사용합니다. 앱에 API 키는 필요하지 않습니다. 팀의 분야를 한 줄로 설정하거나 기본값으로 시작하세요.
 
-내 컴퓨터에서 로컬로 돌고, `claude` CLI 로그인을 통해 내 **Claude Pro/Max 구독**을 씁니다. API 키는 필요 없습니다.
-
-> **상태:** 매일 쓰고 있지만 아직 어린 개인 프로젝트라 거친 부분이 있을 수 있습니다. Anthropic과 관계없는 비공식 프로젝트입니다.
+> **프로젝트 상태:** 매일 사용하며 계속 다듬고 있습니다. Anthropic·OpenAI와 무관한 독립 프로젝트입니다.
 
 ---
 

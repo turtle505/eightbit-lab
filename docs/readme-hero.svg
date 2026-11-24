@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">8-bit Lab pixel office</title>
+  <desc id="desc">Three small agents working at desks beneath a task board and report feed.</desc>
+  <rect width="1200" height="360" rx="18" fill="#141923"/>
+  <rect x="20" y="20" width="1160" height="320" rx="10" fill="#202633" stroke="#45506a" stroke-width="4"/>
+  <rect x="20" y="20" width="1160" height="42" rx="10" fill="#30384a"/>
+  <rect x="20" y="48" width="1160" height="14" fill="#30384a"/>
+  <rect x="42" y="36" width="10" height="10" fill="#ff7979"/>
+  <rect x="62" y="36" width="10" height="10" fill="#f9ca73"/>
+  <rect x="82" y="36" width="10" height="10" fill="#76d9ac"/>
+  <text x="114" y="47" fill="#e7ecf5" font-family="monospace" font-weight="bold" font-size="20">8-BIT LAB</text>
+  <text x="1040" y="46" fill="#9eabc2" font-family="monospace" font-size="14">● ONLINE</text>
+
+  <rect x="42" y="82" width="276" height="202" rx="5" fill="#283044" stroke="#45506a" stroke-width="3"/>
+  <text x="60" y="109" fill="#f6d58f" font-family="monospace" font-weight="bold" font-size="17">TASK BOARD</text>
+  <rect x="60" y="128" width="240" height="39" rx="3" fill="#3a4863"/>
+  <rect x="70" y="139" width="16" height="16" fill="#75d8a9"/>
+  <text x="98" y="153" fill="#e7ecf5" font-family="monospace" font-size="13">Find new papers</text>
+  <rect x="60" y="177" width="240" height="39" rx="3" fill="#3a4863"/>
+  <rect x="70" y="188" width="16" height="16" fill="#8ebaf3"/>
+  <text x="98" y="202" fill="#e7ecf5" font-family="monospace" font-size="13">Run evaluation</text>
+  <rect x="60" y="226" width="240" height="39" rx="3" fill="#3a4863"/>
+  <rect x="70" y="237" width="16" height="16" fill="#f6d58f"/>
+  <text x="98" y="251" fill="#e7ecf5" font-family="monospace" font-size="13">Review results</text>
+
+  <rect x="882" y="82" width="276" height="202" rx="5" fill="#283044" stroke="#45506a" stroke-width="3"/>
+  <text x="900" y="109" fill="#f6d58f" font-family="monospace" font-weight="bold" font-size="17">REPORT FEED</text>
+  <rect x="900" y="128" width="240" height="57" rx="3" fill="#354056"/>
+  <rect x="911" y="139" width="12" height="12" fill="#75d8a9"/>
+  <text x="933" y="150" fill="#e7ecf5" font-family="monospace" font-size="12">Ada finished research</text>
+  <text x="911" y="171" fill="#9eabc2" font-family="monospace" font-size="11">3 papers · ready to read</text>
+  <rect x="900" y="195" width="240" height="57" rx="3" fill="#354056"/>
+  <rect x="911" y="206" width="12" height="12" fill="#8ebaf3"/>
+  <text x="933" y="217" fill="#e7ecf5" font-family="monospace" font-size="12">Gauss sent a report</text>
+  <text x="911" y="238" fill="#9eabc2" font-family="monospace" font-size="11">Metrics · charts · notes</text>
+
+  <rect x="337" y="82" width="526" height="202" rx="5" fill="#252d3d" stroke="#45506a" stroke-width="3"/>
+  <rect x="350" y="97" width="500" height="70" fill="#303f5a"/>
+  <rect x="366" y="110" width="75" height="44" fill="#202a3b"/>
+  <rect x="377" y="121" width="53" height="22" fill="#74a8cf"/>
+  <rect x="462" y="110" width="75" height="44" fill="#202a3b"/>
+  <rect x="473" y="121" width="53" height="22" fill="#a3c0df"/>
+  <rect x="558" y="110" width="75" height="44" fill="#202a3b"/>
+  <rect x="569" y="121" width="53" height="22" fill="#74a8cf"/>
+  <rect x="654" y="110" width="75" height="44" fill="#202a3b"/>
+  <rect x="665" y="121" width="53" height="22" fill="#a3c0df"/>
+  <rect x="750" y="110" width="75" height="44" fill="#202a3b"/>
+  <rect x="761" y="121" width="53" height="22" fill="#74a8cf"/>
+  <rect x="350" y="250" width="500" height="20" fill="#3b4557"/>
+  <rect x="375" y="228" width="110" height="22" fill="#716857"/>
+  <rect x="545" y="228" width="110" height="22" fill="#716857"/>
+  <rect x="715" y="228" width="110" height="22" fill="#716857"/>
+  <rect x="399" y="193" width="62" height="35" fill="#202a3b" stroke="#82c4e9" stroke-width="3"/>
+  <rect x="409" y="202" width="42" height="16" fill="#71add2"/>
+  <rect x="569" y="193" width="62" height="35" fill="#202a3b" stroke="#8fddab" stroke-width="3"/>
+  <rect x="579" y="202" width="42" height="16" fill="#7ccf9f"/>
+  <rect x="739" y="193" width="62" height="35" fill="#202a3b" stroke="#f4cf87" stroke-width="3"/>
+  <rect x="749" y="202" width="42" height="16" fill="#e5c27c"/>
+  <rect x="412" y="166" width="32" height="27" fill="#f3c5a0"/>
+  <rect x="408" y="160" width="40" height="11" fill="#735b5b"/>
+  <rect x="407" y="218" width="42" height="10" fill="#6479b8"/>
+  <rect x="582" y="166" width="32" height="27" fill="#dca581"/>
+  <rect x="578" y="160" width="40" height="11" fill="#4d4e67"/>
+  <rect x="577" y="218" width="42" height="10" fill="#718e85"/>
+  <rect x="752" y="166" width="32" height="27" fill="#f3c5a0"/>
+  <rect x="748" y="160" width="40" height="11" fill="#9f705a"/>
+  <rect x="747" y="218" width="42" height="10" fill="#97779f"/>
+  <text x="378" y="303" fill="#a9b6c9" font-family="monospace" font-size="13">Assign work</text>
+  <text x="552" y="303" fill="#a9b6c9" font-family="monospace" font-size="13">Watch it happen</text>
+  <text x="753" y="303" fill="#a9b6c9" font-family="monospace" font-size="13">Get reports</text>
+  <text x="41" y="319" fill="#78869f" font-family="monospace" font-size="12">LOCAL-FIRST · CLAUDE CODE + CODEX · EN / KO</text>
+</svg>
