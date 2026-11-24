@@ -345,18 +345,19 @@ export function renderEmployeePanel(st: UIState, send: Send) {
   const box = $('employee');
   const e = st.snap.employees.find((x) => x.id === st.selected);
   if (!e) {
-    if (panelFor !== `none:${st.view}:${getLang()}`) {
-      panelFor = `none:${st.view}:${getLang()}`;
-      const n = st.snap.employees.length;
+    const n = st.snap.employees.length;
+    // the count is part of the key: the first render can come before the snapshot (n = 0)
+    if (panelFor !== `none:${st.view}:${getLang()}:${n}`) {
+      panelFor = `none:${st.view}:${getLang()}:${n}`;
       box.innerHTML =
         st.view === 'console'
           ? `<p class="muted hint">${tr({
-              ko: `직원 표에서 행을 클릭하거나 <kbd>1</kbd>–<kbd>${n}</kbd>, <kbd>j</kbd>/<kbd>k</kbd>로 선택하세요. 로그와 지시 입력이 여기에 표시됩니다.`,
-              en: `Click a row in the staff table or press <kbd>1</kbd>–<kbd>${n}</kbd>, <kbd>j</kbd>/<kbd>k</kbd>. Logs and the instruction box appear here.`,
+              ko: `직원 표에서 행을 클릭하거나 <kbd>1</kbd>–<kbd>${n}</kbd>, <kbd>j</kbd>/<kbd>k</kbd>로 선택하세요. 그 직원의 로그가 여기에 표시되고, 지시는 직원 표 아래 입력칸에서 보냅니다.`,
+              en: `Click a row in the staff table or press <kbd>1</kbd>–<kbd>${n}</kbd>, <kbd>j</kbd>/<kbd>k</kbd>. Their log appears here; send instructions from the box under the staff table.`,
             })}</p>`
           : `<p class="muted hint">${tr({
-              ko: `사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>${n}</kbd>를 누르세요. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.`,
-              en: `Click someone in the office or press <kbd>1</kbd>–<kbd>${n}</kbd>. Drop a task card on an employee to assign it.`,
+              ko: `사무실에서 직원을 클릭하거나 숫자키 <kbd>1</kbd>–<kbd>${n}</kbd>를 누르면 그 직원의 로그가 여기에 나오고, 사무실 바로 아래 입력칸으로 지시할 수 있습니다. 작업 카드를 직원에게 끌어다 놓으면 바로 배정됩니다.`,
+              en: `Click someone in the office or press <kbd>1</kbd>–<kbd>${n}</kbd> to see their log here and instruct them from the box right under the office. Drop a task card on an employee to assign it.`,
             })}</p>`;
     }
     return;
@@ -368,41 +369,10 @@ export function renderEmployeePanel(st: UIState, send: Send) {
     box.innerHTML = `
       <div id="emp-head"></div>
       <div id="emp-log" class="log"></div>
-      <form id="emp-form" class="instruct">
-        <textarea id="emp-input" rows="2" placeholder="${esc(
-          tr({
-            ko: `${short(e.name)}에게 지시하기… (Enter 전송, Shift+Enter 줄바꿈, 파일은 끌어다 놓기)`,
-            en: `Instruct ${short(e.name)}… (Enter to send, Shift+Enter for a new line, drop files here)`,
-          }),
-        )}"></textarea>
-        <div id="emp-chips" class="att-chips" hidden></div>
-        <div class="row">
-          <button class="primary" type="submit">${tr({ ko: '지시', en: 'Send' })}</button>
-          <button type="button" id="emp-attach" class="icon-btn attach-btn" title="${tr({ ko: '파일 첨부', en: 'Attach files' })}">📎</button>
-          <button type="button" id="emp-stop">${tr({ ko: '중지', en: 'Stop' })}</button>
-          <button type="button" id="emp-reset" title="${tr({ ko: '대화 맥락을 비우고 새 세션으로 시작', en: 'Clear the conversation and start a new session' })}">${tr({ ko: '새 세션', en: 'New session' })}</button>
-        </div>
-      </form>`;
-    const input = $('emp-input') as HTMLTextAreaElement;
-    const att = bindAttach($('emp-form'), $('emp-attach'), $('emp-chips'));
-    const submit = () => {
-      const text = input.value.trim();
-      if (att.busy()) return void alert(tr({ ko: '첨부 파일을 올리는 중입니다. 잠시 후 다시 보내 주세요.', en: 'Attachments are still uploading. Please send again in a moment.' }));
-      const attachmentIds = att.take();
-      if (!text && !attachmentIds.length) return;
-      send({ t: 'instruct', employeeId: e.id, text, attachmentIds });
-      input.value = '';
-    };
-    $('emp-form').addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      submit();
-    });
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
-        ev.preventDefault();
-        submit();
-      }
-    });
+      <div class="row emp-actions">
+        <button type="button" id="emp-stop">${tr({ ko: '중지', en: 'Stop' })}</button>
+        <button type="button" id="emp-reset" title="${tr({ ko: '대화 맥락을 비우고 새 세션으로 시작', en: 'Clear the conversation and start a new session' })}">${tr({ ko: '새 세션', en: 'New session' })}</button>
+      </div>`;
     $('emp-stop').addEventListener('click', () => send({ t: 'stop', employeeId: e.id }));
     $('emp-reset').addEventListener('click', () => {
       if (confirm(tr({ ko: '대화 맥락을 비우고 새 세션으로 시작할까요?', en: 'Clear the conversation and start a new session?' }))) send({ t: 'resetSession', employeeId: e.id });

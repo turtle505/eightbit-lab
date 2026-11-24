@@ -4,7 +4,7 @@ import { tr } from '../../../shared/i18n.ts';
 
 const KEY = 'eightbit-lab:view';
 /** Panels that exist once and move into whichever view is active. */
-const SHARED = ['approvals', 'employee', 'routines', 'jobs', 'report-feed', 'todos'];
+const SHARED = ['command', 'approvals', 'employee', 'routines', 'jobs', 'report-feed', 'todos'];
 const VIEWS: ViewMode[] = ['game', 'console', 'reports', 'projects'];
 const isView = (v: unknown): v is ViewMode => VIEWS.includes(v as ViewMode);
 

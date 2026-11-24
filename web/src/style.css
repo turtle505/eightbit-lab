@@ -1557,3 +1557,18 @@ body .md-body h4 {
 .diff .d-del { background: color-mix(in srgb, var(--bad) 18%, transparent); }
 .diff .d-ctx { color: var(--muted); }
 .diff .d-gap { color: var(--muted); text-align: center; }
+
+/* command bar: instruct whoever is selected, right under the office (or the staff table) */
+.command { padding: 8px 10px; }
+.cmd-form { display: flex; align-items: flex-end; gap: 6px; }
+.cmd-form select { flex: 0 0 auto; max-width: 11em; font: inherit; padding: 4px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.cmd-form textarea { flex: 1; min-width: 0; resize: none; font: inherit; line-height: 1.4; padding: 5px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); overflow-y: hidden; white-space: pre-wrap; }
+.cmd-form textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cmd-hint { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-hint[hidden] { display: none; }
+.emp-actions { margin-top: 6px; }
+@media (max-width: 700px) {
+  .cmd-form { flex-wrap: wrap; }
+  .cmd-form select { flex: 1 0 100%; max-width: none; }
+  .cmd-hint { display: none; }
+}

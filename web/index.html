@@ -27,6 +27,7 @@
         <div id="office" class="office">
           <div id="overlay" class="overlay"></div>
         </div>
+        <div data-slot="command"><section id="command" class="panel command"></section></div>
         <div data-slot="approvals"><section id="approvals" class="panel approvals" hidden></section></div>
         <div data-slot="report-feed"><section id="report-feed" class="panel report-feed"></section></div>
         <div data-slot="employee"><section id="employee" class="panel employee"></section></div>
@@ -65,6 +66,7 @@
             <div class="c-head"><h2 data-i18n="c.staff">직원</h2><span class="muted small"><kbd>1</kbd>–<kbd>5</kbd> <span data-i18n="k.select">선택</span> · <kbd>j</kbd>/<kbd>k</kbd> <span data-i18n="k.move">이동</span> · <kbd>/</kbd> <span data-i18n="k.instruct">지시</span> · <kbd>Esc</kbd> <span data-i18n="k.clear">해제</span> · <kbd>`</kbd> <span data-i18n="k.view">화면 전환</span></span></div>
             <div id="c-staff"></div>
           </section>
+          <div data-slot="command"></div>
           <section class="panel">
             <div class="c-head"><h2 data-i18n="c.tasks">작업</h2></div>
             <form id="c-task-form" class="c-task-form">

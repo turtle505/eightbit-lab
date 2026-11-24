@@ -18,6 +18,7 @@ import {
 } from './ui/panels.ts';
 import { applyView, initialView, viewTitle } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
+import { renderCommandBar } from './ui/command.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
 import { initReports, onReportContent, renderReports, unreadReports } from './ui/reports.ts';
 import { renderProjects, setHostDirs } from './ui/projects.ts';
@@ -77,6 +78,7 @@ function renderAll() {
   // shared panels (live in whichever view is active)
   renderTodos(state, send);
   renderReportFeed(state);
+  renderCommandBar(state, send, select);
   renderApprovals(state, send);
   renderEmployeePanel(state, send);
   renderRoutines(state, send);
@@ -298,6 +300,12 @@ window.addEventListener('keydown', (ev) => {
   const n = Number(ev.key);
   if (n >= 1 && n <= emps.length) return select(emps[n - 1].id);
   if (ev.key === 'Escape') return select(null);
+  if (ev.key === '/') {
+    ev.preventDefault();
+    if (!state.selected && emps[0]) select(emps[0].id);
+    document.getElementById('cmd-input')?.focus();
+    return;
+  }
   if (state.view !== 'console') return;
 
   // console-only shortcuts
@@ -305,12 +313,6 @@ window.addEventListener('keydown', (ev) => {
     const i = emps.findIndex((e) => e.id === state.selected);
     const next = i < 0 ? 0 : (i + (ev.key === 'j' ? 1 : -1) + emps.length) % emps.length;
     return select(emps[next]?.id ?? null);
-  }
-  if (ev.key === '/') {
-    ev.preventDefault();
-    if (!state.selected && emps[0]) select(emps[0].id);
-    document.getElementById('emp-input')?.focus();
-    return;
   }
   const first = state.snap.approvals[0];
   if (first && (ev.key === 'a' || ev.key === 'd')) {
