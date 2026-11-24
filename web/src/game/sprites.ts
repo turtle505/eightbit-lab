@@ -146,7 +146,7 @@ export function professorSprite(blink = false, frame: 0 | 1 = 0): HTMLCanvasElem
   return c;
 }
 
-// The manager (you): a showpiece. Swept golden pompadour, a proper face (brows, eyes, smile, ears),
+// The manager (you): a showpiece. Swept glossy-black pompadour, a proper face (brows, eyes, smile, ears),
 // royal-purple velvet suit with gold lapels, crimson tie, pink pocket square, gold chain and belt buckle.
 // 14x20. Cape and sparkles are drawn around it per frame in office.ts.
 const MANAGER = [
@@ -183,7 +183,7 @@ export function managerSprite(blink = false): HTMLCanvasElement {
   c.height = MANAGER_H;
   const skin = '#f1c27d';
   paintMap(c.getContext('2d')!, MANAGER, {
-    H: '#d9a93a', h: '#ffe9a0', S: skin, b: '#8a6020', E: blink ? skin : '#1b1b1b', n: '#d9a066', M: '#b5584a',
+    H: '#1d1b26', h: '#5f74b8', S: skin, b: '#1d1b26', E: blink ? skin : '#1b1b1b', n: '#d9a066', M: '#b5584a',
     W: '#fafafa', V: '#5b2a86', v: '#46206a', L: '#e8c55a', R: '#c0283c', Q: '#ff7eb6', C: '#ffd966',
     P: '#2b2140', B: '#111111',
   }, 0, 0);
