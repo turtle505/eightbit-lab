@@ -1,4 +1,5 @@
 // Projects tab: folders on a host, each holding several independent Claude Code sessions.
+import { followBottom } from './follow.ts';
 import type { EmployeeView, ProjectView } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, changed, esc, plain, statusLabel } from './panels.ts';
@@ -146,7 +147,8 @@ export function renderProjects(st: UIState, send: Send) {
         submit();
       }
     });
-    const log = el.querySelector('.plog');
-    if (log) log.scrollTop = log.scrollHeight;
+    const log = el.querySelector<HTMLElement>('.plog');
+    // the whole tab is redrawn (also every 15 s), so keep the reader's place instead of yanking them down
+    if (log) followBottom(`plog:${id}`, log, (st.logs.get(id) ?? []).length);
   });
 }

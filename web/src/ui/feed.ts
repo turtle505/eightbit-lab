@@ -1,4 +1,5 @@
 // 📨 Report box: report files and finished-run results, appended like a chat (newest at the bottom), in markdown.
+import { followBottom } from './follow.ts';
 import type { FeedItem } from '../../../shared/protocol.ts';
 import { getLang, locale, tr } from '../../../shared/i18n.ts';
 import { renderMd } from './markdown.ts';
@@ -71,16 +72,16 @@ export function renderReportFeed(st: UIState) {
     sel.innerHTML = `<option value="">${tr({ ko: '전체', en: 'Everyone' })}</option>` + [...emps].sort((a, b) => a.desk - b.desk).map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))}</option>`).join('');
     sel.value = who;
   }
-  const items = st.snap.feed.filter((f) => !who || f.employeeId === who).slice(-SHOWN);
+  const mine = st.snap.feed.filter((f) => !who || f.employeeId === who);
+  const items = mine.slice(-SHOWN);
   const list = $('rf-list');
   const visible = list.offsetParent !== null;
   if (changed('rf-list', [items.map((f) => [f.id, f.ts]), emps.map((e) => e.name)])) {
-    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     list.innerHTML = items.length
       ? items.map((f) => card(f, st)).join('')
       : `<p class="muted small">${tr({ ko: '보고서 파일이 저장되거나 직원의 실행이 끝나면 여기에 차례로 올라옵니다.', en: 'Saved report files and finished runs show up here in order.' })}</p>`;
     list.dataset.measured = '';
-    if (visible && (atBottom || !list.dataset.init)) list.scrollTop = list.scrollHeight;
+    followBottom(`rf:${who}`, list, mine.length);
   }
   // sizes are only known while the box is on screen (it lives in the game or console view)
   if (visible && !list.dataset.measured) {
@@ -91,9 +92,7 @@ export function renderReportFeed(st: UIState) {
       more.hidden = !body.classList.contains('open') && body.scrollHeight <= body.clientHeight + 4;
     });
     list.dataset.measured = '1';
-    if (!list.dataset.init) {
-      list.scrollTop = list.scrollHeight;
-      list.dataset.init = '1';
-    }
+    // first time on screen (or back from the other view): heights are real now
+    followBottom(`rf:${who}`, list, mine.length);
   }
 }

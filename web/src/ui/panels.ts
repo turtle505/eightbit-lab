@@ -1,4 +1,5 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
+import { followBottom } from './follow.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState, UsageRow } from '../../../shared/protocol.ts';
 import { dowShort, getLang, hhmm, locale, tr } from '../../../shared/i18n.ts';
 
@@ -443,14 +444,13 @@ export function renderEmployeePanel(st: UIState, send: Send) {
   const lines = st.logs.get(e.id) ?? [];
   if (changed('emp-log', [e.id, lines.length, lines[lines.length - 1]?.ts])) {
     const log = $('emp-log');
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
     log.innerHTML = lines
       .map(
         (l) =>
           `<div class="line k-${l.kind}"><span class="ts">${new Date(l.ts).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span><span class="txt">${esc(l.text)}</span></div>`,
       )
       .join('');
-    if (atBottom) log.scrollTop = log.scrollHeight;
+    followBottom(`log:${e.id}`, log, lines.length);
   }
 }
 
