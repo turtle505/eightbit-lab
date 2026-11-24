@@ -1,7 +1,7 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
 import type { AgentStatus, EmployeeView, ServerView, Task } from '../../../shared/protocol.ts';
-import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
+import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
 const WALL_H = 36;
@@ -563,12 +563,19 @@ export class OfficeScene {
     g.fillRect(x + 4, y + 4, 80, 38);
     g.fillStyle = 'rgba(201,162,39,0.55)';
     for (let k = 0; k < 9; k++) g.fillRect(x + 6 + k * 9, y + 37, 3, 1);
+    // a slow golden spotlight behind the chair
+    const glow = g.createRadialGradient(150, H - 44, 2, 150, H - 44, 30);
+    const a = 0.16 + 0.06 * Math.sin(this.t / 40);
+    glow.addColorStop(0, `rgba(255,220,120,${a.toFixed(3)})`);
+    glow.addColorStop(1, 'rgba(255,220,120,0)');
+    g.fillStyle = glow;
+    g.fillRect(x + 1, y + 1, 86, 44);
   }
 
   private drawBossChair() {
     const g = this.g;
     const x = 150 - 8;
-    const top = 206 - 19;
+    const top = H - 34 - 19;
     g.fillStyle = '#3a1712';
     g.fillRect(x, top + 1, 16, 18);
     g.fillRect(x + 1, top, 14, 1);
@@ -649,8 +656,49 @@ export class OfficeScene {
   }
 
   private drawBoss() {
-    const spr = characterSprite({ hair: '#2e2e2e', shirt: '#4a4a5a', pants: '#2b2b33', skin: '#f1c27d' }, 'stand', this.t % 240 < 6);
-    this.g.drawImage(spr, 150 - SPRITE_W / 2, 206 - SPRITE_H + 2);
+    const g = this.g;
+    const t = this.t;
+    const cx = 150;
+    const x = cx - MANAGER_W / 2;
+    const y = H - 34 - MANAGER_H; // sits up a little so the chain shows above the desk, which hides the legs
+    // crimson cape with gold trim, hem swaying a little
+    const sway = Math.round(Math.sin(t / 22));
+    for (let r = 0; r < 10; r++) {
+      const half = 7 + Math.floor(r / 3);
+      const dx = r > 5 ? sway : 0;
+      g.fillStyle = '#8e1a2e';
+      g.fillRect(cx - half + dx, y + 9 + r, half * 2, 1);
+      g.fillStyle = '#e8c55a';
+      g.fillRect(cx - half + dx, y + 9 + r, 1, 1);
+      g.fillRect(cx + half - 1 + dx, y + 9 + r, 1, 1);
+    }
+    // high standing collar of the cape, framing the head
+    g.fillStyle = '#b3203a';
+    g.fillRect(x, y + 5, 2, 5);
+    g.fillRect(x + MANAGER_W - 2, y + 5, 2, 5);
+    g.fillStyle = '#ff5a6e';
+    g.fillRect(x, y + 4, 1, 6);
+    g.fillRect(x + MANAGER_W - 1, y + 4, 1, 6);
+    g.drawImage(managerSprite(), x, y);
+    // a glint sweeps across the aviators every ~3 s
+    const gl = t % 180;
+    if (gl < 10) {
+      g.fillStyle = '#ffffff';
+      g.fillRect(x + 3 + gl, y + 4, 1, 1);
+    }
+    // sparkles twinkling around, each on its own phase
+    const spots = [[-13, 2], [12, -3], [-10, 14], [14, 10], [0, -6]];
+    spots.forEach(([sx, sy], k) => {
+      const ph = (t + k * 37) % 120;
+      if (ph > 24) return;
+      const px = cx + sx, py = y + sy;
+      const big = ph > 6 && ph < 18;
+      g.fillStyle = '#ffe680';
+      g.fillRect(px, py - (big ? 2 : 1), 1, big ? 5 : 3);
+      g.fillRect(px - (big ? 2 : 1), py, big ? 5 : 3, 1);
+      g.fillStyle = '#ffffff';
+      g.fillRect(px, py, 1, 1);
+    });
   }
 
   /** A small gold crown above the lead's head. */

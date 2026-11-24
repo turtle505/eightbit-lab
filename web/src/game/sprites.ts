@@ -146,6 +146,48 @@ export function professorSprite(blink = false, frame: 0 | 1 = 0): HTMLCanvasElem
   return c;
 }
 
+// The manager (you): a showpiece. Swept golden pompadour, gold aviators, royal-purple velvet suit with gold lapels,
+// crimson tie, pink pocket square, gold chain and belt buckle. 14x19. Cape, glint and sparkles are drawn
+// around it per frame in office.ts.
+const MANAGER = [
+  '.....HhhHH....',
+  '...HHHhhHHHH..',
+  '..HHHHHHHHHHH.',
+  '...HSSSSSSH...',
+  '..YGGGYYGGGY..',
+  '...SSSSSSSS...',
+  '...SSSMMSSS...',
+  '....SSSSSS....',
+  '....WWSSWW....',
+  '..VVLWRRWLVV..',
+  '.VVVVLWRWLVVV.',
+  '.VVQVVLRLVVVV.',
+  '.SVVVVCRCVVVS.',
+  '.SVVVVVYVVVVS.',
+  '..VVVVvvVVVV..',
+  '..PPPPYYPPPP..',
+  '..PPPP..PPPP..',
+  '..PPP....PPP..',
+  '..BBB....BBB..',
+];
+export const MANAGER_W = 14;
+export const MANAGER_H = MANAGER.length;
+
+export function managerSprite(): HTMLCanvasElement {
+  const hit = cache.get('manager');
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = MANAGER_W;
+  c.height = MANAGER_H;
+  paintMap(c.getContext('2d')!, MANAGER, {
+    H: '#e0b84a', h: '#fff1a8', S: '#f1c27d', G: '#15151c', Y: '#e8c55a', M: '#a8584a',
+    W: '#fafafa', V: '#5b2a86', v: '#46206a', L: '#e8c55a', R: '#c0283c', Q: '#ff7eb6', C: '#ffd966',
+    P: '#2b2140', B: '#111111',
+  }, 0, 0);
+  cache.set('manager', c);
+  return c;
+}
+
 /** Tiny helper to paint an ascii pixel map at (x, y). */
 export function paintMap(g: CanvasRenderingContext2D, map: string[], colors: Record<string, string>, x: number, y: number) {
   map.forEach((row, dy) =>
