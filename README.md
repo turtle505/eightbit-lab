@@ -4,11 +4,13 @@
 
 **A pixel-art office where your AI agents work.** 8-bit Lab runs several Claude Code agents ("employees") side by side, and shows them as little characters at their desks. You're the manager: you hand out work, approve anything risky, and read their reports.
 
+**Why not just open a few `claude` terminals?** Because here they work as a team you can manage: one place to approve what they want to do, a board of tasks and who has them, GPU jobs that report back when they finish, and their reports collected in one feed — while you watch the office instead of tabbing between terminals.
+
 It started in a research lab, so it also knows how to submit and watch GPU jobs on remote servers, but nothing assumes a field: tell it what your team works on in one line, and the employees take it from there.
 
 - 🧑‍💻 **Six employees out of the box**: a literature researcher, an evaluation analyst, two research aides, an assistant, and a lead engineer who can hand work to the others.
 - 👀 **See what everyone is doing**: who's typing, running commands, searching the web, or waiting for you.
-- ✋ **You stay in control**: risky actions (anything touching a lab server, deletes, pushes) show up as approval cards.
+- ✋ **You stay in control**: anything that reaches a remote server always asks first; other unclear actions come to you as approval cards, and a 🔒 task asks for everything (see [Safety](#safety)).
 - 📨 **Reports come to you**: finished work and saved report files appear in a chat-like feed.
 - ⏰ **Routines**: "every weekday at 9, brief me on new papers". Just ask the assistant.
 - 🖥️ **GPU jobs**: submit, watch and fetch jobs on ssh or Slurm servers. The employee who submitted a job reports back when it finishes.
@@ -16,13 +18,15 @@ It started in a research lab, so it also knows how to submit and watch GPU jobs 
 
 It runs locally on your machine and uses your own **Claude Pro/Max subscription** through the `claude` CLI login. There's no API key.
 
+> **Status:** a personal project, used daily but young — expect rough edges. It is not affiliated with or endorsed by Anthropic.
+
 ---
 
 ## Quick start
 
 ### What you need
 
-- **Node.js 22.5 or newer**. The app uses the built-in `node:sqlite`.
+- **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag.
 - **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
 - macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
 
@@ -108,7 +112,7 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 
 **Workspaces.** With `researchRepo` set, each engineer works in their own git worktree (branch `office/<id>`), so they don't step on each other. Without it, everyone shares `workspaces/shared`. Reports go to `workspaces/<employee>/reports/`.
 
-**The team.** Every employee's prompt starts with `About this team: <domain>`, then the `common:` block of `roles.yaml` (report honestly, read before changing, use the report format), and — only if you have GPU servers or remote hosts — the `servers:` block of remote-server etiquette. Each employee then adds their own role. To specialise someone further (say, the evaluation analyst should know your field's metrics), override their `systemPrompt` in `config/roles.local.yaml`; it's merged by `id`, and the same goes for `autoAllow` (e.g. an MCP server you've installed for paper search), as in the example below.
+**The team.**
 
 | id | Who | What they do |
 |---|---|---|
@@ -117,6 +121,8 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
 | `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
+
+**Fitting them to your field.** Setting `domain` is usually enough: every employee's prompt starts with `About this team: <domain>`. To go further — say, the evaluation analyst should know your field's metrics, or the researcher may use a paper-search MCP server you've installed — override that employee in `config/roles.local.yaml`. Entries are merged by `id`, field by field:
 
 ```yaml
 # config/roles.local.yaml
@@ -129,7 +135,7 @@ employees:
       You compute and interpret mAP, IoU and per-class recall for our detection models …
 ```
 
-Removing an employee from `roles.yaml` doesn't lose their task cards. They go back to *unassigned*.
+Under each role, every prompt also gets the shared rules from the `common:` block of `roles.yaml` (report honestly, read before changing, the report format), plus a `servers:` block of remote-server etiquette when you have GPU servers or remote hosts. Removing an employee doesn't lose their task cards; they go back to *unassigned*.
 
 **Language.** Employees always get their instructions in English; only the language they *report* in follows the setting. The header button overrides `language:` and is remembered. Old logs and feed entries keep the language they were written in, and routines already saved aren't retranslated.
 
@@ -213,11 +219,18 @@ Drop files on 📎 in the task form or on an employee's input box (up to 50 MB e
 <details>
 <summary><b>🦙 An employee on a local model (Ollama)</b></summary>
 
-Any employee can run on an Ollama model instead of your subscription, which is good for light work like summaries and notes. Add a provider and point an employee at it with `provider: <id>` in `roles.local.yaml`:
+Any employee can run on an Ollama model instead of your subscription, which is good for light work like summaries and notes. Add the provider in `office.local.yaml`, then point an employee at it in `roles.local.yaml`:
 
 ```yaml
+# config/office.local.yaml
 providers:
   - { id: workstation, name: "🖥 workstation", kind: ollama, ssh_host: workstation, remotePort: 11434, localPort: 11435, model: "qwen3:8b" }
+```
+
+```yaml
+# config/roles.local.yaml
+employees:
+  - { id: aide2, provider: workstation }
 ```
 
 - The office opens the ssh tunnel itself and health-checks it.
