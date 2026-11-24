@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { CodexTools } from '../src/agents/codexTools.ts';
 import { statusForTool } from '../src/agents/status.ts';
+
+describe('Codex office tool bridge', () => {
+  it('exposes and calls existing MCP tools', async () => {
+    const bridge = new CodexTools();
+    try {
+      const server = createSdkMcpServer({ name: 'office', version: '1.0.0', tools: [
+        tool('ping', 'Return a marker', {}, async () => ({ content: [{ type: 'text', text: 'office-ready' }] })),
+      ] });
+      await bridge.add('office', server.instance);
+      expect(bridge.specs[0].tools.map((t) => t.name)).toEqual(['ping']);
+      await expect(bridge.call('office', 'ping', {})).resolves.toMatchObject({ success: true, contentItems: [{ text: 'office-ready' }] });
+    } finally {
+      await bridge.close();
+    }
+  });
+});
 import { parseNvidiaSmi } from '../src/compute/adapter.ts';
 import { SshAdapter, parseSshStatus } from '../src/compute/ssh.ts';
 import { SlurmAdapter, parseSlurmState } from '../src/compute/slurm.ts';

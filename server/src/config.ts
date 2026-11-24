@@ -55,6 +55,8 @@ export interface HostConfig {
   projectRoot: string;
   /** absolute path to the CLI — a non-login ssh often lacks ~/.local/bin on PATH */
   claudePath?: string;
+  /** absolute Codex CLI path on a remote host when non-login SSH has no PATH entry */
+  codexPath?: string;
   /** ssh/scp runs per minute for this host; omitted = office.sshPerMinute, 0 = no limit */
   sshPerMinute?: number;
 }
@@ -219,6 +221,7 @@ export function normalizeHosts(list: Partial<HostConfig>[]): HostConfig[] {
       ssh: h.ssh,
       projectRoot: h.projectRoot || '~/project',
       claudePath: h.claudePath,
+      codexPath: h.codexPath,
       sshPerMinute: h.sshPerMinute,
     });
   }

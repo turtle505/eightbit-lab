@@ -135,7 +135,7 @@ function assignTask(taskId: number, employeeId: string) {
   const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing', startAt: null }); // assigning by hand starts a scheduled card now
   if (!t) return;
   bus.send({ t: 'task', data: t });
-  agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval });
+  agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval, attachmentPaths: store.attachmentsForTask(t.id).flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
 }
 
 function createTask(
@@ -312,7 +312,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       const rows = attachments.rows(msg.attachmentIds ?? []);
       if (!msg.text.trim() && !rows.length) break;
       store.markAttachmentsUsed(rows.map((r) => r.id));
-      agents.instruct(msg.employeeId, (msg.text.trim() || 'Please look at the attached files.') + attachmentBlock(rows));
+      agents.instruct(msg.employeeId, (msg.text.trim() || 'Please look at the attached files.') + attachmentBlock(rows), null, { attachmentPaths: rows.flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
       break;
     }
     case 'stop':
@@ -323,6 +323,9 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       break;
     case 'setPermission':
       agents.setPermission(msg.employeeId, msg.mode);
+      break;
+    case 'setEmployeeEngine':
+      agents.setEngine(msg.employeeId, msg.engine);
       break;
     case 'renameEmployee':
       agents.rename(msg.employeeId, msg.nick);

@@ -148,6 +148,10 @@ Under each role, every prompt also gets the shared rules from the `common:` bloc
 
 ## Optional features
 
+### Codex employees
+
+In an employee panel, choose **Codex** from the engine selector after the employee's current work finishes. The choice persists; switching back to Claude restores that employee's separate Claude conversation. Codex runs through its local app-server with your ChatGPT login, so install the official Codex CLI and run `codex login` on the backend machine. For a remote employee host, install and sign in there too; set `codexPath` to the CLI's absolute path in that host's `office.local.yaml` entry if a non-login SSH shell cannot find it. On a headless host, `codex login --device-auth` is an option. Codex uses the same task board, report feed, approval cards, and office/lab tools. Its subscription usage is separate from the Claude meter in the header.
+
 <details>
 <summary><b>🖥️ GPU servers (submit and track jobs)</b></summary>
 

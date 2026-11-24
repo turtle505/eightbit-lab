@@ -384,6 +384,7 @@ export function renderEmployeePanel(st: UIState, send: Send) {
       <div class="emp-title"><span class="swatch" style="background:${esc(e.sprite.shirt)}"></span>
         <b>${esc(e.name)}</b> <button type="button" id="emp-rename" class="icon-btn" title="${tr({ ko: '이름 바꾸기', en: 'Rename' })}">✏️</button> <span class="muted">${esc(e.title)}</span>
         <span class="status s-${e.status}">${statusLabel(e.status)}</span>
+        <select id="emp-engine" aria-label="${tr({ ko: '실행기', en: 'Agent engine' })}" ${e.provider ? 'disabled' : ''}><option value="claude" ${e.engine === 'claude' ? 'selected' : ''}>Claude</option><option value="codex" ${e.engine === 'codex' ? 'selected' : ''}>Codex</option></select>
         <button type="button" id="emp-perm" class="perm-btn perm-${e.permission}" title="${
           e.permission === 'auto'
             ? tr({
@@ -434,11 +435,17 @@ export function renderEmployeePanel(st: UIState, send: Send) {
             })
       }">${e.live ? tr({ ko: '🟢 세션 열림', en: '🟢 Session open' }) : tr({ ko: '⚪ 세션 대기', en: '⚪ Session idle' })}</span> ${
         e.sessionId ? esc(e.sessionId.slice(0, 8)) : tr({ ko: '새로 시작', en: 'fresh start' })
-      } · ${e.provider ? tr({ ko: '구독 사용 안 함', en: 'no subscription use' }) : tr({ ko: `사무실 사용 비중 ${usageShare(st, e.costUsd)}`, en: `share of office usage ${usageShare(st, e.costUsd)}` })}</div>`;
+      } · ${e.engine === 'codex' ? tr({ ko: 'Codex 구독', en: 'Codex subscription' }) : e.provider ? tr({ ko: '구독 사용 안 함', en: 'no subscription use' }) : tr({ ko: `사무실 사용 비중 ${usageShare(st, e.costUsd)}`, en: `share of office usage ${usageShare(st, e.costUsd)}` })}</div>`;
     document.getElementById('emp-model')?.addEventListener('change', (ev) => {
       if (prov) send({ t: 'setProviderModel', providerId: prov.id, model: (ev.target as HTMLSelectElement).value });
     });
     $('emp-perm').addEventListener('click', () => send({ t: 'setPermission', employeeId: e.id, mode: e.permission === 'auto' ? 'ask' : 'auto' }));
+    document.getElementById('emp-engine')?.addEventListener('change', (ev) => {
+      const select = ev.target as HTMLSelectElement;
+      send({ t: 'setEmployeeEngine', employeeId: e.id, engine: select.value as 'claude' | 'codex' });
+      // The server owns the selection; a rejected switch leaves the prior value in place.
+      select.value = e.engine;
+    });
     document.getElementById('emp-resume')?.addEventListener('click', () => send({ t: 'resumeWork', employeeId: e.id }));
     document.querySelectorAll<HTMLButtonElement>('#emp-head .host-recheck').forEach((b) =>
       b.addEventListener('click', () => send({ t: 'recheckHost', hostId: b.dataset.host! })),

@@ -13,7 +13,13 @@ import { sshThrottle, type HostRegistry } from '../hosts.ts';
 import { SshThrottle } from '../sshRate.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
+import { CodexTurn } from './codex.ts';
+import { CodexTools } from './codexTools.ts';
+import { stageCodexAttachments } from './codexAttachments.ts';
 import { hostname } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { ROOT } from '../config.ts';
 
 interface Work {
   text: string;
@@ -24,6 +30,7 @@ interface Work {
   label: string;
   /** force 'ask' for this run (task marked 🔒 by the manager or the delegating lead) */
   requireApproval: boolean;
+  attachmentPaths: string[];
 }
 
 /** Push-driven async iterable: the stream of user messages a live session reads from. */
@@ -92,6 +99,8 @@ class Employee {
   view: EmployeeView;
   inbox: Work[] = [];
   live: LiveSession | null = null;
+  codexTurn: CodexTurn | null = null;
+  codexStopped = false;
   /** resolves the in-flight turn (set by run(), called from the consume loop on `result`) */
   endTurn: (() => void) | null = null;
   idleTimer: NodeJS.Timeout | null = null;
@@ -111,6 +120,7 @@ class Employee {
   constructor(readonly role: RoleConfig, sessionId: string | null, costUsd: number, permission: PermissionSetting) {
     this.view = {
       id: role.id,
+      engine: 'claude',
       name: role.name,
       title: role.title,
       desk: role.desk,
@@ -198,6 +208,7 @@ export function needsLabApproval(
  * (mac → desktop) would look like "same host" and the resume would fail with "No conversation found".
  */
 export const sessionHostId = (roleHost: string | undefined, backend = hostname()) => roleHost ?? `backend:${backend}`;
+const codexThreadKey = (role: RoleConfig) => `codex-thread:${role.id}:${sessionHostId(role.host)}`;
 
 /**
  * Decide what the per-minute budget says about a shell command the agent wants to run.
@@ -253,6 +264,8 @@ export class AgentManager {
     for (const r of roles) {
       const s = store.getSession(r.id);
       const e = new Employee(r, s.sessionId, s.costUsd, store.getEmployeePerm(r.id) ?? r.permissionMode ?? office.permissionMode);
+      e.view.engine = store.getSetting(`engine:${r.id}`) === 'codex' ? 'codex' : 'claude';
+      if (e.view.engine === 'codex') e.view.sessionId = store.getSetting(codexThreadKey(r));
       e.sessionHost = s.hostId;
       e.view.name = store.getEmployeeName(r.id) ?? r.name;
       this.emps.set(r.id, e);
@@ -272,6 +285,8 @@ export class AgentManager {
     if (existing) return existing.view;
     const s = this.store.getSession(role.id);
     const e = new Employee(role, s.sessionId, s.costUsd, this.store.getEmployeePerm(role.id) ?? role.permissionMode ?? this.office.permissionMode);
+    e.view.engine = this.store.getSetting(`engine:${role.id}`) === 'codex' ? 'codex' : 'claude';
+    if (e.view.engine === 'codex') e.view.sessionId = this.store.getSetting(codexThreadKey(role));
     e.sessionHost = s.hostId;
     e.view.name = this.store.getEmployeeName(role.id) ?? role.name;
     this.emps.set(role.id, e);
@@ -332,12 +347,12 @@ export class AgentManager {
 
   /** push the current view to the browsers (status unchanged) */
   private sendView(e: Employee) {
-    e.view.live = !!e.live;
+    e.view.live = !!e.live || !!e.codexTurn;
     bus.send({ t: 'employee', data: { ...e.view } });
   }
 
   private set(e: Employee, status: AgentStatus, activity?: string) {
-    e.view.live = !!e.live;
+    e.view.live = !!e.live || !!e.codexTurn;
     e.view.status = status;
     if (activity !== undefined) e.view.activity = activity;
     bus.send({ t: 'employee', data: { ...e.view } });
@@ -357,11 +372,11 @@ export class AgentManager {
   }
 
   /** Give an employee an instruction. Queued if they're busy or the office is at capacity. */
-  instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean } = {}) {
+  instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean; attachmentPaths?: string[] } = {}) {
     const e = this.emp(employeeId);
     const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
     this.log(e, 'user', taskId ? `${tr({ ko: `[작업 #${taskId}]`, en: `[Task #${taskId}]` })} ${text}` : text);
-    this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval });
+    this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval, attachmentPaths: opts.attachmentPaths ?? [] });
   }
 
   /** Add work to an employee's inbox (`front` = before anything already waiting) and let the queue run. */
@@ -385,7 +400,10 @@ export class AgentManager {
       const provider = e.role.provider;
       if (provider) this.busyProviders.add(provider);
       else this.running++;
-      void this.run(e, work).finally(() => {
+      void this.run(e, work).catch((err) => {
+        this.log(e, 'error', String((err as Error).message ?? err));
+        this.set(e, 'error', tr({ ko: '⚠️ 실행 실패', en: '⚠️ Run failed' }));
+      }).finally(() => {
         if (provider) this.busyProviders.delete(provider);
         else this.running--;
         e.current = null;
@@ -402,6 +420,13 @@ export class AgentManager {
     if (this.unpark(e)) this.log(e, 'system', tr({ ko: '⏹ 예약된 재개를 취소했습니다', en: '⏹ Cancelled the scheduled resume' }));
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
+    if (e.codexTurn) {
+      e.codexStopped = true;
+      e.codexTurn.stop();
+      this.log(e, 'system', tr({ ko: '⏹ 중지됨', en: '⏹ Stopped' }));
+      this.set(e, 'idle', tr({ ko: '☕ 대기 중', en: '☕ Idle' }));
+      return;
+    }
     const live = e.live;
     if (!live || !e.current) {
       if (!e.current) this.set(e, 'idle', this.idleActivity(e));
@@ -445,12 +470,25 @@ export class AgentManager {
     bus.send({ t: 'employee', data: { ...e.view } });
   }
 
+  setEngine(employeeId: string, engine: 'claude' | 'codex') {
+    const e = this.emp(employeeId);
+    if (e.current || e.inbox.length || this.waiting.includes(e)) throw new Error(tr({ ko: '작업이 끝난 뒤 실행기를 전환하세요.', en: 'Switch engines after the current work finishes.' }));
+    if (e.role.provider && engine === 'codex') throw new Error(tr({ ko: 'Ollama 직원은 Codex로 전환할 수 없습니다.', en: 'An Ollama employee cannot switch to Codex.' }));
+    if (e.view.engine === engine) return;
+    this.closeSession(e);
+    e.view.engine = engine;
+    e.view.sessionId = engine === 'codex' ? this.store.getSetting(codexThreadKey(e.role)) : this.store.getSession(employeeId).sessionId;
+    this.store.setSetting(`engine:${employeeId}`, engine);
+    this.sendView(e);
+  }
+
   resetSession(employeeId: string) {
     const e = this.emp(employeeId);
     this.stop(employeeId);
     this.closeSession(e);
     e.view.sessionId = null;
-    this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
+    if (e.view.engine === 'codex') this.store.setSetting(codexThreadKey(e.role), '');
+    else this.store.saveSession(e.role.id, null, e.view.costUsd, e.view.cwd);
     this.log(e, 'system', tr({ ko: '새 대화 세션으로 초기화됨', en: 'Reset to a new conversation session' }));
     this.set(e, 'idle', tr({ ko: '☕ 새 마음으로 대기 중', en: '☕ Idle, with a fresh start' }));
   }
@@ -724,12 +762,95 @@ export class AgentManager {
   }
 
   /** Send one instruction into the employee's session and wait for that turn to finish. */
+  private async runCodex(e: Employee, work: Work): Promise<void> {
+    const host = e.role.host ? this.hosts?.get(e.role.host) : undefined;
+    if (e.role.host && (!host || !host.view.ok)) {
+      this.log(e, 'error', tr({ ko: 'Codex 실행 host에 연결할 수 없습니다.', en: 'The Codex host is unavailable.' }));
+      this.set(e, 'error');
+      return;
+    }
+    const cwd = host && !host.isLocal
+      ? host.expand(e.role.cwd?.startsWith('/') || e.role.cwd?.startsWith('~') ? e.role.cwd : `${host.cfg.projectRoot}/${e.role.cwd || '.'}`)
+      : ensureWorkspace(this.office, e.role);
+    e.view.cwd = cwd;
+    let turn: CodexTurn | null = null;
+    const tools = new CodexTools();
+    e.codexStopped = false;
+    const skillName = work.text.match(/office:([a-z0-9-]+)/)?.[1];
+    const skillPath = skillName ? resolve(ROOT, 'workspaces/office-skills/skills', skillName, 'SKILL.md') : '';
+    const skillText = skillPath && existsSync(skillPath) ? `\n\nOffice skill office:${skillName}:\n${readFileSync(skillPath, 'utf8')}` : '';
+    let prompt = `${e.role.systemPrompt}\n\n${reportLanguageLine(getLang())}\nThe office MCP names mcp__office__X and mcp__lab__X appear here as office.X and lab.X. Use those tools with the same approval rules.\n\nCurrent instruction:\n${work.text}${skillText}`;
+    try {
+      if (host && !host.isLocal) prompt = await stageCodexAttachments(host.cfg, prompt, work.attachmentPaths);
+      if (this.registry.list().length) await tools.add('lab', labToolsServer(e.role.id, cwd, this.registry, this.store).instance);
+      if (e.role.officeTools && this.officeApi) await tools.add('office', officeToolsServer(e.role.id, this.officeApi).instance);
+      const callTool = async (namespace: string, tool: string, args: Record<string, unknown>) => {
+        const name = `mcp__${namespace}__${tool}`;
+        const readOnly = new Set(['mcp__lab__list_servers', 'mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log', 'mcp__office__office_status', 'mcp__office__list_tasks', 'mcp__office__office_activity', 'mcp__office__list_routines', 'mcp__office__list_skills']);
+        const allowed = isAutoAllowed(e.role.autoAllow, name) || work.extraAllow.some((rule) => matchesRule(rule, name, args));
+        if (!allowed && (!readOnly.has(name) || e.view.permission === 'ask' || work.requireApproval)) {
+          const decision = await this.broker.request(e.role.id, name, args, new AbortController().signal);
+          if (decision.behavior !== 'allow') throw new Error(decision.message || 'Manager denied the tool call');
+        }
+        return tools.call(namespace, tool, args);
+      };
+      turn = new CodexTurn(e.role.id, this.broker, tools, callTool, host?.cfg);
+      e.codexTurn = turn;
+      this.sendView(e);
+      const result = await turn.start(cwd, prompt, e.view.sessionId, (method, params) => {
+        const item = params.item;
+        if (method === 'approval/requested') {
+          this.set(e, 'waiting_permission', tr({ ko: '✋ 승인 대기', en: '✋ Awaiting approval' }));
+        } else if (method === 'approval/resolved') {
+          this.set(e, 'thinking', tr({ ko: '💭 작업 계속 중', en: '💭 Continuing work' }));
+        } else if (method === 'item/started' && item?.type === 'commandExecution') {
+          this.log(e, 'tool', item.command ?? 'Command');
+          this.set(e, 'running', `⚙️ ${clip(item.command ?? 'Command', 55)}`);
+        } else if (method === 'item/started' && item?.type === 'fileChange') {
+          this.log(e, 'tool', 'File change');
+          this.set(e, 'typing', tr({ ko: '✏️ 파일 수정 중', en: '✏️ Editing files' }));
+        } else if (method === 'item/completed' && item?.type === 'agentMessage' && item.text) {
+          e.lastText = item.text;
+          this.log(e, 'assistant', item.text);
+          this.set(e, 'thinking', `💬 ${clip(item.text.replace(/\s+/g, ' '), 55)}`);
+        }
+      }, e.view.permission === 'ask' || work.requireApproval);
+      if (e.codexStopped || result.status === 'interrupted') {
+        this.set(e, 'idle', tr({ ko: '☕ 대기 중', en: '☕ Idle' }));
+        return;
+      }
+      e.view.sessionId = result.threadId;
+      this.store.setSetting(codexThreadKey(e.role), result.threadId);
+      e.lastText = result.text || e.lastText;
+      const ok = result.status === 'completed';
+      this.log(e, ok ? 'result' : 'error', ok ? tr({ ko: 'Codex 작업 완료', en: 'Codex turn completed' }) : `Codex: ${result.status}`);
+      this.set(e, ok ? 'done' : 'error', ok ? tr({ ko: '✅ 완료', en: '✅ Done' }) : `⚠️ ${result.status}`);
+      bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId } satisfies RunFinished);
+      if (work.taskId != null) {
+        const task = this.store.updateTask(work.taskId, ok ? { state: 'review', result: e.lastText || null } : { result: e.lastText || null });
+        if (task) bus.send({ t: 'task', data: task });
+      }
+    } catch (err) {
+      turn?.stop();
+      if (!e.codexStopped) {
+        this.log(e, 'error', String((err as Error).message ?? err));
+        this.set(e, 'error', tr({ ko: '⚠️ Codex 실행 실패', en: '⚠️ Codex failed' }));
+      }
+    } finally {
+      e.codexTurn = null;
+      await tools.close();
+      this.sendView(e);
+    }
+  }
+
+  /** Send one instruction into the employee's session and wait for that turn to finish. */
   private async run(e: Employee, work: Work): Promise<void> {
     e.current = work;
     e.view.taskId = work.taskId;
     e.lastText = '';
     this.set(e, 'thinking', tr({ ko: '💭 업무 파악 중', en: '💭 Getting up to speed' }));
     if (e.idleTimer) clearTimeout(e.idleTimer);
+    if (e.view.engine === 'codex') return this.runCodex(e, work);
 
     // a remote session costs one ssh connection; queue behind the per-host budget rather than
     // hammering a server that bans noisy clients

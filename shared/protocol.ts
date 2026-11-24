@@ -15,6 +15,8 @@ export type AgentStatus =
 
 export interface EmployeeView {
   id: string;
+  /** execution harness selected for this employee */
+  engine: 'claude' | 'codex';
   name: string;
   title: string;
   desk: number;
@@ -375,6 +377,7 @@ export type ClientMsg =
   | { t: 'refreshUsage' }
   /** pick the model for every employee on this provider (must be installed there) */
   | { t: 'setProviderModel'; providerId: string; model: string }
+  | { t: 'setEmployeeEngine'; employeeId: string; engine: 'claude' | 'codex' }
   /** folders available on a host, for the new-project picker */
   | { t: 'listHostDirs'; hostId: string }
   | { t: 'createProject'; hostId: string; name: string; dir: string; label?: string }
