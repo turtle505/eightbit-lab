@@ -146,23 +146,22 @@ export function professorSprite(blink = false, frame: 0 | 1 = 0): HTMLCanvasElem
   return c;
 }
 
-// The manager (you): a showpiece. Long glossy black hair over the shoulders, a proper face (brows, eyes, smile),
+// The manager (you): a showpiece. Same head as everyone (black hair),
 // royal-purple velvet suit with gold lapels, crimson tie, pink pocket square, gold chain and belt buckle.
-// 14x20. Cape and sparkles are drawn around it per frame in office.ts.
+// 14x19. Cape and sparkles are drawn around it per frame in office.ts.
 const MANAGER = [
+  '.....HHHH.....',
   '....HHHHHH....',
-  '...HHHhhHHH...',
-  '..HHHhhHHHHH..',
-  '..HHSSSSSSHH..',
-  '..HSbbSSbbSH..',
-  '..HSSESSESSH..',
-  '..HSSSSnSSSH..',
-  '..HSSMMMMSSH..',
-  '..HHSSSSSSHH..',
-  '..HHWWSSWWHH..',
-  '.HHVLWRRWLVHH.',
-  '.HHVVLWRWLVHH.',
-  '.HVQVVLRLVVVH.',
+  '...HHHHHHHH...',
+  '...HSSSSSSH...',
+  '...SSESSESS...',
+  '...SSSSSSSS...',
+  '....SSSSSS....',
+  '.....SSSS.....',
+  '....WWSSWW....',
+  '..VVLWRRWLVV..',
+  '.VVVVLWRWLVVV.',
+  '.VVQVVLRLVVVV.',
   '.SVVVVCRCVVVS.',
   '.SVVVVVYVVVVS.',
   '..VVVVvvVVVV..',
@@ -183,7 +182,7 @@ export function managerSprite(blink = false): HTMLCanvasElement {
   c.height = MANAGER_H;
   const skin = '#f1c27d';
   paintMap(c.getContext('2d')!, MANAGER, {
-    H: '#1d1b26', h: '#5f74b8', S: skin, b: '#1d1b26', E: blink ? skin : '#1b1b1b', n: '#d9a066', M: '#b5584a',
+    H: '#2e2e2e', S: skin, E: blink ? skin : '#1b1b1b',
     W: '#fafafa', V: '#5b2a86', v: '#46206a', L: '#e8c55a', R: '#c0283c', Q: '#ff7eb6', C: '#ffd966',
     P: '#2b2140', B: '#111111',
   }, 0, 0);

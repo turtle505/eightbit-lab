@@ -667,10 +667,10 @@ export class OfficeScene {
       const half = 7 + Math.floor(r / 3);
       const dx = r > 5 ? sway : 0;
       g.fillStyle = '#8e1a2e';
-      g.fillRect(cx - half + dx, y + 10 + r, half * 2, 1);
+      g.fillRect(cx - half + dx, y + 9 + r, half * 2, 1);
       g.fillStyle = '#e8c55a';
-      g.fillRect(cx - half + dx, y + 10 + r, 1, 1);
-      g.fillRect(cx + half - 1 + dx, y + 10 + r, 1, 1);
+      g.fillRect(cx - half + dx, y + 9 + r, 1, 1);
+      g.fillRect(cx + half - 1 + dx, y + 9 + r, 1, 1);
     }
     g.drawImage(managerSprite(t % 240 < 6), x, y);
     // sparkles twinkling around, each on its own phase
