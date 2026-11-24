@@ -1578,3 +1578,15 @@ body .md-body h4 {
 .engine-badge.e-codex { color: var(--ok); }
 .engine-badge.e-claude { color: var(--accent); }
 #emp-engine.engine-turn { opacity: 1; border-color: currentColor; }
+
+/* compact board: columns scroll, cards are a title + meta line until opened */
+.col { max-height: 340px; overflow-y: auto; }
+.col h3 { position: sticky; top: -6px; z-index: 1; margin: -6px -6px 6px; padding: 6px; background: var(--code-bg); display: flex; align-items: center; gap: 6px; }
+.col h3 .col-act { margin-left: auto; font-size: 11px; padding: 0 6px; font-weight: normal; cursor: pointer; }
+.card .card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; width: 100%; text-align: left; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-weight: 600; line-height: 1.35; cursor: pointer; }
+.card.open .card-title { display: block; -webkit-line-clamp: unset; }
+.card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.card-meta button { font-size: 11px; padding: 0 6px; }
+.card.open { cursor: default; }
+.card.open .card-detail { margin-top: 6px; }
+.col-more { display: block; width: 100%; text-align: center; font-size: 12px; padding: 2px; background: none; border: 0; color: var(--accent); cursor: pointer; }

@@ -65,7 +65,7 @@ For bigger jobs, add a **task card** on the board and drag it onto an employee. 
 | Give an instruction | Click an employee (or pick one in the box right under the office) → type and press Enter. <kbd>/</kbd> jumps to the box |
 | Assign a task | Add a card on the task board → drag it onto an employee (or pick from the card's dropdown) |
 | Approve / deny | Use the yellow approval panel (<kbd>a</kbd> / <kbd>d</kbd> in the console view) |
-| Check results | Finished cards move to **Review**: expand **Report**, then mark it **Done** |
+| Check results | Finished cards move to **Review** (newest on top): click a card title to open its report, then **Done**, or **All done** for the whole column. Done keeps the latest five in view |
 | Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |

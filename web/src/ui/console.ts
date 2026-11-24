@@ -2,7 +2,7 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
-import { $, type Send, type UIState, ago, agoText, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
+import { $, type Send, type UIState, ago, agoText, byRecent, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
 import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
@@ -73,6 +73,9 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
 }
 
 const expanded = new Set<number>();
+/** show every Done row instead of the latest DONE_ROWS */
+let doneAll = false;
+const DONE_ROWS = 10;
 
 export function renderTaskTable(st: UIState, send: Send) {
   const emps = sortedEmployees(st);
@@ -82,8 +85,13 @@ export function renderTaskTable(st: UIState, send: Send) {
     sel.innerHTML = `<option value="">${tr({ ko: '담당: 나중에', en: 'Assignee: later' })}</option>` + emps.map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))}</option>`).join('');
     sel.value = v;
   }
-  if (!changed('c-tasks', [st.snap.tasks, emps.map((e) => [e.id, e.name]), [...expanded], Math.floor(Date.now() / 15000)])) return;
-  const tasks = [...st.snap.tasks].sort((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state) || b.id - a.id);
+  if (!changed('c-tasks', [st.snap.tasks, emps.map((e) => [e.id, e.name]), [...expanded], doneAll, Math.floor(Date.now() / 15000)])) return;
+  const sorted = [...st.snap.tasks].sort((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state) || byRecent(a, b));
+  // Done only grows: keep the latest few and fold the rest behind one row
+  const doneCount = sorted.filter((t) => t.state === 'done').length;
+  let seenDone = 0;
+  const tasks = sorted.filter((t) => t.state !== 'done' || doneAll || ++seenDone <= DONE_ROWS);
+  const hiddenDone = doneCount - tasks.filter((t) => t.state === 'done').length;
   const empOpts = (cur: string | null) =>
     `<option value="" ${cur ? '' : 'selected'}>—</option>` +
     emps.map((e) => `<option value="${esc(e.id)}" ${cur === e.id ? 'selected' : ''}>${esc(short(e.name))}</option>`).join('');
@@ -112,8 +120,18 @@ export function renderTaskTable(st: UIState, send: Send) {
     })
     .join('');
   $('c-tasks').innerHTML = tasks.length
-    ? `<table class="ctable tasks"><thead><tr><th class="num">#</th><th>${tr({ ko: '제목', en: 'Title' })}</th><th>${tr({ ko: '상태', en: 'State' })}</th><th>${tr({ ko: '담당', en: 'Assignee' })}</th><th class="num">${tr({ ko: '갱신', en: 'Updated' })}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table class="ctable tasks"><thead><tr><th class="num">#</th><th>${tr({ ko: '제목', en: 'Title' })}</th><th>${tr({ ko: '상태', en: 'State' })}</th><th>${tr({ ko: '담당', en: 'Assignee' })}</th><th class="num">${tr({ ko: '갱신', en: 'Updated' })}</th><th></th></tr></thead><tbody>${rows}${
+        hiddenDone > 0 || (doneAll && doneCount > DONE_ROWS)
+          ? `<tr class="more"><td></td><td colspan="5"><button class="link" data-act="done-more">${
+              hiddenDone > 0 ? tr({ ko: `완료 ${hiddenDone}개 더 보기`, en: `${hiddenDone} more done` }) : tr({ ko: '완료 접기', en: 'Show fewer done' })
+            }</button></td></tr>`
+          : ''
+      }</tbody></table>`
     : `<p class="muted small">${tr({ ko: '작업이 없습니다. 위 입력줄에서 추가하세요.', en: 'No tasks. Add one from the row above.' })}</p>`;
+  $('c-tasks').querySelector('[data-act="done-more"]')?.addEventListener('click', () => {
+    doneAll = !doneAll;
+    renderTaskTable(st, send);
+  });
   $('c-tasks').querySelectorAll<HTMLTableRowElement>('tr.task').forEach((row) => {
     const id = Number(row.dataset.id);
     row.querySelector('[data-act="expand"]')!.addEventListener('click', () => {

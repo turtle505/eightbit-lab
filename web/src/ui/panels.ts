@@ -240,6 +240,15 @@ const COLS = (): Array<[TaskState, string]> => [
   ['done', tr({ ko: '완료', en: 'Done' })],
 ];
 
+/** cards opened for detail (by id), and whether Done shows everything; kept across re-renders */
+const openCards = new Set<number>();
+let doneAll = false;
+const DONE_SHOWN = 5;
+const DETAIL_CHARS = 600;
+
+/** newest first within a column: the latest results sit on top */
+export const byRecent = (a: Task, b: Task) => b.updatedAt - a.updatedAt || b.id - a.id;
+
 export function renderBoard(st: UIState, send: Send) {
   const s = st.snap;
   const emps = [...s.employees].sort((a, b) => a.desk - b.desk);
@@ -250,49 +259,94 @@ export function renderBoard(st: UIState, send: Send) {
     sel.innerHTML = `<option value="">${tr({ ko: '(나중에 배정)', en: '(assign later)' })}</option>` + emps.map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))} · ${esc(e.title)}</option>`).join('');
     sel.value = v;
   }
-  if (!changed('board', [s.tasks, emps.map((e) => [e.id, e.name])])) return;
-  $('board').innerHTML = COLS().map(([state, label]) => {
-    const tasks = s.tasks.filter((t) => t.state === state);
-    return `<div class="col" data-state="${state}"><h3>${label} <span class="muted">${tasks.length}</span></h3>${tasks
-      .map((t) => {
-        const who = emps.find((e) => e.id === t.assignee);
-        return `<div class="card" draggable="true" data-id="${t.id}">
-          <div class="card-title">#${t.id} ${engineBadge(t)}${t.requireApproval ? `<span class="lock" title="${esc(tr({ ko: '승인 받기: 자동 모드여도 도구마다 매니저 승인', en: 'Require approval: every tool needs the manager\'s approval, even in auto mode' }))}">🔒</span> ` : ''}${esc(t.title)}</div>
-          ${t.startAt != null && state === 'todo' ? `<div class="card-when">${scheduledBadge(t)} <button data-act="now">${tr({ ko: '▶ 지금 시작', en: '▶ Start now' })}</button></div>` : ''}
-          ${t.detail ? `<div class="card-detail">${esc(t.detail.slice(0, 140))}</div>` : ''}
-          ${t.attachments?.length ? `<div class="card-att">📎 ${attachmentLinks(t.attachments)}</div>` : ''}
-          ${t.result ? `<details><summary>${tr({ ko: '보고', en: 'Report' })}</summary><div class="card-result">${esc(t.result)}</div></details>` : ''}
-          <div class="row">
-            <select data-act="assign"><option value="">${who ? esc(short(who.name)) : tr({ ko: '배정…', en: 'Assign…' })}</option>${emps
-              .map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))}</option>`)
-              .join('')}</select>
-            ${state === 'review' ? `<button data-act="done">${tr({ ko: '완료', en: 'Done' })}</button>` : ''}
-            <button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">✕</button>
-          </div>
-        </div>`;
-      })
-      .join('')}</div>`;
-  }).join('');
+  if (!changed('board', [s.tasks, emps.map((e) => [e.id, e.name]), [...openCards], doneAll, getLang()])) return;
 
   const board = $('board');
-  board.querySelectorAll<HTMLElement>('.card').forEach((card) => {
-    const id = Number(card.dataset.id);
-    card.addEventListener('dragstart', (ev) => {
+  // a re-render replaces the columns; keep where each one was scrolled to
+  const scrolled = new Map([...board.querySelectorAll<HTMLElement>('.col')].map((c) => [c.dataset.state, c.scrollTop]));
+
+  const lock = `<span class="lock" title="${esc(tr({ ko: '승인 받기: 자동 모드여도 도구마다 매니저 승인', en: 'Require approval: every tool needs the manager\'s approval, even in auto mode' }))}">🔒</span>`;
+  const card = (t: Task, state: TaskState) => {
+    const who = emps.find((e) => e.id === t.assignee);
+    const open = openCards.has(t.id);
+    const meta = [
+      `#${t.id}`,
+      who ? esc(short(who.name)) : `<i>${tr({ ko: '미배정', en: 'unassigned' })}</i>`,
+      agoText(t.updatedAt),
+    ].join(' · ');
+    const marks = `${engineBadge(t)}${t.requireApproval ? lock + ' ' : ''}${t.startAt != null && state === 'todo' ? scheduledBadge(t) + ' ' : ''}${
+      t.attachments?.length ? `<span class="muted">📎${t.attachments.length}</span> ` : ''
+    }`;
+    const body = open
+      ? `${t.startAt != null && state === 'todo' ? `<div class="card-when"><button data-act="now">${tr({ ko: '▶ 지금 시작', en: '▶ Start now' })}</button></div>` : ''}
+         ${t.detail ? `<div class="card-detail">${esc(t.detail.length > DETAIL_CHARS ? `${t.detail.slice(0, DETAIL_CHARS)}…` : t.detail)}</div>` : ''}
+         ${t.attachments?.length ? `<div class="card-att">📎 ${attachmentLinks(t.attachments)}</div>` : ''}
+         ${t.result ? `<details ${state === 'review' ? 'open' : ''}><summary>${tr({ ko: '보고', en: 'Report' })}</summary><div class="card-result">${esc(t.result)}</div></details>` : ''}
+         <div class="row">
+           <select data-act="assign"><option value="">${who ? esc(short(who.name)) : tr({ ko: '배정…', en: 'Assign…' })}</option>${emps
+             .map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))}</option>`)
+             .join('')}</select>
+           <button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">✕</button>
+         </div>`
+      : '';
+    return `<div class="card${open ? ' open' : ''}" draggable="true" data-id="${t.id}">
+      <button type="button" class="card-title link" data-act="toggle" aria-expanded="${open}" title="${esc(t.title)}">${marks}${esc(t.title)}</button>
+      <div class="card-meta"><span>${meta}</span>${state === 'review' ? `<button data-act="done">${tr({ ko: '완료', en: 'Done' })}</button>` : ''}</div>
+      ${body}
+    </div>`;
+  };
+
+  board.innerHTML = COLS().map(([state, label]) => {
+    const all = s.tasks.filter((t) => t.state === state).sort(byRecent);
+    const tasks = state === 'done' && !doneAll ? all.slice(0, DONE_SHOWN) : all;
+    const hidden = all.length - tasks.length;
+    const bulk = state === 'review' && all.length >= 2 ? `<button type="button" class="col-act" data-act="all-done">${tr({ ko: '모두 완료', en: 'All done' })}</button>` : '';
+    const fold =
+      state === 'done' && (hidden > 0 || (doneAll && all.length > DONE_SHOWN))
+        ? `<button type="button" class="link col-more" data-act="done-more">${hidden > 0 ? tr({ ko: `+${hidden}개 더 보기`, en: `+${hidden} more` }) : tr({ ko: '접기', en: 'Show fewer' })}</button>`
+        : '';
+    return `<div class="col" data-state="${state}"><h3>${label} <span class="muted">${all.length}</span>${bulk}</h3>${tasks.map((t) => card(t, state)).join('')}${fold}</div>`;
+  }).join('');
+  board.querySelectorAll<HTMLElement>('.col').forEach((c) => (c.scrollTop = scrolled.get(c.dataset.state) ?? 0));
+
+  board.querySelectorAll<HTMLElement>('.card').forEach((el) => {
+    const id = Number(el.dataset.id);
+    el.addEventListener('dragstart', (ev) => {
       ev.dataTransfer!.setData('text/task-id', String(id));
       ev.dataTransfer!.effectAllowed = 'move';
     });
-    card.querySelector<HTMLSelectElement>('select[data-act="assign"]')!.addEventListener('change', (ev) => {
+    el.querySelector('[data-act="toggle"]')!.addEventListener('click', () => {
+      if (openCards.has(id)) openCards.delete(id);
+      else openCards.add(id);
+      renderBoard(st, send);
+    });
+    el.querySelector<HTMLSelectElement>('select[data-act="assign"]')?.addEventListener('change', (ev) => {
       const v = (ev.target as HTMLSelectElement).value;
       if (v) send({ t: 'assignTask', taskId: id, employeeId: v });
     });
-    card.querySelector('button[data-act="done"]')?.addEventListener('click', () => send({ t: 'moveTask', taskId: id, state: 'done' }));
-    card.querySelector('button[data-act="now"]')?.addEventListener('click', () => {
+    el.querySelector('button[data-act="done"]')?.addEventListener('click', () => {
+      openCards.delete(id);
+      send({ t: 'moveTask', taskId: id, state: 'done' });
+    });
+    el.querySelector('button[data-act="now"]')?.addEventListener('click', () => {
       const t = st.snap.tasks.find((x) => x.id === id);
       if (t?.assignee) send({ t: 'assignTask', taskId: id, employeeId: t.assignee });
     });
-    card.querySelector('button[data-act="del"]')!.addEventListener('click', () => {
+    el.querySelector('button[data-act="del"]')?.addEventListener('click', () => {
       if (confirm(tr({ ko: `작업 #${id}을 삭제할까요?`, en: `Delete task #${id}?` }))) send({ t: 'deleteTask', taskId: id });
     });
+  });
+  board.querySelector('[data-act="all-done"]')?.addEventListener('click', () => {
+    const review = st.snap.tasks.filter((t) => t.state === 'review');
+    if (!confirm(tr({ ko: `검토 중인 작업 ${review.length}개를 모두 완료로 옮길까요?`, en: `Move all ${review.length} tasks in Review to Done?` }))) return;
+    for (const t of review) {
+      openCards.delete(t.id);
+      send({ t: 'moveTask', taskId: t.id, state: 'done' });
+    }
+  });
+  board.querySelector('[data-act="done-more"]')?.addEventListener('click', () => {
+    doneAll = !doneAll;
+    renderBoard(st, send);
   });
   board.querySelectorAll<HTMLElement>('.col').forEach((col) => {
     col.addEventListener('dragover', (ev) => ev.preventDefault());
