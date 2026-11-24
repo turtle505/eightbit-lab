@@ -3,7 +3,7 @@ import { followBottom } from './follow.ts';
 import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
 import { approvalRisk } from './approvalRisk.ts';
 import { lineDiff, type DiffLine } from './diff.ts';
-import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, TaskState, UsageRow } from '../../../shared/protocol.ts';
+import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, Task, TaskState, UsageRow } from '../../../shared/protocol.ts';
 import { dowShort, getLang, hhmm, locale, tr } from '../../../shared/i18n.ts';
 
 export type ViewMode = 'game' | 'console' | 'reports' | 'projects';
@@ -200,6 +200,13 @@ export function renderApprovals(st: UIState, send: Send) {
   );
 }
 
+/** "[Codex]" on a task the lead routed to an engine other than the assignee's default */
+export function engineBadge(t: Task): string {
+  if (!t.engine) return '';
+  const name = t.engine === 'codex' ? 'Codex' : 'Claude';
+  return `<span class="engine-badge e-${t.engine}" title="${esc(tr({ ko: `이 작업만 ${name}로 실행`, en: `This task runs on ${name}` }))}">${name}</span> `;
+}
+
 const WRITE_PREVIEW_LINES = 60;
 
 /** What a file-editing call would change, as a red/green diff instead of the JSON blob. */
@@ -250,7 +257,7 @@ export function renderBoard(st: UIState, send: Send) {
       .map((t) => {
         const who = emps.find((e) => e.id === t.assignee);
         return `<div class="card" draggable="true" data-id="${t.id}">
-          <div class="card-title">#${t.id} ${t.requireApproval ? `<span class="lock" title="${esc(tr({ ko: '승인 받기: 자동 모드여도 도구마다 매니저 승인', en: 'Require approval: every tool needs the manager\'s approval, even in auto mode' }))}">🔒</span> ` : ''}${esc(t.title)}</div>
+          <div class="card-title">#${t.id} ${engineBadge(t)}${t.requireApproval ? `<span class="lock" title="${esc(tr({ ko: '승인 받기: 자동 모드여도 도구마다 매니저 승인', en: 'Require approval: every tool needs the manager\'s approval, even in auto mode' }))}">🔒</span> ` : ''}${esc(t.title)}</div>
           ${t.startAt != null && state === 'todo' ? `<div class="card-when">${scheduledBadge(t)} <button data-act="now">${tr({ ko: '▶ 지금 시작', en: '▶ Start now' })}</button></div>` : ''}
           ${t.detail ? `<div class="card-detail">${esc(t.detail.slice(0, 140))}</div>` : ''}
           ${t.attachments?.length ? `<div class="card-att">📎 ${attachmentLinks(t.attachments)}</div>` : ''}

@@ -13,10 +13,13 @@ export type AgentStatus =
   | 'done' // just finished
   | 'error';
 
+/** which agent harness runs a turn: Claude Code (Agent SDK) or Codex (app-server) */
+export type Engine = 'claude' | 'codex';
+
 export interface EmployeeView {
   id: string;
-  /** execution harness selected for this employee */
-  engine: 'claude' | 'codex';
+  /** execution harness selected for this employee (a task may override it for one turn: Task.engine) */
+  engine: Engine;
   name: string;
   title: string;
   desk: number;
@@ -112,6 +115,8 @@ export interface Task {
   requireApproval: boolean;
   /** scheduled start (epoch ms): the card waits in 'todo' with its assignee until then; null = not scheduled */
   startAt: number | null;
+  /** run this task on this engine instead of the assignee's default (set by the lead/secretary); null = default */
+  engine: Engine | null;
   attachments: AttachmentView[];
   createdAt: number;
   updatedAt: number;

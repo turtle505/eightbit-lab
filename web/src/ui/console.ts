@@ -2,7 +2,7 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
-import { $, type Send, type UIState, ago, agoText, changed, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
+import { $, type Send, type UIState, ago, agoText, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
 import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
@@ -93,7 +93,7 @@ export function renderTaskTable(st: UIState, send: Send) {
       const open = expanded.has(t.id);
       const main = `<tr data-id="${t.id}" class="task t-${t.state}">
         <td class="num">#${t.id}</td>
-        <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
+        <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${engineBadge(t)}${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
           t.attachments?.length ? ` <span class="muted">${tr({ ko: `[첨부 ${t.attachments.length}]`, en: `[${t.attachments.length} files]` })}</span>` : ''
         }</button> ${scheduledBadge(t)}</td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>

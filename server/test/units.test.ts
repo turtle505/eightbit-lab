@@ -973,6 +973,39 @@ describe('live sessions', async () => {
     expect(m.busy()).toEqual({ working: [], queued: 0 }); // the open session alone doesn't count
   });
 
+  it('a task routed to the other engine runs there once and leaves the default untouched', async () => {
+    const sdk = fakeSdk();
+    const { m, store } = makeManager(sdk);
+    m.instruct('lit', 'warm up');
+    await settle();
+    const claudeSession = m.views()[0].sessionId;
+    store.setSetting('codex-thread:lit:backend:' + (await import('node:os')).hostname(), 'th-1');
+    const seen: (string | null)[] = [];
+    (m as any).runCodex = async (e: any) => void seen.push(e.view.sessionId);
+    m.instruct('lit', 'review this', null, { engine: 'codex' });
+    await settle();
+    expect(seen).toEqual(['th-1']); // ran on Codex, resuming the Codex thread
+    expect(sdk.prompts).toEqual(['warm up']); // the Claude session got nothing
+    expect(m.views()[0].engine).toBe('claude');
+    expect(m.views()[0].sessionId).toBe(claudeSession);
+    m.instruct('lit', 'back to normal');
+    await settle();
+    expect(sdk.prompts).toEqual(['warm up', 'back to normal']);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('a local-model employee ignores a Codex override', async () => {
+    const sdk = fakeSdk();
+    const { m, store } = makeManager(sdk);
+    (m as any).emps.get('lit').role.provider = 'ollama-x';
+    let codex = 0;
+    (m as any).runCodex = async () => void codex++;
+    m.instruct('lit', 'x', null, { engine: 'codex' });
+    await settle();
+    expect(codex).toBe(0);
+    expect(store.logsSince(0).some((l) => /requested engine is ignored|지정된 실행기/.test(l.text))).toBe(true);
+  });
+
   it('stop() interrupts the turn but keeps the session open', async () => {
     const sdk = fakeSdk();
     const { m } = makeManager(sdk);
@@ -1770,5 +1803,38 @@ describe('approval cards: risk marks and edit diffs', async () => {
     const big = Array.from({ length: 500 }, (_, i) => String(i)).join('\n');
     const fb = lineDiff(big, big + '\nz');
     expect(fb.filter((l) => l.op === '-')).toHaveLength(500); // too big for LCS: old then new
+  });
+});
+
+describe('lead picks the engine per task', async () => {
+  const { planTaskEngine } = await import('../src/mcp/officeTools.ts');
+  const s = new Store(':memory:');
+  const done = s.createTask('Add parser', 'parse the log', 'aide1');
+  s.updateTask(done.id, { state: 'review', result: 'Added parse() in src/log.ts' });
+  const viaCodex = s.createTask('Port script', '', 'aide1', null, false, null, 'codex');
+  const emps = [
+    { id: 'aide1', engine: 'claude' as const },
+    { id: 'aide2', engine: 'codex' as const },
+  ];
+
+  it('stores the engine on the task', () => {
+    expect(s.getTask(viaCodex.id)!.engine).toBe('codex');
+    expect(s.getTask(done.id)!.engine).toBeNull();
+  });
+
+  it('an explicit engine wins, and none means the default', () => {
+    expect(planTaskEngine({ engine: 'claude', detail: 'd' }, s.listTasks(), emps)).toEqual({ engine: 'claude', detail: 'd' });
+    expect(planTaskEngine({ detail: 'd' }, s.listTasks(), emps)).toEqual({ engine: null, detail: 'd' });
+  });
+
+  it('a review goes to the engine that did not do the work, with the work attached', () => {
+    const r = planTaskEngine({ reviewOf: done.id }, s.listTasks(), emps);
+    expect('engine' in r && r.engine).toBe('codex'); // aide1 runs on Claude by default
+    expect('detail' in r && r.detail).toMatch(/Review the work of task #\d+ "Add parser".*on claude/);
+    expect('detail' in r && r.detail).toContain('Added parse() in src/log.ts');
+    const r2 = planTaskEngine({ reviewOf: viaCodex.id }, s.listTasks(), emps);
+    expect('engine' in r2 && r2.engine).toBe('claude'); // that one was routed to Codex
+    expect(planTaskEngine({ reviewOf: done.id, engine: 'claude' }, s.listTasks(), emps)).toMatchObject({ engine: 'claude' });
+    expect(planTaskEngine({ reviewOf: 999 }, s.listTasks(), emps)).toEqual({ error: 'reviewOf: there is no task #999.' });
   });
 });

@@ -2,7 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { RoutineInput } from '../routines.ts';
 import { fmtWhen, parseStartAt } from '../schedule.ts';
-import type { EmployeeView, Job, LogLine, RoutineView, ServerView, SkillView, Task } from '../../../shared/protocol.ts';
+import type { EmployeeView, Engine, Job, LogLine, RoutineView, ServerView, SkillView, Task, UsageView } from '../../../shared/protocol.ts';
 
 /** What the office exposes to the secretary. Wired up in index.ts. */
 export interface OfficeApi {
@@ -12,13 +12,54 @@ export interface OfficeApi {
   servers(): ServerView[];
   routines(): RoutineView[];
   logsSince(ts: number): LogLine[];
-  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null, requireApproval?: boolean, attachmentIds?: number[], startAt?: number | null): Task;
+  /** subscription quota per engine (the lead routes work away from one that's nearly spent) */
+  usage(): { claude: UsageView; codex: UsageView };
+  createTask(
+    title: string,
+    detail: string,
+    assignee: string | null,
+    createdBy: string | null,
+    requireApproval?: boolean,
+    attachmentIds?: number[],
+    startAt?: number | null,
+    engine?: Engine | null,
+  ): Task;
   createRoutine(input: RoutineInput): RoutineView;
   updateRoutine(id: string, patch: Partial<RoutineInput>): RoutineView;
   deleteRoutine(id: string): RoutineView;
   skills(): SkillView[];
   saveSkill(name: string, description: string, body: string, allow: string[]): SkillView;
 }
+
+const REVIEW_CLIP = 4000;
+const otherEngine = (e: Engine): Engine => (e === 'claude' ? 'codex' : 'claude');
+
+/**
+ * `create_task` engine choice and detail: an explicit engine wins; a review of task #N defaults to the engine
+ * that did *not* do #N (an independent second opinion), and carries #N's result so the reviewer sees it.
+ */
+export function planTaskEngine(
+  input: { engine?: Engine; reviewOf?: number; detail?: string },
+  tasks: Task[],
+  employees: Pick<EmployeeView, 'id' | 'engine'>[],
+): { engine: Engine | null; detail: string } | { error: string } {
+  let detail = input.detail ?? '';
+  let engine: Engine | null = input.engine ?? null;
+  if (input.reviewOf != null) {
+    const r = tasks.find((t) => t.id === input.reviewOf);
+    if (!r) return { error: `reviewOf: there is no task #${input.reviewOf}.` };
+    const ranOn: Engine = r.engine ?? employees.find((e) => e.id === r.assignee)?.engine ?? 'claude';
+    engine ??= otherEngine(ranOn);
+    const result = r.result?.trim() ? clip(r.result.trim(), REVIEW_CLIP) : '(no result recorded; look at the files it changed)';
+    detail =
+      `${detail ? `${detail}\n\n` : ''}Review the work of task #${r.id} "${r.title}" (done by ${r.assignee ?? 'someone'} on ${ranOn}). ` +
+      `Check it independently: correctness, missing cases, and whether it does what was asked. Report concrete problems with where they are, or say it holds up.\n\n` +
+      `Task #${r.id} instruction:\n${clip(r.detail || '(none)', 1500)}\n\nIts result:\n${result}`;
+  }
+  return { engine, detail };
+}
+
+const usageRows = (u: UsageView) => (u.available ? u.rows.map((r) => ({ window: r.label, usedPercent: r.percent, resets: r.resetsAt ? new Date(r.resetsAt).toLocaleString('en-US') : null })) : u.note || 'unavailable');
 
 const text = (s: string, isError = false) => ({ content: [{ type: 'text' as const, text: s }], isError });
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -37,14 +78,18 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
       'Tools to see and manage the AI office: staff status, the task board, remote jobs, servers and routines. ' +
       'create_task with an assignee immediately puts that employee to work, so delegate only when the manager asked for it or a routine says so. ' +
       'For a one-off "do X at time T" (tomorrow 9am, in 2 hours), use create_task with `startAt`; routines are for work that repeats. ' +
+      'Each employee runs on Claude or Codex by default (office_status shows it and both quotas); create_task `engine` runs one task on the other, ' +
+      'and `reviewOf` makes a review task that by default goes to the engine that did not do the work. Prefer the other engine when one quota is above ~85%. ' +
       'Routines (create_routine / update_routine / delete_routine) change the office schedule: use them only when the manager asked; every call waits for the manager\'s approval. ' +
       'A routine should normally run an office skill (save_skill → create_routine with `skill`) instead of carrying a long prompt.',
     tools: [
-      tool('office_status', 'Snapshot of every employee (status, current activity, task) plus open approvals count, jobs and servers.', {}, async () => {
-        const emps = api.employees().map((e) => ({ id: e.id, name: e.name, title: e.title, status: e.status, activity: e.activity, taskId: e.taskId }));
+      tool('office_status', 'Snapshot of every employee (default engine, status, current activity, task), Claude and Codex quota, jobs and servers.', {}, async () => {
+        const emps = api.employees().map((e) => ({ id: e.id, name: e.name, title: e.title, engine: e.engine, status: e.status, activity: e.activity, taskId: e.taskId }));
         const jobs = api.jobs().slice(-20).map((j) => ({ id: j.id, name: j.name, server: j.server, state: j.state, by: j.submittedBy, updated: new Date(j.updatedAt).toLocaleString('en-US') }));
         const servers = api.servers().map((s) => ({ name: s.name, online: s.online, gpus: s.gpus.map((g) => `${g.util}%`).join(' '), note: s.note }));
-        return text(JSON.stringify({ employees: emps, jobs, servers }, null, 2));
+        const u = api.usage();
+        const quota = { claude: usageRows(u.claude), codex: usageRows(u.codex) };
+        return text(JSON.stringify({ employees: emps, quota, jobs, servers }, null, 2));
       }),
       tool(
         'list_tasks',
@@ -162,7 +207,8 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
       ),
       tool(
         'create_task',
-        'Add a task to the board. With `assignee` (employee id) the employee starts on it right away, or at `startAt` if given.',
+        'Add a task to the board. With `assignee` (employee id) the employee starts on it right away, or at `startAt` if given. ' +
+          '`engine` runs this one task on Claude or Codex instead of the assignee\'s default; `reviewOf` turns it into a review of another task.',
         {
           title: z.string(),
           detail: z.string().optional(),
@@ -181,12 +227,25 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
               'one-off scheduled start, local time "YYYY-MM-DDTHH:mm" (e.g. "2026-01-31T09:00"); needs `assignee`. ' +
                 'The card waits on the board until then. If unsure of the current date/time, run `date` first.',
             ),
+          engine: z
+            .enum(['claude', 'codex'])
+            .optional()
+            .describe(
+              'Run this one task on this engine instead of the assignee\'s default (office_status shows defaults and quota). ' +
+                'claude for anything that needs the web (Codex has no network); codex suits in-repo code work; ' +
+                'for a second opinion use the engine that did not do the work (reviewOf does this by default); switch away from an engine whose quota is nearly spent. Omit to use the default.',
+            ),
+          reviewOf: z
+            .number()
+            .int()
+            .optional()
+            .describe('task id to review: its instruction and result are added to this task, and `engine` defaults to the other engine than the one that did it'),
           attachments: z
             .array(z.number().int())
             .optional()
             .describe('attachment ids (#N in the "Attachments" section of your instructions) to hand to the assignee; they get the file paths in their task'),
         },
-        async ({ title, detail, assignee, requireApproval, startAt, attachments }) => {
+        async ({ title, detail, assignee, requireApproval, startAt, engine, reviewOf, attachments }) => {
           if (assignee && !api.employees().some((e) => e.id === assignee)) return text(`unknown employee ${assignee}`, true);
           if (assignee === selfId) return text('You cannot delegate a task to yourself.', true);
           let at: number | null = null;
@@ -196,12 +255,18 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
             if ('error' in p) return text(p.error, true);
             at = p.ms;
           }
-          const t = api.createTask(title, detail ?? '', assignee ?? null, selfId, !!requireApproval, attachments ?? [], at);
+          const plan = planTaskEngine({ engine, reviewOf, detail }, api.tasks(), api.employees());
+          if ('error' in plan) return text(plan.error, true);
+          const codex = api.usage().codex;
+          const codexWarn = plan.engine === 'codex' && !codex.available ? ` (warning: Codex looks unavailable on this machine: ${codex.note || 'no quota info'}; the task may fail)` : '';
+          const t = api.createTask(title, plan.detail, assignee ?? null, selfId, !!requireApproval, attachments ?? [], at, plan.engine);
           const missing = (attachments ?? []).filter((id) => !t.attachments.some((a) => a.id === id));
           return text(
             `created task #${t.id}${t.startAt ? `, scheduled: ${assignee} starts it ${fmtWhen(t.startAt)}` : assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 every tool call needs approval)' : ''}` +
               (t.attachments.length ? `, attachments ${t.attachments.map((a) => `#${a.id}`).join(' ')}` : '') +
-              (missing.length ? ` (ignored unknown attachment ids: ${missing.join(', ')})` : ''),
+              (missing.length ? ` (ignored unknown attachment ids: ${missing.join(', ')})` : '') +
+              (t.engine ? `, runs on ${t.engine} (this task only)${reviewOf != null ? `, reviewing #${reviewOf}` : ''}` : '') +
+              codexWarn,
           );
         },
       ),

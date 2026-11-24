@@ -1,5 +1,5 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentStatus, EmployeeView, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
+import type { AgentStatus, EmployeeView, Engine, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
 import { bus } from '../bus.ts';
 import { getLang, hhmm, LANG_NAME_EN, tr, type Lang } from '../../../shared/i18n.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
@@ -31,6 +31,8 @@ interface Work {
   /** force 'ask' for this run (task marked 🔒 by the manager or the delegating lead) */
   requireApproval: boolean;
   attachmentPaths: string[];
+  /** run this one turn on this engine instead of the employee's default (a task the lead routed) */
+  engine?: Engine;
 }
 
 /** Push-driven async iterable: the stream of user messages a live session reads from. */
@@ -386,11 +388,16 @@ export class AgentManager {
   }
 
   /** Give an employee an instruction. Queued if they're busy or the office is at capacity. */
-  instruct(employeeId: string, text: string, taskId: number | null = null, opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean; attachmentPaths?: string[] } = {}) {
+  instruct(
+    employeeId: string,
+    text: string,
+    taskId: number | null = null,
+    opts: { extraAllow?: string[]; label?: string; requireApproval?: boolean; attachmentPaths?: string[]; engine?: Engine | null } = {},
+  ) {
     const e = this.emp(employeeId);
     const label = opts.label ?? `💬 ${clip(text.split('\n').find((l) => l.trim())?.trim() ?? '', 40)}`;
     this.log(e, 'user', taskId ? `${tr({ ko: `[작업 #${taskId}]`, en: `[Task #${taskId}]` })} ${text}` : text);
-    this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval, attachmentPaths: opts.attachmentPaths ?? [] });
+    this.enqueue(e, { text, taskId, extraAllow: opts.extraAllow ?? [], label, requireApproval: !!opts.requireApproval, attachmentPaths: opts.attachmentPaths ?? [], engine: opts.engine ?? undefined });
   }
 
   /** Add work to an employee's inbox (`front` = before anything already waiting) and let the queue run. */
@@ -869,8 +876,47 @@ export class AgentManager {
     e.lastText = '';
     this.set(e, 'thinking', tr({ ko: '💭 업무 파악 중', en: '💭 Getting up to speed' }));
     if (e.idleTimer) clearTimeout(e.idleTimer);
-    if (e.view.engine === 'codex') return this.runCodex(e, work);
+    const engine = this.turnEngine(e, work);
+    if (engine !== e.view.engine) return this.runOverride(e, work, engine);
+    if (engine === 'codex') return this.runCodex(e, work);
+    return this.runClaude(e, work);
+  }
 
+  /** The engine for this turn: the task's override, except that an Ollama (provider) employee can't run Codex. */
+  private turnEngine(e: Employee, work: Work): Engine {
+    if (!work.engine || work.engine === e.view.engine) return e.view.engine;
+    if (e.role.provider) {
+      this.log(e, 'system', tr({ ko: '이 직원은 로컬 모델이라 지정된 실행기 대신 기본으로 실행합니다', en: 'This employee runs on a local model, so the requested engine is ignored' }));
+      return e.view.engine;
+    }
+    return work.engine;
+  }
+
+  /**
+   * One turn on the other engine. Each engine keeps its own conversation (Claude: `sessions`, Codex: the
+   * thread setting), and both run paths read and write `e.view.sessionId`, so swap in that engine's id for
+   * the turn and put the default's back afterwards — the employee's own engine and conversation are untouched.
+   */
+  private async runOverride(e: Employee, work: Work, engine: Engine): Promise<void> {
+    this.log(e, 'system', engine === 'codex' ? tr({ ko: '🔀 Codex로 실행 (이 작업만)', en: '🔀 Running on Codex (this task only)' }) : tr({ ko: '🔀 Claude로 실행 (이 작업만)', en: '🔀 Running on Claude (this task only)' }));
+    const saved = { sessionId: e.view.sessionId, host: e.sessionHost };
+    if (engine === 'codex') e.view.sessionId = this.store.getSetting(codexThreadKey(e.role)) || null;
+    else {
+      const s = this.store.getSession(e.role.id);
+      e.view.sessionId = s.sessionId;
+      e.sessionHost = s.hostId;
+    }
+    try {
+      await (engine === 'codex' ? this.runCodex(e, work) : this.runClaude(e, work));
+    } finally {
+      e.view.sessionId = saved.sessionId;
+      e.sessionHost = saved.host;
+      this.sendView(e);
+    }
+  }
+
+  /** Claude path of run(): push the instruction into the live session and wait for that turn to finish. */
+  private async runClaude(e: Employee, work: Work): Promise<void> {
     // a remote session costs one ssh connection; queue behind the per-host budget rather than
     // hammering a server that bans noisy clients
     const remote = e.role.host ? this.hosts?.get(e.role.host) : undefined;

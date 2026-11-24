@@ -24,9 +24,9 @@ export interface ProjectSessionRow {
   createdAt: number;
   closedAt: number | null;
 }
-import type { FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
+import type { Engine, FeedItem, Job, JobState, LogLine, PermissionSetting, Task, TaskState } from '../../shared/protocol.ts';
 
-const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, attachments });
+const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, engine: r.engine === 'claude' || r.engine === 'codex' ? r.engine : null, attachments });
 
 export interface RoutineRow {
   id: string;
@@ -130,6 +130,7 @@ export class Store {
     if (!scols.includes('hostId')) this.db.exec('ALTER TABLE sessions ADD COLUMN hostId TEXT');
     if (!tcols.includes('requireApproval')) this.db.exec('ALTER TABLE tasks ADD COLUMN requireApproval INTEGER NOT NULL DEFAULT 0');
     if (!tcols.includes('startAt')) this.db.exec('ALTER TABLE tasks ADD COLUMN startAt INTEGER');
+    if (!tcols.includes('engine')) this.db.exec('ALTER TABLE tasks ADD COLUMN engine TEXT');
   }
 
   // ---- tasks
@@ -148,11 +149,19 @@ export class Store {
     const r = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
     return r ? rowToTask(r, this.attachmentsForTask(id).map(toView)) : undefined;
   }
-  createTask(title: string, detail: string, assignee: string | null, createdBy: string | null = null, requireApproval = false, startAt: number | null = null): Task {
+  createTask(
+    title: string,
+    detail: string,
+    assignee: string | null,
+    createdBy: string | null = null,
+    requireApproval = false,
+    startAt: number | null = null,
+    engine: Engine | null = null,
+  ): Task {
     const now = Date.now();
     const r = this.db
-      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, startAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, startAt, now, now);
+      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, startAt, engine, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, startAt, engine, now, now);
     return this.getTask(Number(r.lastInsertRowid))!;
   }
   updateTask(id: number, patch: Partial<Pick<Task, 'assignee' | 'state' | 'result' | 'startAt'>>): Task | undefined {

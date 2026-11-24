@@ -1572,3 +1572,8 @@ body .md-body h4 {
   .cmd-form select { flex: 1 0 100%; max-width: none; }
   .cmd-hint { display: none; }
 }
+
+/* a task routed to an engine other than the assignee's default */
+.engine-badge { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 4px; border-radius: 3px; border: 1px solid currentColor; vertical-align: 1px; }
+.engine-badge.e-codex { color: var(--ok); }
+.engine-badge.e-claude { color: var(--accent); }

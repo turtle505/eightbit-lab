@@ -15,7 +15,7 @@ import { SkillLibrary } from './skills.ts';
 import { ReportLibrary, reportRoots } from './reports.ts';
 import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
-import type { FeedItem } from '../../shared/protocol.ts';
+import type { Engine, FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
 import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
@@ -129,9 +129,10 @@ const usage = new UsageMonitor(ROOT);
 const codexUsage = new CodexUsageMonitor();
 // refresh subscription usage shortly after an employee finishes a run
 bus.on('msg', (m: ServerMsg) => {
+  // a task can run on the engine that isn't the employee's default, so refresh both (debounced, cheap)
   if (m.t === 'employee' && (m.data.status === 'done' || m.data.status === 'error')) {
-    if (m.data.engine === 'codex') codexUsage.poke();
-    else usage.poke();
+    codexUsage.poke();
+    usage.poke();
   }
 });
 
@@ -140,7 +141,7 @@ function assignTask(taskId: number, employeeId: string) {
   const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing', startAt: null }); // assigning by hand starts a scheduled card now
   if (!t) return;
   bus.send({ t: 'task', data: t });
-  agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval, attachmentPaths: store.attachmentsForTask(t.id).flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
+  agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval, engine: t.engine, attachmentPaths: store.attachmentsForTask(t.id).flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
 }
 
 function createTask(
@@ -151,10 +152,11 @@ function createTask(
   requireApproval = false,
   attachmentIds: number[] = [],
   startAt: number | null = null,
+  engine: Engine | null = null,
 ) {
   // a start time only means something with someone to start it; one that's (nearly) now just starts now
   const later = assignee && agents.has(assignee) && startAt != null && startAt > Date.now() + SCHEDULE_SLACK_MS ? startAt : null;
-  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later ? assignee : null, createdBy, requireApproval, later);
+  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later ? assignee : null, createdBy, requireApproval, later, engine);
   if (attachmentIds.length) store.bindAttachments(created.id, attachmentIds);
   const t = store.getTask(created.id)!;
   bus.send({ t: 'task', data: t });
@@ -211,6 +213,7 @@ agents.officeApi = {
   servers: () => registry.list(),
   routines: () => routines.list(),
   logsSince: (ts) => store.logsSince(ts),
+  usage: () => ({ claude: usage.view, codex: codexUsage.view }),
   createTask,
   createRoutine: (input) => routines.create(input),
   updateRoutine: (id, patch) => routines.update(id, patch),
