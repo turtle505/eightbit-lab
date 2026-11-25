@@ -126,6 +126,10 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
 | `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
+| `thug` | Kang | Street punk who swears at whatever is giving you a hard time, never at you |
+| `counsel` | On | A calm counselor who listens and helps you sort things out |
+
+Kang and On aren't there for work. They stand on a rug in the bottom-left corner with no desk, keep their replies to a sentence or two, and talk in speech bubbles: their reply over their head, what you said over yours. They answer in the office language and take keys <kbd>7</kbd>/<kbd>8</kbd>; the team lead never hands them tasks.
 
 **Fitting them to your field.** Setting `domain` is usually enough: every employee's prompt starts with `About this team: <domain>`. To go further — say, the evaluation analyst should know your field's metrics, or the researcher may use a paper-search MCP server you've installed — override that employee in `config/roles.local.yaml`. Entries are merged by `id`, field by field:
 

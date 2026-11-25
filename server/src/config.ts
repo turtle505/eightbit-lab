@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
-import type { PermissionSetting } from '../../shared/protocol.ts';
+import type { PermissionSetting, Seat } from '../../shared/protocol.ts';
 import { tr, type Lang } from '../../shared/i18n.ts';
 import { DEFAULT_NOTE_FORMAT, type NoteFormat } from './obsidian.ts';
 import { normalizeNotify, type NotifyConfig } from './notify.ts';
@@ -103,7 +103,7 @@ export interface RoleConfig {
   stayAtDesk?: boolean;
   /** 'lead' draws the executive desk */
   /** a fixed seat instead of a slot in the desk grid */
-  seat?: 'reception' | 'lead';
+  seat?: Seat;
   deskStyle?: 'lead';
   /** overrides office.permissionMode for this employee */
   permissionMode?: PermissionSetting;

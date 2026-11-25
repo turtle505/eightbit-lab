@@ -277,6 +277,38 @@ textarea:focus-visible {
   max-width: 320px;
   opacity: 1;
 }
+/* corner characters (and the manager talking to them): a game-style text box that wraps instead of clipping */
+.bubble.speech {
+  transform: translateY(-100%);
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  width: max-content;
+  max-width: 260px;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 4px 8px;
+  border-width: 3px;
+  opacity: 1;
+  z-index: 3;
+}
+.bubble.speech::after {
+  left: var(--tail-x, 50%);
+  bottom: -7px;
+}
+.bubble.speech.selected {
+  max-width: 260px;
+}
+.bubble.speech.stacked::after {
+  display: none;
+}
+.bubble.speech .speech-to {
+  display: block;
+  font-size: 10px;
+  color: #777;
+}
 .nametag {
   position: absolute;
   transform: translate(-50%, 0);

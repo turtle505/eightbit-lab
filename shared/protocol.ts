@@ -16,6 +16,12 @@ export type AgentStatus =
 /** which agent harness runs a turn: Claude Code (Agent SDK) or Codex (app-server) */
 export type Engine = 'claude' | 'codex';
 
+/**
+ * A fixed place outside the desk grid. 'reception' and 'lead' are desks in the bottom strip; 'corner' is a
+ * standing spot (no desk) in the bottom-left corner, where the role's `desk` number is its order in the corner.
+ */
+export type Seat = 'reception' | 'lead' | 'corner';
+
 export interface EmployeeView {
   id: string;
   /** execution harness selected for this employee (a task may override it for one turn: Task.engine) */
@@ -35,7 +41,7 @@ export interface EmployeeView {
   /** always seated at the own desk in the game view */
   stayAtDesk?: boolean;
   /** a fixed seat instead of a slot in the desk grid */
-  seat?: 'reception' | 'lead';
+  seat?: Seat;
   deskStyle?: 'lead';
   /** 'auto': a classifier approves tool calls and only unclear ones become approval cards; 'ask': every non-autoAllow tool asks */
   permission: PermissionSetting;

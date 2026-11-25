@@ -235,6 +235,9 @@ function onMsg(m: ServerMsg) {
       s.routines = s.routines.filter((r) => r.id !== m.id);
       break;
     case 'log': {
+      // corner characters talk in speech bubbles: their replies over their heads, the manager's lines over the manager's
+      if (m.data.kind === 'assistant') scene.say(m.data.employeeId, m.data.text);
+      else if (m.data.kind === 'user') scene.managerSay(m.data.employeeId, m.data.text);
       state.feed.push(m.data);
       if (state.feed.length > FEED_MAX) state.feed.splice(0, state.feed.length - FEED_MAX);
       const arr = state.logs.get(m.data.employeeId);

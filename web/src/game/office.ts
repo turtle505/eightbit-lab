@@ -1,6 +1,6 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
-import type { AgentStatus, EmployeeView, ServerView, Task } from '../../../shared/protocol.ts';
+import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
 import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
@@ -49,6 +49,12 @@ interface Spot {
   y: number;
 }
 
+/** A line of dialogue revealed a character at a time, like a game text box. */
+interface Speech {
+  chars: string[];
+  shown: number;
+}
+
 interface Actor {
   id: string;
   x: number;
@@ -57,14 +63,36 @@ interface Actor {
   view: EmployeeView;
   bubble: HTMLDivElement;
   tag: HTMLDivElement;
+  /** corner (chat) characters only: their last reply */
+  speech: Speech | null;
+  /** corner characters: frame at which the manager last spoke to them and no reply has come yet */
+  awaitingSince: number | null;
+  /** last text written into the bubble, so the DOM is touched only on change */
+  bubbleText: string;
 }
 
 /** Reserved seats sit in the bottom strip; every other desk is a slot in the grid. */
 const seatPos = (seat: 'reception' | 'lead') => (seat === 'reception' ? { x: 206, y: H - 44 } : { x: 40, y: H - 36 });
-const deskPos = (i: number, seat?: 'reception' | 'lead') =>
-  seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
-const seatSpot = (i: number, seat?: 'reception' | 'lead'): Spot => ({ x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 });
-const besideSpot = (i: number, seat?: 'reception' | 'lead'): Spot => ({ x: deskPos(i, seat).x + 60, y: deskPos(i, seat).y + 16 });
+/** corner characters stand (no desk) between the bottom-left plant and the manager's rug */
+const cornerSpot = (i: number): Spot => ({ x: 44 + i * 32, y: H - 10 });
+const deskPos = (i: number, seat?: Seat) =>
+  seat === 'corner' ? cornerSpot(i) : seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
+const seatSpot = (i: number, seat?: Seat): Spot =>
+  seat === 'corner' ? cornerSpot(i) : { x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 };
+const besideSpot = (i: number, seat?: Seat): Spot =>
+  seat === 'corner' ? cornerSpot(i) : { x: deskPos(i, seat).x + 60, y: deskPos(i, seat).y + 16 };
+/** characters per frame for the typewriter effect (~30/s at 60 fps) */
+const TYPE_SPEED = 0.5;
+/** frames the manager's line stays up after the reply has finished typing */
+const MANAGER_LINE_HOLD = 360;
+const BUSY: AgentStatus[] = ['queued', 'thinking', 'typing', 'running', 'researching', 'remote'];
+/** what a corner character says when selected before anyone has talked to them */
+const greeting = (v: EmployeeView) =>
+  v.id === 'thug'
+    ? tr({ ko: '…뭐. 또 누가 건드렸어?', en: '…What. Who messed with you this time?' })
+    : v.id === 'counsel'
+      ? tr({ ko: '오늘 하루 어땠어요?', en: 'How was your day?' })
+      : tr({ ko: '무슨 일 있어?', en: "What's up?" });
 // lounge spots along the top wall, spaced so bubbles don't collide; it wraps to a second line
 const coffeeSpot = (i: number): Spot => ({ x: 62 + (i % 7) * 46, y: 68 + Math.floor(i / 7) * 10 });
 
@@ -97,6 +125,10 @@ export class OfficeScene {
   private rows = MIN_ROWS;
   private figureTags = new Map<FigureKey, HTMLDivElement>();
   private boardText = '';
+  /** the manager's line to a corner character, shown over the manager's head */
+  private managerLine: { to: string; speech: Speech; hideAt: number | null } | null = null;
+  private managerBubble: HTMLDivElement;
+  private managerBubbleText = '';
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -114,6 +146,10 @@ export class OfficeScene {
       overlay.append(tag);
       this.figureTags.set(key, tag);
     }
+    this.managerBubble = document.createElement('div');
+    this.managerBubble.className = 'bubble speech manager-line';
+    this.managerBubble.hidden = true;
+    overlay.append(this.managerBubble);
     // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
     new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
@@ -126,6 +162,9 @@ export class OfficeScene {
         return;
       }
       const id = this.hit(ev);
+      // clicking a character mid-line shows the rest at once, like skipping dialogue in a game
+      const sp = id ? this.actors.get(id)?.speech : null;
+      if (sp) sp.shown = sp.chars.length;
       this.selected = id;
       this.onSelect(id);
     });
@@ -220,21 +259,89 @@ export class OfficeScene {
     if (v.desk < 0) return; // a session that has not been given a desk lives in the projects tab only
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
+      const start = v.seat === 'corner' || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
       tag.className = 'nametag';
       this.overlay.append(bubble, tag);
-      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag };
+      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '' };
       this.actors.set(v.id, a);
     }
     a.view = v;
     this.layout();
-    a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
+    // corner characters speak their replies instead (see renderSpeech, called every frame)
+    a.bubble.classList.toggle('speech', v.seat === 'corner');
+    if (v.seat !== 'corner') a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
     a.bubble.title = v.activity;
     a.bubble.dataset.status = v.status;
     a.tag.textContent = v.name.replace(/^.*"(.*)".*$/, '$1');
+  }
+
+  /** A corner character's reply (an assistant log line): shown over their head, typed out. */
+  say(id: string, text: string) {
+    const a = this.actors.get(id);
+    if (!a || a.view.seat !== 'corner' || !text.trim()) return;
+    a.speech = { chars: Array.from(text.trim()), shown: 0 };
+    a.awaitingSince = null;
+    // one conversation at a time: the other corner characters fall quiet
+    for (const o of this.actors.values()) if (o !== a && o.view.seat === 'corner') o.speech = null;
+  }
+
+  /** What the manager said to a corner character (a user log line): shown over the manager's head. */
+  managerSay(id: string, text: string) {
+    const a = this.actors.get(id);
+    if (!a || a.view.seat !== 'corner' || !text.trim()) return;
+    a.speech = null;
+    a.awaitingSince = this.t;
+    for (const o of this.actors.values()) if (o.view.seat === 'corner' && o !== a) o.speech = null;
+    this.managerLine = { to: id, speech: { chars: Array.from(text.trim()), shown: 0 }, hideAt: null };
+  }
+
+  /** Advance the typewriter and write each corner character's bubble (and the manager's line). */
+  private renderSpeech() {
+    const ml = this.managerLine;
+    if (ml) {
+      ml.speech.shown = Math.min(ml.speech.chars.length, ml.speech.shown + TYPE_SPEED);
+      const to = this.actors.get(ml.to);
+      const reply = to?.speech;
+      // fade out a while after the reply has finished typing, or once nobody is answering any more
+      if (ml.hideAt == null && reply && reply.shown >= reply.chars.length) ml.hideAt = this.t + MANAGER_LINE_HOLD;
+      if (ml.hideAt == null && to && !reply && to.awaitingSince == null) ml.hideAt = this.t + MANAGER_LINE_HOLD;
+      if (!to || (ml.hideAt != null && this.t >= ml.hideAt)) this.managerLine = null;
+    }
+    const line = this.managerLine;
+    const text = line ? line.speech.chars.slice(0, Math.floor(line.speech.shown)).join('') : '';
+    const head = line ? `→ ${(this.actors.get(line.to)?.view.name ?? '').replace(/^.*"(.*)".*$/, '$1')}` : '';
+    const key = `${head}\n${text}`;
+    if (key !== this.managerBubbleText) {
+      this.managerBubbleText = key;
+      this.managerBubble.hidden = !line;
+      const to = document.createElement('span');
+      to.className = 'speech-to';
+      to.textContent = head;
+      this.managerBubble.replaceChildren(to, document.createTextNode(text));
+    }
+
+    for (const a of this.actors.values()) {
+      const v = a.view;
+      if (v.seat !== 'corner') continue;
+      // a turn that ended without a reply (stopped, failed) stops the waiting dots
+      if (a.awaitingSince != null && !BUSY.includes(v.status) && this.t - a.awaitingSince > 120) a.awaitingSince = null;
+      let out: string;
+      if (v.status === 'waiting_permission' || v.status === 'error') out = v.activity;
+      else if (a.awaitingSince != null && !a.speech) out = '.'.repeat(1 + (Math.floor(this.t / 20) % 3));
+      else if (a.speech) {
+        a.speech.shown = Math.min(a.speech.chars.length, a.speech.shown + TYPE_SPEED);
+        out = a.speech.chars.slice(0, Math.floor(a.speech.shown)).join('');
+      } else if (this.selected === a.id) out = greeting(v);
+      else out = '';
+      if (out !== a.bubbleText) {
+        a.bubbleText = out;
+        a.bubble.textContent = out;
+      }
+      a.bubble.hidden = !out;
+    }
   }
 
   /** GPU servers are shown in the jobs panel now, not drawn in the office. */
@@ -372,7 +479,7 @@ export class OfficeScene {
     return c;
   }
 
-  private drawDesk(i: number, status: AgentStatus | null, local = false, seat?: 'reception' | 'lead') {
+  private drawDesk(i: number, status: AgentStatus | null, local = false, seat?: Seat) {
     const g = this.g;
     const { x, y } = deskPos(i, seat);
     // desk top
@@ -419,7 +526,7 @@ export class OfficeScene {
 
   // ---- team lead's desk: a regular desk plus a simple office chair and a small brass nameplate (kept modest
   // so the manager's desk next to it stays the showpiece)
-  private drawLeadChair(i: number, seat?: 'reception' | 'lead') {
+  private drawLeadChair(i: number, seat?: Seat) {
     const g = this.g;
     const s = seatSpot(i, seat);
     g.fillStyle = '#2f3440';
@@ -428,7 +535,7 @@ export class OfficeScene {
     g.fillRect(s.x - 5, s.y - 14, 10, 2);
   }
 
-  private drawLeadDesk(i: number, status: AgentStatus | null, seat?: 'reception' | 'lead') {
+  private drawLeadDesk(i: number, status: AgentStatus | null, seat?: Seat) {
     this.drawDesk(i, status, false, seat);
     const g = this.g;
     const { x, y } = deskPos(i, seat);
@@ -461,7 +568,7 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
-    if (v.stayAtDesk) return seatSpot(v.desk, v.seat);
+    if (v.stayAtDesk || v.seat === 'corner') return seatSpot(v.desk, v.seat);
     // the server room is gone from the drawing; remote work just shows in the bubble
     if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
     if (BESIDE.includes(v.status)) return besideSpot(v.desk, v.seat);
@@ -496,7 +603,7 @@ export class OfficeScene {
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
     // one desk per (seat, slot): a reserved seat and a grid slot can share a number
-    type Desk = { i: number; seat?: 'reception' | 'lead'; lead: boolean; local: boolean; status: AgentStatus | null };
+    type Desk = { i: number; seat?: Seat; lead: boolean; local: boolean; status: AgentStatus | null };
     const desks = new Map<string, Desk>();
     const key = (i: number, seat?: string) => `${seat ?? ''}#${i}`;
     // only occupied desks are drawn — an office of empty furniture looks abandoned
@@ -506,6 +613,7 @@ export class OfficeScene {
       const spot = seatSpot(v.desk, v.seat);
       const seated = a.x === spot.x && a.y === spot.y;
       items.push({ y: a.y + (seated ? -0.5 : 0), draw: () => this.drawActor(a, seated) });
+      if (v.seat === 'corner') continue; // they stand; no desk
       desks.set(key(v.desk, v.seat), {
         i: v.desk,
         seat: v.seat,
@@ -521,6 +629,8 @@ export class OfficeScene {
         items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(d.i, d.status, d.seat) });
       } else items.push({ y: p.y + 2, draw: () => this.drawDesk(d.i, d.status, d.local, d.seat) });
     }
+    // the corner characters' rug, under everything
+    if ([...this.actors.values()].some((a) => a.view.seat === 'corner')) items.push({ y: -1e9, draw: () => this.drawCornerRug() });
     // the professor: just stands there, solemnly
     items.push({ y: PROF.y, draw: () => this.drawProfessor() });
     // the manager (you) behind the manager desk
@@ -530,7 +640,21 @@ export class OfficeScene {
     items.push({ y: H - 33, draw: () => this.drawBossDesk() });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
 
+    this.renderSpeech();
     this.layoutOverlay();
+  }
+
+  /** a small round-cornered rug for the corner characters, between the plant and the manager's rug */
+  private drawCornerRug() {
+    const g = this.g;
+    const x = 22, y = H - 26, w = 76, h = 22;
+    g.fillStyle = '#8a5a3b';
+    g.fillRect(x + 1, y, w - 2, h);
+    g.fillRect(x, y + 1, w, h - 2);
+    g.fillStyle = '#c47a4a';
+    g.fillRect(x + 2, y + 2, w - 4, h - 4);
+    g.fillStyle = '#e0a366';
+    for (let k = 0; k < 3; k++) g.fillRect(x + 6, y + 6 + k * 4, w - 12, 1);
   }
 
   private drawProfessor() {
@@ -709,6 +833,8 @@ export class OfficeScene {
     const v = a.view;
     let pose: Pose = 'stand';
     if (a.walkPhase) pose = Math.floor(a.walkPhase / 8) % 2 ? 'walkA' : 'walkB';
+    // corner characters have no desk to type at: they just stand there and talk
+    else if (v.seat === 'corner' && v.status !== 'waiting_permission') pose = 'stand';
     else if (seated && ['typing', 'running', 'researching'].includes(v.status)) pose = Math.floor(this.t / 7) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'remote') pose = Math.floor(this.t / 9) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'waiting_permission') pose = 'handUp';
@@ -770,12 +896,40 @@ export class OfficeScene {
         tag.style.fontSize = `${Math.max(12, 9 * s)}px`;
       }
     }
+    const width = W * s;
+    // speech bubbles are wide and wrap: keep them inside the canvas and point the tail at the speaker's head
+    const placeSpeech = (b: HTMLDivElement, headX: number, headY: number, anchor: number) => {
+      const w = b.offsetWidth;
+      const left = Math.max(4, Math.min(width - w - 4, headX - w * anchor));
+      b.style.left = `${left}px`;
+      b.style.top = `${headY}px`;
+      b.style.setProperty('--tail-x', `${headX - left}px`);
+    };
     for (const a of this.actors.values()) {
-      a.bubble.style.left = `${a.x * s}px`;
-      a.bubble.style.top = `${(a.y - SPRITE_H - 5) * s}px`;
+      if (a.view.seat === 'corner') {
+        if (!a.bubble.hidden) placeSpeech(a.bubble, a.x * s, (a.y - SPRITE_H - 5) * s, 0.5);
+      } else {
+        a.bubble.style.left = `${a.x * s}px`;
+        a.bubble.style.top = `${(a.y - SPRITE_H - 5) * s}px`;
+      }
       a.bubble.classList.toggle('selected', this.selected === a.id);
       a.tag.style.left = `${a.x * s}px`;
       a.tag.style.top = `${(a.y + 2) * s}px`;
+    }
+    // the manager's line: if a reply bubble is in the way, it moves up above it (older line on top, like a chat log)
+    const mb = this.managerBubble;
+    mb.classList.remove('stacked');
+    if (!mb.hidden) {
+      placeSpeech(mb, 150 * s, (H - 34 - MANAGER_H - 2) * s, 0.15);
+      const m = mb.getBoundingClientRect();
+      for (const a of this.actors.values()) {
+        if (a.view.seat !== 'corner' || a.bubble.hidden) continue;
+        const r = a.bubble.getBoundingClientRect();
+        if (r.right > m.left && r.left < m.right && r.bottom > m.top && r.top < m.bottom) {
+          mb.style.top = `${parseFloat(mb.style.top) - (m.bottom - r.top) - 6}px`;
+          mb.classList.add('stacked');
+        }
+      }
     }
   }
 }
