@@ -12,7 +12,7 @@
   <a href="README.ko.md"><img src="https://img.shields.io/badge/language-EN%20%2F%20KO-f0c050" alt="English and Korean"></a>
 </p>
 
-<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#tutorial">Tutorial</a> · <a href="#everyday-use">Everyday use</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
+<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#installation">Installation</a> · <a href="#tutorial">Tutorial</a> · <a href="#controls">Controls</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
 
 | Your team | Your desk |
 |---|---|
@@ -26,17 +26,15 @@ Runs locally on macOS or Linux using your own CLI login. Claude Code requires a 
 
 ---
 
-## Tutorial
+## Installation
 
-Five stages, about ten minutes. Play them in order and you'll know every basic control.
-
-### Stage 0: Gear up
+### Requirements
 
 - **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag. With nvm, `nvm use` picks the right one (`.nvmrc`); `npm start` refuses older versions with a clear message.
 - **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
 - macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
 
-### Stage 1: Start the game
+### Run
 
 ```bash
 git clone https://github.com/turtle505/eightbit-lab.git
@@ -45,11 +43,15 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. The office opens with no config. You are the **manager**, at the big desk at the bottom.
+Open **http://localhost:5173**. No configuration is needed to start.
 
-**Clear when:** you see the pixel office, with six employees having ☕ in the lounge.
+---
 
-### Stage 2: Your first instruction
+## Tutorial
+
+You are the **manager**, at the big desk at the bottom of the office. Your six employees are in the lounge having ☕, waiting for orders. Clear these four stages in order and you'll know every basic control.
+
+### Stage 1: Your first instruction
 
 1. Click **Ada** (or press <kbd>1</kbd>).
 2. Type in the box under the office and press Enter: *"Find three recent papers on retrieval-augmented generation and summarise them."*
@@ -59,19 +61,19 @@ Open **http://localhost:5173**. The office opens with no config. You are the **m
 
 **Clear when:** Ada is typing at her desk.
 
-### Stage 3: Approve something
+### Stage 2: Approve something
 
 When an employee **raises a hand with a `!`**, they need your OK. Read what they want to do in the yellow approval panel, then **approve** or **deny**. Risky actions (deletes, git push, reaching a remote server and the like) are marked.
 
 **Clear when:** you've handled one approval card. (If nobody raised a hand, you skipped this stage.)
 
-### Stage 4: Collect the report
+### Stage 3: Collect the report
 
 When the work is done, the employee sparkles ✨ and the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
 
 **Clear when:** you've read Ada's summary in the feed.
 
-### Stage 5: Task cards
+### Stage 4: Task cards
 
 Bigger jobs go on a card instead of a chat line.
 
@@ -90,9 +92,11 @@ Bigger jobs go on a card instead of a chat line.
 
 ---
 
-## Everyday use
+## Controls
 
-| I want to… | Do this |
+Once the tutorial is cleared, this is the full list of controls.
+
+| Action | How |
 |---|---|
 | Give an instruction | Click an employee (or pick one in the box right under the office) → type and press Enter. <kbd>/</kbd> jumps to the box |
 | Assign a task | Add a card on the task board → drag it onto an employee (or pick from the card's dropdown) |
@@ -108,11 +112,11 @@ Bigger jobs go on a card instead of a chat line.
 
 **Views.** *Game* is the pixel office. *Console* shows the same data as tables: staff, tasks, a combined activity feed and approvals, all driven from the keyboard. *Reports* is a reader for report files. Add `?view=console` or `?view=reports` to the URL to open one directly.
 
-**Keyboard** (console): <kbd>1</kbd>–<kbd>6</kbd> select · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruct · <kbd>a</kbd>/<kbd>d</kbd> approve/deny · <kbd>Esc</kbd> deselect.
+**Hotkeys** (console): <kbd>1</kbd>–<kbd>6</kbd> select · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruct · <kbd>a</kbd>/<kbd>d</kbd> approve/deny · <kbd>Esc</kbd> deselect.
 
-**What the characters mean**
+**Status signs.** A glance at a character tells you what they're doing.
 
-| You see | It means |
+| You see | Status |
 |---|---|
 | ☕ In the lounge | Idle |
 | Typing at the desk | Working. The monitor is blue when editing, green when running commands, sky blue when on the web |
