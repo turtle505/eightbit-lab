@@ -304,6 +304,13 @@ textarea:focus-visible {
 .bubble.speech.stacked::after {
   display: none;
 }
+/* a bubble moved away from its speaker (to clear another bubble) says whose it is */
+.bubble.speech.stacked[data-who]::before {
+  content: attr(data-who);
+  display: block;
+  font-size: 10px;
+  color: #777;
+}
 .bubble.speech .speech-to {
   display: block;
   font-size: 10px;

@@ -76,6 +76,9 @@ interface Actor {
   bubbleText: string;
   /** the greeting shown last time, so the next one differs */
   lastGreet: string;
+  /** the speech object seen last frame and the frame it appeared: the newer of two bubbles stays nearer its speaker */
+  speechRef: Speech | null;
+  speechSince: number;
 }
 
 /** Reserved seats sit in the bottom strip; every other desk is a slot in the grid. */
@@ -449,6 +452,12 @@ export class OfficeScene {
   private bagDir = 1;
   private bagSpark: { x: number; y: number; until: number } | null = null;
   private bagTag: HTMLDivElement;
+  // speech-bubble layout: when each bubble's content last changed, and what was laid out last frame
+  private captionRef: OfficeScene['caption'] = null;
+  private captionSince = 0;
+  private managerLineRef: OfficeScene['managerLine'] = null;
+  private managerLineSince = 0;
+  private speechLayoutKey = '';
   private bagName = bagLabel();
   private nextBanterAt = banterGap();
   private banterReply: { at: number; text: string } | null = null;
@@ -980,7 +989,7 @@ export class OfficeScene {
       const tag = document.createElement('div');
       tag.className = 'nametag';
       this.overlay.append(bubble, tag);
-      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '', lastGreet: '' };
+      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '', lastGreet: '', speechRef: null, speechSince: 0 };
       this.actors.set(v.id, a);
     }
     a.view = v;
@@ -1074,6 +1083,18 @@ export class OfficeScene {
         a.bubble.textContent = out;
       }
       a.bubble.hidden = !out;
+      if (a.speech !== a.speechRef) {
+        a.speechRef = a.speech;
+        a.speechSince = this.t;
+      }
+    }
+    if (this.caption !== this.captionRef) {
+      this.captionRef = this.caption;
+      this.captionSince = this.t;
+    }
+    if (this.managerLine !== this.managerLineRef) {
+      this.managerLineRef = this.managerLine;
+      this.managerLineSince = this.t;
     }
   }
 
@@ -1765,20 +1786,8 @@ export class OfficeScene {
         tag.style.fontSize = `${Math.max(12, 9 * s)}px`;
       }
     }
-    const width = W * s;
-    // speech bubbles are wide and wrap: keep them inside the canvas and point the tail at the speaker's head
-    const placeSpeech = (b: HTMLDivElement, headX: number, headY: number, anchor: number) => {
-      const w = b.offsetWidth;
-      const left = Math.max(4, Math.min(width - w - 4, headX - w * anchor));
-      b.style.left = `${left}px`;
-      b.style.top = `${headY}px`;
-      b.style.setProperty('--tail-x', `${headX - left}px`);
-    };
     for (const a of this.actors.values()) {
-      if (isChat(a.view)) {
-        const top = a.view.seat === 'podium' ? a.y - 2 - PROF_H - 5 : a.y - SPRITE_H - 5;
-        if (!a.bubble.hidden) placeSpeech(a.bubble, a.x * s, top * s, 0.5);
-      } else {
+      if (!isChat(a.view)) {
         a.bubble.style.left = `${a.x * s}px`;
         a.bubble.style.top = `${(a.y - SPRITE_H - 5) * s}px`;
       }
@@ -1790,21 +1799,63 @@ export class OfficeScene {
     if (this.bagTag.textContent !== label) this.bagTag.textContent = label;
     this.bagTag.style.left = `${(this.bag.x + 2) * s}px`;
     this.bagTag.style.top = `${(this.bag.y + 2) * s}px`;
-    if (!this.objBubble.hidden && this.caption) placeSpeech(this.objBubble, this.caption.x * s, this.caption.y * s, 0.5);
-    // the manager's line: if a reply bubble is in the way, it moves up above it (older line on top, like a chat log)
-    const mb = this.managerBubble;
-    mb.classList.remove('stacked');
-    if (!mb.hidden) {
-      placeSpeech(mb, 150 * s, (H - 34 - MANAGER_H - 2) * s, 0.15);
-      const m = mb.getBoundingClientRect();
-      for (const a of this.actors.values()) {
-        if (!isChat(a.view) || a.bubble.hidden) continue;
-        const r = a.bubble.getBoundingClientRect();
-        if (r.right > m.left && r.left < m.right && r.bottom > m.top && r.top < m.bottom) {
-          mb.style.top = `${parseFloat(mb.style.top) - (m.bottom - r.top) - 6}px`;
-          mb.classList.add('stacked');
+    this.layoutSpeech();
+  }
+
+  /**
+   * Place the speech bubbles (chat characters, the manager's line, the bubble over a thing) so that none overlap.
+   * Each wants to sit over its speaker's head, inside the canvas, tail on the head. They are settled from the
+   * bottom of the screen up — at the same height the newer one first — and one that would overlap a settled
+   * bubble moves up above it, loses its tail and shows its speaker's name instead. So two people talking read
+   * top to bottom like a chat log. Redone only when a bubble's text or position changed.
+   */
+  private layoutSpeech() {
+    const s = this.scale;
+    type Entry = { el: HTMLDivElement; key: string; headX: number; headY: number; anchor: number; since: number; who: string };
+    const entries: Entry[] = [];
+    for (const a of this.actors.values()) {
+      if (!isChat(a.view) || a.bubble.hidden) continue;
+      const top = a.view.seat === 'podium' ? a.y - 2 - PROF_H - 5 : a.y - SPRITE_H - 5;
+      entries.push({ el: a.bubble, key: `${a.id}:${a.bubbleText}`, headX: a.x * s, headY: top * s, anchor: 0.5, since: a.speechSince, who: a.tag.textContent ?? '' });
+    }
+    if (!this.objBubble.hidden && this.caption)
+      entries.push({ el: this.objBubble, key: `thing:${this.caption.text}`, headX: this.caption.x * s, headY: this.caption.y * s, anchor: 0.5, since: this.captionSince, who: '' });
+    if (!this.managerBubble.hidden)
+      entries.push({ el: this.managerBubble, key: `manager:${this.managerBubbleText}`, headX: 150 * s, headY: (H - 34 - MANAGER_H - 2) * s, anchor: 0.15, since: this.managerLineSince, who: '' });
+    const layoutKey = `${s}|${H}|` + entries.map((e) => `${e.key}@${Math.round(e.headX)},${Math.round(e.headY)}`).join('|');
+    if (layoutKey === this.speechLayoutKey) return;
+    this.speechLayoutKey = layoutKey;
+
+    const width = W * s;
+    const GAP = 6;
+    const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+    entries.sort((p, q) => q.headY - p.headY || q.since - p.since);
+    for (const e of entries) {
+      const b = e.el;
+      b.classList.remove('stacked');
+      if (e.who) b.dataset.who = e.who;
+      else delete b.dataset.who;
+      // a bubble's `top` is its bottom edge (it is shifted up by its own height in CSS)
+      const fit = () => {
+        const w = b.offsetWidth;
+        const left = Math.max(4, Math.min(width - w - 4, e.headX - w * e.anchor));
+        return { left, right: left + w, h: b.offsetHeight };
+      };
+      let box = fit();
+      let bottom = e.headY;
+      const hits = () => placed.find((p) => box.left < p.right && box.right > p.left && bottom - box.h < p.bottom && bottom > p.top);
+      for (let guard = 0, p = hits(); p && guard < 8; guard++, p = hits()) {
+        if (!b.classList.contains('stacked')) {
+          b.classList.add('stacked'); // no tail, the speaker's name on top: its size changes, so measure again
+          box = fit();
         }
+        bottom = p.top - GAP;
       }
+      bottom = Math.max(bottom, box.h + 2); // not off the top of the canvas
+      b.style.left = `${box.left}px`;
+      b.style.top = `${bottom}px`;
+      b.style.setProperty('--tail-x', `${e.headX - box.left}px`);
+      placed.push({ left: box.left, right: box.right, top: bottom - box.h, bottom });
     }
   }
 }
