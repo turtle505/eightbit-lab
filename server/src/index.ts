@@ -40,6 +40,15 @@ const store = new Store();
 }
 const broker = new PermissionBroker();
 const registry = new ServerRegistry(servers, store);
+// The professor used to be decoration with its name under a reserved key; it is an employee (`prof`) now.
+// Carry a name the manager gave the figure over to the employee, once.
+{
+  const old = store.getEmployeeName('__professor');
+  if (old != null) {
+    if (store.getEmployeeName('prof') == null && roles.some((r) => r.id === 'prof')) store.setEmployeeName('prof', old);
+    store.setEmployeeName('__professor', null);
+  }
+}
 const agents = new AgentManager(office, roles, store, broker, registry);
 const skills = new SkillLibrary(resolve(office.workspaceRoot, 'office-skills'), store);
 skills.ensure();
@@ -226,7 +235,7 @@ agents.officeApi = {
   },
 };
 
-// professor / manager are decoration, not employees; their names live in employee_names under reserved keys
+// the manager figure and the whiteboard are decoration, not employees; their text lives in employee_names under reserved keys
 const figureName = (key: FigureKey) => store.getEmployeeName(`__${key}`) ?? figureDefaultName(key);
 const figureNames = () => Object.fromEntries(FIGURE_KEYS.map((k) => [k, figureName(k)])) as Record<FigureKey, string>;
 

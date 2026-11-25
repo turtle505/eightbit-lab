@@ -24,8 +24,8 @@ export const rowsFor = (maxSlot: number) => Math.max(MIN_ROWS, Math.floor(Math.m
 /** current canvas height; grows as desks are added (see OfficeScene.layout) */
 export let H = heightFor(MIN_ROWS);
 /**
- * Where the (decorative) professor stands: in the aisle between the last desk row and the manager,
- * right of the manager desk. Kept clear of the grid — he used to stand on the lead's desk.
+ * Where the professor (the `seat: 'podium'` employee) stands: in the aisle between the last desk row and the
+ * manager, right of the manager desk. Kept clear of the grid — he used to stand on the lead's desk.
  */
 let PROF = { x: 346, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
@@ -36,7 +36,6 @@ const askName = (k: FigureKey) => {
   return tr({ ko: `이름 (비우면 "${d}")`, en: `Name (empty = "${d}")` });
 };
 const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: () => string; fromBottom?: boolean }> = {
-  professor: { tag: { x: 346, y: -82 }, box: { x0: 337, x1: 355, y0: -110, y1: -82 }, ask: () => askName('professor'), fromBottom: true },
   manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: () => askName('manager'), fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
   board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: () =>
@@ -75,12 +74,15 @@ interface Actor {
 const seatPos = (seat: 'reception' | 'lead') => (seat === 'reception' ? { x: 206, y: H - 44 } : { x: 40, y: H - 36 });
 /** corner characters stand (no desk) between the bottom-left plant and the manager's rug */
 const cornerSpot = (i: number): Spot => ({ x: 44 + i * 32, y: H - 10 });
+/** characters who stand at a fixed spot and talk in speech bubbles instead of working at a desk */
+const isChat = (v: { seat?: Seat }) => v.seat === 'corner' || v.seat === 'podium';
+const standSpot = (i: number, seat: Seat): Spot => (seat === 'podium' ? { x: PROF.x, y: PROF.y } : cornerSpot(i));
 const deskPos = (i: number, seat?: Seat) =>
-  seat === 'corner' ? cornerSpot(i) : seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
+  seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
 const seatSpot = (i: number, seat?: Seat): Spot =>
-  seat === 'corner' ? cornerSpot(i) : { x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 };
+  seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : { x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 };
 const besideSpot = (i: number, seat?: Seat): Spot =>
-  seat === 'corner' ? cornerSpot(i) : { x: deskPos(i, seat).x + 60, y: deskPos(i, seat).y + 16 };
+  seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : { x: deskPos(i, seat).x + 60, y: deskPos(i, seat).y + 16 };
 /** characters per frame for the typewriter effect (~30/s at 60 fps) */
 const TYPE_SPEED = 0.5;
 /** frames the manager's line stays up after the reply has finished typing */
@@ -88,7 +90,9 @@ const MANAGER_LINE_HOLD = 360;
 const BUSY: AgentStatus[] = ['queued', 'thinking', 'typing', 'running', 'researching', 'remote'];
 /** what a corner character says when selected before anyone has talked to them */
 const greeting = (v: EmployeeView) =>
-  v.id === 'thug'
+  v.seat === 'podium'
+    ? tr({ ko: '음, 그래서 결과는 나왔나?', en: 'So, any results yet?' })
+    : v.id === 'thug'
     ? tr({ ko: '…뭐. 또 누가 건드렸어?', en: '…What. Who messed with you this time?' })
     : v.id === 'counsel'
       ? tr({ ko: '오늘 하루 어땠어요?', en: 'How was your day?' })
@@ -220,7 +224,8 @@ export class OfficeScene {
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
     for (const a of this.actors.values()) {
-      if (x >= a.x - 9 && x <= a.x + 9 && y >= a.y - SPRITE_H - 3 && y <= a.y + 3) return a.id;
+      const h = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      if (x >= a.x - 9 && x <= a.x + 9 && y >= a.y - h - 3 && y <= a.y + 3) return a.id;
     }
     return null;
   }
@@ -259,7 +264,7 @@ export class OfficeScene {
     if (v.desk < 0) return; // a session that has not been given a desk lives in the projects tab only
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = v.seat === 'corner' || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
+      const start = isChat(v) || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
@@ -271,8 +276,8 @@ export class OfficeScene {
     a.view = v;
     this.layout();
     // corner characters speak their replies instead (see renderSpeech, called every frame)
-    a.bubble.classList.toggle('speech', v.seat === 'corner');
-    if (v.seat !== 'corner') a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
+    a.bubble.classList.toggle('speech', isChat(v));
+    if (!isChat(v)) a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
     a.bubble.title = v.activity;
     a.bubble.dataset.status = v.status;
     a.tag.textContent = v.name.replace(/^.*"(.*)".*$/, '$1');
@@ -281,20 +286,20 @@ export class OfficeScene {
   /** A corner character's reply (an assistant log line): shown over their head, typed out. */
   say(id: string, text: string) {
     const a = this.actors.get(id);
-    if (!a || a.view.seat !== 'corner' || !text.trim()) return;
+    if (!a || !isChat(a.view) || !text.trim()) return;
     a.speech = { chars: Array.from(text.trim()), shown: 0 };
     a.awaitingSince = null;
     // one conversation at a time: the other corner characters fall quiet
-    for (const o of this.actors.values()) if (o !== a && o.view.seat === 'corner') o.speech = null;
+    for (const o of this.actors.values()) if (o !== a && isChat(o.view)) o.speech = null;
   }
 
   /** What the manager said to a corner character (a user log line): shown over the manager's head. */
   managerSay(id: string, text: string) {
     const a = this.actors.get(id);
-    if (!a || a.view.seat !== 'corner' || !text.trim()) return;
+    if (!a || !isChat(a.view) || !text.trim()) return;
     a.speech = null;
     a.awaitingSince = this.t;
-    for (const o of this.actors.values()) if (o.view.seat === 'corner' && o !== a) o.speech = null;
+    for (const o of this.actors.values()) if (isChat(o.view) && o !== a) o.speech = null;
     this.managerLine = { to: id, speech: { chars: Array.from(text.trim()), shown: 0 }, hideAt: null };
   }
 
@@ -325,7 +330,7 @@ export class OfficeScene {
 
     for (const a of this.actors.values()) {
       const v = a.view;
-      if (v.seat !== 'corner') continue;
+      if (!isChat(v)) continue;
       // a turn that ended without a reply (stopped, failed) stops the waiting dots
       if (a.awaitingSince != null && !BUSY.includes(v.status) && this.t - a.awaitingSince > 120) a.awaitingSince = null;
       let out: string;
@@ -568,7 +573,7 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
-    if (v.stayAtDesk || v.seat === 'corner') return seatSpot(v.desk, v.seat);
+    if (v.stayAtDesk || isChat(v)) return seatSpot(v.desk, v.seat);
     // the server room is gone from the drawing; remote work just shows in the bubble
     if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
     if (BESIDE.includes(v.status)) return besideSpot(v.desk, v.seat);
@@ -613,7 +618,7 @@ export class OfficeScene {
       const spot = seatSpot(v.desk, v.seat);
       const seated = a.x === spot.x && a.y === spot.y;
       items.push({ y: a.y + (seated ? -0.5 : 0), draw: () => this.drawActor(a, seated) });
-      if (v.seat === 'corner') continue; // they stand; no desk
+      if (isChat(v)) continue; // they stand; no desk
       desks.set(key(v.desk, v.seat), {
         i: v.desk,
         seat: v.seat,
@@ -631,8 +636,6 @@ export class OfficeScene {
     }
     // the corner characters' rug, under everything
     if ([...this.actors.values()].some((a) => a.view.seat === 'corner')) items.push({ y: -1e9, draw: () => this.drawCornerRug() });
-    // the professor: just stands there, solemnly
-    items.push({ y: PROF.y, draw: () => this.drawProfessor() });
     // the manager (you) behind the manager desk
     items.push({ y: -1e9 + 1, draw: () => this.drawBossRug() });
     items.push({ y: H - 35, draw: () => this.drawBossChair() });
@@ -657,21 +660,23 @@ export class OfficeScene {
     for (let k = 0; k < 3; k++) g.fillRect(x + 6, y + 6 + k * 4, w - 12, 1);
   }
 
-  private drawProfessor() {
+  /** the professor on his small podium, feet at (px, py - 2); returns the sprite's top-left for the status glyphs */
+  private drawProfessor(px: number, py: number) {
     const g = this.g;
-    // small podium
     g.fillStyle = '#c9a227';
-    g.fillRect(PROF.x - 12, PROF.y - 2, 24, 1);
+    g.fillRect(px - 12, py - 2, 24, 1);
     g.fillStyle = '#4e3020';
-    g.fillRect(PROF.x - 12, PROF.y - 1, 24, 4);
+    g.fillRect(px - 12, py - 1, 24, 4);
     g.fillStyle = '#3b2418';
-    g.fillRect(PROF.x - 12, PROF.y + 3, 24, 1);
+    g.fillRect(px - 12, py + 3, 24, 1);
     g.fillStyle = 'rgba(0,0,0,0.18)';
-    g.fillRect(PROF.x - 5, PROF.y - 3, PROF_W - 2, 1);
+    g.fillRect(px - 5, py - 3, PROF_W - 2, 1);
     // hair flutters in gusts: a few seconds of wind every ~7 s
     const gust = this.t % 420 < 150;
     const frame = gust && Math.floor(this.t / 10) % 2 ? 1 : 0;
-    g.drawImage(professorSprite(this.t % 300 < 5, frame), PROF.x - PROF_W / 2, PROF.y - 2 - PROF_H);
+    const x = px - PROF_W / 2, y = py - 2 - PROF_H;
+    g.drawImage(professorSprite(this.t % 300 < 5, frame), x, y);
+    return { x, y };
   }
 
   // ---- the manager (you): wine rug with gold border, high-back leather chair, wide walnut desk,
@@ -834,20 +839,24 @@ export class OfficeScene {
     let pose: Pose = 'stand';
     if (a.walkPhase) pose = Math.floor(a.walkPhase / 8) % 2 ? 'walkA' : 'walkB';
     // corner characters have no desk to type at: they just stand there and talk
-    else if (v.seat === 'corner' && v.status !== 'waiting_permission') pose = 'stand';
+    else if (isChat(v) && v.status !== 'waiting_permission') pose = 'stand';
     else if (seated && ['typing', 'running', 'researching'].includes(v.status)) pose = Math.floor(this.t / 7) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'remote') pose = Math.floor(this.t / 9) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'waiting_permission') pose = 'handUp';
     else if (v.status === 'idle') pose = Math.floor(this.t / 90) % 3 === 0 ? 'cup' : 'stand';
     const blink = this.t % 200 < 6;
-    const spr = characterSprite(v.sprite, pose, blink);
     const bob = v.status === 'waiting_permission' ? Math.round(Math.sin(this.t / 5)) : 0;
-    const x = Math.round(a.x - SPRITE_W / 2);
-    const y = Math.round(a.y - SPRITE_H + bob);
-    // shadow
-    g.fillStyle = 'rgba(0,0,0,0.18)';
-    g.fillRect(x + 1, Math.round(a.y) - 1, SPRITE_W - 2, 2);
-    g.drawImage(spr, x, y);
+    let x = Math.round(a.x - SPRITE_W / 2);
+    let y = Math.round(a.y - SPRITE_H + bob);
+    if (v.seat === 'podium') {
+      // the professor keeps his own look (and never raises a hand): podium, suit, hair in the wind
+      ({ x, y } = this.drawProfessor(Math.round(a.x), Math.round(a.y)));
+    } else {
+      // shadow
+      g.fillStyle = 'rgba(0,0,0,0.18)';
+      g.fillRect(x + 1, Math.round(a.y) - 1, SPRITE_W - 2, 2);
+      g.drawImage(characterSprite(v.sprite, pose, blink), x, y);
+    }
     if (v.deskStyle === 'lead') this.drawCrown(x + SPRITE_W / 2, y);
     // selection marker
     if (this.selected === a.id) {
@@ -906,8 +915,9 @@ export class OfficeScene {
       b.style.setProperty('--tail-x', `${headX - left}px`);
     };
     for (const a of this.actors.values()) {
-      if (a.view.seat === 'corner') {
-        if (!a.bubble.hidden) placeSpeech(a.bubble, a.x * s, (a.y - SPRITE_H - 5) * s, 0.5);
+      if (isChat(a.view)) {
+        const top = a.view.seat === 'podium' ? a.y - 2 - PROF_H - 5 : a.y - SPRITE_H - 5;
+        if (!a.bubble.hidden) placeSpeech(a.bubble, a.x * s, top * s, 0.5);
       } else {
         a.bubble.style.left = `${a.x * s}px`;
         a.bubble.style.top = `${(a.y - SPRITE_H - 5) * s}px`;
@@ -923,7 +933,7 @@ export class OfficeScene {
       placeSpeech(mb, 150 * s, (H - 34 - MANAGER_H - 2) * s, 0.15);
       const m = mb.getBoundingClientRect();
       for (const a of this.actors.values()) {
-        if (a.view.seat !== 'corner' || a.bubble.hidden) continue;
+        if (!isChat(a.view) || a.bubble.hidden) continue;
         const r = a.bubble.getBoundingClientRect();
         if (r.right > m.left && r.left < m.right && r.bottom > m.top && r.top < m.bottom) {
           mb.style.top = `${parseFloat(mb.style.top) - (m.bottom - r.top) - 6}px`;

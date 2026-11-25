@@ -18,9 +18,11 @@ export type Engine = 'claude' | 'codex';
 
 /**
  * A fixed place outside the desk grid. 'reception' and 'lead' are desks in the bottom strip; 'corner' is a
- * standing spot (no desk) in the bottom-left corner, where the role's `desk` number is its order in the corner.
+ * standing spot (no desk) in the bottom-left corner, where the role's `desk` number is its order in the corner;
+ * 'podium' is the professor's spot in the right aisle (drawn as the professor). Corner and podium characters
+ * talk in speech bubbles.
  */
-export type Seat = 'reception' | 'lead' | 'corner';
+export type Seat = 'reception' | 'lead' | 'corner' | 'podium';
 
 export interface EmployeeView {
   id: string;
@@ -326,12 +328,11 @@ export interface Snapshot {
   language: Lang;
 }
 
-/** editable labels in the game view that are not employees: professor / manager name tags and the whiteboard text */
-export type FigureKey = 'professor' | 'manager' | 'board';
-export const FIGURE_KEYS: readonly FigureKey[] = ['professor', 'manager', 'board'];
-export const figureDefaultName = (key: FigureKey): string =>
-  key === 'professor' ? tr({ ko: '교수님', en: 'Professor' }) : key === 'manager' ? tr({ ko: '매니저', en: 'Manager' }) : '';
-export const FIGURE_MAX_LEN: Record<FigureKey, number> = { professor: 20, manager: 20, board: 60 };
+/** editable labels in the game view that are not employees: the manager's name tag and the whiteboard text */
+export type FigureKey = 'manager' | 'board';
+export const FIGURE_KEYS: readonly FigureKey[] = ['manager', 'board'];
+export const figureDefaultName = (key: FigureKey): string => (key === 'manager' ? tr({ ko: '매니저', en: 'Manager' }) : '');
+export const FIGURE_MAX_LEN: Record<FigureKey, number> = { manager: 20, board: 60 };
 
 // server -> client
 export type ServerMsg =

@@ -27,8 +27,8 @@ const hms = (ts: number) => new Date(ts).toLocaleTimeString(locale(), { hour: '2
 
 /** The office staff. Project sessions are employees too, but they belong to the projects tab. */
 export function sortedEmployees(st: UIState) {
-  // corner characters number their own spots, so they go after the desk grid (keeps 1–n on the working staff)
-  const corner = (e: { seat?: string }) => (e.seat === 'corner' ? 1 : 0);
+  // chat characters (corner, podium) number their own spots, so they go after the desk grid (keeps 1–n on the working staff)
+  const corner = (e: { seat?: string }) => (e.seat === 'corner' || e.seat === 'podium' ? 1 : 0);
   return st.snap.employees.filter((e) => e.kind !== 'project').sort((a, b) => corner(a) - corner(b) || a.desk - b.desk);
 }
 
