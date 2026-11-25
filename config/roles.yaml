@@ -12,8 +12,6 @@
 #     corner makes them stand (no desk) in the bottom-left corner, `desk` being their order there, and talk in speech bubbles
 #     podium is the professor's spot in the right aisle (drawn as the professor), also talking in speech bubbles
 # - deskStyle: lead draws a team-lead desk
-# - deskItem: one large thing on the desk that tells whose it is:
-#     books | chart | snacks | plant | phone | clutter (omit it for the plain desk with paper and a mug)
 # - permissionMode: auto | ask (default office.permissionMode). A value set in the UI employee panel wins
 # - provider: run on a local model (Ollama) from office.yaml providers instead of the Claude subscription
 # Rules prepended to every employee's prompt. Each role's systemPrompt follows below it.
@@ -54,7 +52,6 @@ employees:
     title: Literature Researcher
     desk: 0
     sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d", look: bowl }
-    deskItem: books
     useWorktree: false
     # add literature MCP tools you have installed (e.g. a PubMed or arXiv server) here to use them without approval
     autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite]
@@ -73,7 +70,6 @@ employees:
     title: Evaluation Analyst
     desk: 1
     sprite: { hair: "#d9d9d9", shirt: "#8064a2", pants: "#2b2b2b", skin: "#c68642", look: cap }
-    deskItem: chart
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
     systemPrompt: |
@@ -93,7 +89,6 @@ employees:
     title: Research Aide
     desk: 2
     sprite: { hair: "#4a3520", shirt: "#5b9279", pants: "#36404a", skin: "#e8c39e", look: beanie }
-    deskItem: snacks
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -112,7 +107,6 @@ employees:
     title: Research Aide
     desk: 3
     sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d", look: ponytail }
-    deskItem: plant
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -131,7 +125,6 @@ employees:
     title: Executive Assistant
     desk: 4
     sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3", look: bob }
-    deskItem: phone
     cwd: ./workspaces/secretary
     officeTools: true
     # create_task (delegation), save_skill (saving skills) and create/update/delete_routine (routine changes) are left out on purpose → manager approval every time
@@ -170,7 +163,6 @@ employees:
     desk: 5
     deskStyle: lead    # drawn with the team-lead desk even inside the grid (the crown is on the character)
     sprite: { hair: "#2b1d14", shirt: "#2e6f6a", pants: "#2a2a3a", skin: "#eac086" }
-    deskItem: clutter
     useWorktree: true
     # Hands-on engineer and team lead. To run on a server, list the machine under hosts in office.local.yaml and set host: <id>.
     autoAllow: [Read, Glob, Grep, Edit, Write, TodoWrite,

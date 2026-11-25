@@ -137,7 +137,6 @@ class Employee {
       stayAtDesk: role.stayAtDesk ?? false,
       seat: role.seat,
       deskStyle: role.deskStyle,
-      deskItem: role.deskItem,
       permission,
       live: false,
       hostId: role.host,

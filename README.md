@@ -157,7 +157,7 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | File | What it controls |
 |---|---|
 | `config/office.yaml` | Your field (`domain`), concurrency, model, language, idle timeout, hosts, local models |
-| `config/roles.yaml` | The employees: name, role prompt, tools they may use without asking (`autoAllow`), sprite colours, `look` (a hairstyle or hat) and `deskItem` (what stands on their desk) |
+| `config/roles.yaml` | The employees: name, role prompt, tools they may use without asking (`autoAllow`), sprite colours and `look` (a hairstyle or hat) |
 | `config/routines.yaml` | Starter routines: weekday 09:00 morning briefing, weekday 18:00 evening report, Friday 17:00 weekly review (off) |
 | `config/servers.local.yaml` | Your GPU servers (copy `servers.example.yaml`) |
 
