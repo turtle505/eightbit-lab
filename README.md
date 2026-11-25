@@ -12,7 +12,7 @@
   <a href="README.ko.md"><img src="https://img.shields.io/badge/language-EN%20%2F%20KO-f0c050" alt="English and Korean"></a>
 </p>
 
-<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#quick-start">Quick start</a> · <a href="#everyday-use">Everyday use</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
+<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#tutorial">Tutorial</a> · <a href="#everyday-use">Everyday use</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
 
 | Your team | Your desk |
 |---|---|
@@ -26,15 +26,17 @@ Runs locally on macOS or Linux using your own CLI login. Claude Code requires a 
 
 ---
 
-## Quick start
+## Tutorial
 
-### What you need
+Five stages, about ten minutes. Play them in order and you'll know every basic control.
+
+### Stage 0: Gear up
 
 - **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag. With nvm, `nvm use` picks the right one (`.nvmrc`); `npm start` refuses older versions with a clear message.
 - **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
 - macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
 
-### Run it
+### Stage 1: Start the game
 
 ```bash
 git clone https://github.com/turtle505/eightbit-lab.git
@@ -43,18 +45,48 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. That's it: no config is needed to start.
+Open **http://localhost:5173**. The office opens with no config. You are the **manager**, at the big desk at the bottom.
 
-### Your first five minutes
+**Clear when:** you see the pixel office, with six employees having ☕ in the lounge.
 
-1. **Click an employee** (or press <kbd>1</kbd>–<kbd>6</kbd>) and type an instruction in the box at the bottom, e.g. *"Find three recent papers on retrieval-augmented generation and summarise them."*
-2. Watch them work. The speech bubble shows what they're doing right now.
-3. If they **raise a hand with a `!`**, they need your OK: approve or deny in the yellow approval panel.
-4. When they finish, the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
+### Stage 2: Your first instruction
 
-For bigger jobs, add a **task card** on the board and drag it onto an employee. Finished cards move to *Review* with the report attached.
+1. Click **Ada** (or press <kbd>1</kbd>).
+2. Type in the box under the office and press Enter: *"Find three recent papers on retrieval-augmented generation and summarise them."*
+3. Ada walks to her desk and starts working. The speech bubble over her head shows what she's doing right now.
 
 > 💡 The first instruction to each employee takes a few seconds while their session starts. After that, replies start almost instantly.
+
+**Clear when:** Ada is typing at her desk.
+
+### Stage 3: Approve something
+
+When an employee **raises a hand with a `!`**, they need your OK. Read what they want to do in the yellow approval panel, then **approve** or **deny**. Risky actions (deletes, git push, reaching a remote server and the like) are marked.
+
+**Clear when:** you've handled one approval card. (If nobody raised a hand, you skipped this stage.)
+
+### Stage 4: Collect the report
+
+When the work is done, the employee sparkles ✨ and the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
+
+**Clear when:** you've read Ada's summary in the feed.
+
+### Stage 5: Task cards
+
+Bigger jobs go on a card instead of a chat line.
+
+1. On the **task board** on the right, type a title and press **Add**.
+2. Drag the card onto an employee in the office.
+3. Finished cards move to *Review* with the report attached. Click the title to read it, then **Done**.
+
+**Clear when:** a card reaches *Done*. That's all the basic controls.
+
+### Bonus stage: the two in the corner
+
+**Kang** (<kbd>7</kbd>) and **On** (<kbd>8</kbd>) stand on the rug in the bottom-left corner with no desk, and they don't do work. Talk to them on a rough day; the conversation plays out in speech bubbles like game dialogue.
+
+- **Kang** sighs at whatever you say and answers with sarcasm. Don't expect comfort.
+- **On** listens calmly and helps you sort things out.
 
 ---
 
@@ -126,10 +158,10 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
 | `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
-| `thug` | Kang | Street punk who sighs at your whining and answers with sarcasm, never sympathy |
+| `thug` | Kang | Street punk who sighs at your whining and roasts you with blunt facts, never sympathy |
 | `counsel` | On | A calm counselor who listens and helps you sort things out |
 
-Kang and On aren't there for work. They stand on a rug in the bottom-left corner with no desk, keep their replies to a sentence or two, and talk in speech bubbles: their reply over their head, what you said over yours. They answer in the office language and take keys <kbd>7</kbd>/<kbd>8</kbd>; the team lead never hands them tasks.
+Kang and On aren't there for work. They stand on a rug in the bottom-left corner with no desk, keep their replies to a sentence or two, and talk in speech bubbles: their reply over their head, what you said over yours. They answer in the office language (in Korean they go by 깡 and 온) and take keys <kbd>7</kbd>/<kbd>8</kbd>; the team lead never hands them tasks. Kang quietly keeps what you tell him in `workspaces/thug/notes.md` as roast material, so it survives a new session; delete the file to make him forget.
 
 **Fitting them to your field.** Setting `domain` is usually enough: every employee's prompt starts with `About this team: <domain>`. To go further — say, the evaluation analyst should know your field's metrics, or the researcher may use a paper-search MCP server you've installed — override that employee in `config/roles.local.yaml`. Entries are merged by `id`, field by field:
 
