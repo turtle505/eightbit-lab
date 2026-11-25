@@ -4,7 +4,8 @@
 # - officeTools: true gives access to mcp__office__* (staff status, task board, delegation)
 # - cwd: fixed working folder (relative to the project root)
 # - useWorktree: true gives the employee a git worktree of the research repo as a personal desk
-# - sprite: character colours (hair / shirt / pants)
+# - sprite: character colours (hair / shirt / pants); optional look, one hairstyle or hat that tells the character apart:
+#     spikes | bun | long | cap | beanie | ponytail | bob (omit it for the plain head)
 # - model: model for this employee only (overrides office.model)
 # - stayAtDesk: true keeps the character at its desk regardless of status
 # - seat: reception | lead seats the employee at a fixed spot next to the manager's desk instead of the grid (unused right now);
@@ -50,7 +51,7 @@ employees:
     name: Literature Researcher "Ada"
     title: Literature Researcher
     desk: 0
-    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d" }
+    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d", look: long }
     useWorktree: false
     # add literature MCP tools you have installed (e.g. a PubMed or arXiv server) here to use them without approval
     autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite]
@@ -68,7 +69,7 @@ employees:
     name: Evaluation Analyst "Gauss"
     title: Evaluation Analyst
     desk: 1
-    sprite: { hair: "#d9d9d9", shirt: "#8064a2", pants: "#2b2b2b", skin: "#c68642" }
+    sprite: { hair: "#d9d9d9", shirt: "#8064a2", pants: "#2b2b2b", skin: "#c68642", look: cap }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
     systemPrompt: |
@@ -87,7 +88,7 @@ employees:
     name: Research Aide "Finn"
     title: Research Aide
     desk: 2
-    sprite: { hair: "#4a3520", shirt: "#5b9279", pants: "#36404a", skin: "#e8c39e" }
+    sprite: { hair: "#4a3520", shirt: "#5b9279", pants: "#36404a", skin: "#e8c39e", look: beanie }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -105,7 +106,7 @@ employees:
     name: Research Aide "Mira"
     title: Research Aide
     desk: 3
-    sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d" }
+    sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d", look: ponytail }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -123,7 +124,7 @@ employees:
     name: Executive Assistant "Hana"
     title: Executive Assistant
     desk: 4
-    sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3" }
+    sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3", look: bob }
     cwd: ./workspaces/secretary
     officeTools: true
     # create_task (delegation), save_skill (saving skills) and create/update/delete_routine (routine changes) are left out on purpose → manager approval every time
@@ -205,7 +206,7 @@ employees:
     title: Street Punk
     seat: corner
     desk: 0
-    sprite: { hair: "#e8d44d", shirt: "#1f1f1f", pants: "#3a3f6b", skin: "#f1c27d" }   # bleached hair, black shirt
+    sprite: { hair: "#e8d44d", shirt: "#1f1f1f", pants: "#3a3f6b", skin: "#f1c27d", look: spikes }   # bleached hair, black shirt
     cwd: ./workspaces/thug
     autoAllow: [Read, Write, Edit, TodoWrite]
     systemPrompt: |
@@ -250,7 +251,7 @@ employees:
     title: Counselor
     seat: corner
     desk: 1
-    sprite: { hair: "#6b4a3a", shirt: "#9fc5b8", pants: "#4a4a5a", skin: "#f3d2b3" }   # calm mint tones
+    sprite: { hair: "#6b4a3a", shirt: "#9fc5b8", pants: "#4a4a5a", skin: "#f3d2b3", look: bun }   # calm mint tones
     cwd: ./workspaces/counsel
     autoAllow: [Read, Write, Edit, TodoWrite]
     systemPrompt: |

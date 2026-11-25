@@ -33,7 +33,8 @@ export interface EmployeeView {
   name: string;
   title: string;
   desk: number;
-  sprite: { hair: string; shirt: string; pants: string; skin: string };
+  /** colours, plus an optional `look`: one hairstyle or hat (see LOOKS in web/src/game/sprites.ts) */
+  sprite: { hair: string; shirt: string; pants: string; skin: string; look?: string };
   status: AgentStatus;
   activity: string; // one-line speech bubble
   taskId: number | null;

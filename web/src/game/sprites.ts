@@ -6,6 +6,8 @@ export interface Palette {
   shirt: string;
   pants: string;
   skin: string;
+  /** one big thing that tells a character apart: a hairstyle or a hat (see LOOKS); omitted = the plain head */
+  look?: string;
 }
 
 const HEAD = [
@@ -59,27 +61,67 @@ const LEGS_STAND = ['..PPPPPPPP..', '..PPP..PPP..', '..PPP..PPP..', '..BBB..BBB.
 const LEGS_WALK_A = ['..PPPPPPPP..', '..PPP...PP..', '.PPP....PP..', '.BBB....BB..'];
 const LEGS_WALK_B = ['..PPPPPPPP..', '..PP...PPP..', '..PP....PPP.', '..BB....BBB.'];
 
-export type Pose = 'stand' | 'walkA' | 'walkB' | 'typeA' | 'typeB' | 'handUp' | 'cup';
+const LEGS_SHAKE = ['..PPPPPPPP..', '..PPP..PPP..', '..PPP...PPP.', '..BBB...BBB.'];
+/** squatting: the body and legs fold into three rows */
+const SQUAT = ['.STTTTTTTTS.', 'PPTTTTTTTTPP', 'BBPPPPPPPPBB'];
+
+/**
+ * Looks: a head to use instead of HEAD. Deliberately one large shape each (hair or a hat) and nothing small:
+ * at this size glasses, beards and props turn to mush. Rows above the usual eight make the figure taller.
+ * `C` is the hat colour (taken from the trousers or the shirt), `W` white; `extra` paints over the body.
+ */
+const LOOKS: Record<string, { head: string[]; hat?: 'pants' | 'shirt'; extra?: [number, number, string][] }> = {
+  // three spikes standing straight up
+  spikes: { head: ['...H..H..H..', '..HH.HH.HH..', '..HHHHHHHH..', '..HHHHHHHH..', '..HHHHHHHH..', '..HSSSSSSH..', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'] },
+  // a round bun on top
+  bun: { head: ['.....HH.....', '....HHHH....', ...HEAD] },
+  // long hair framing the face and down to the shoulders
+  long: {
+    head: ['....HHHH....', '...HHHHHH...', '..HHHHHHHH..', '.HHSSSSSSHH.', '.HHSESSESHH.', '.HHSSSSSSHH.', '.HHHSSSSHHH.', '.HH.SSSS.HH.'],
+    extra: [[1, 8, 'H'], [10, 8, 'H'], [1, 9, 'H'], [10, 9, 'H']],
+  },
+  // a flat cap with the brim out to one side
+  cap: { head: ['....CCCC....', '...CCCCCC...', '..CCCCCCCCCC', '..HSSSSSSH..', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'], hat: 'pants' },
+  // a beanie with a pom-pom
+  beanie: { head: ['.....WW.....', '....CCCC....', '...CCCCCC...', '..CCCCCCCC..', '..CCCCCCCC..', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'], hat: 'shirt' },
+  // a big ponytail sticking out behind
+  ponytail: { head: ['....HHHH....', '...HHHHHH.HH', '..HHHHHHHHHH', '..HSSSSSSH.H', '..SSESSESS.H', '..SSSSSSSS.H', '...SSSSSS...', '....SSSS....'] },
+  // a wide bob down to the jaw
+  bob: { head: ['....HHHH....', '...HHHHHH...', '.HHHHHHHHHH.', '.HHSSSSSSHH.', '.HHSESSESHH.', '.HHSSSSSSHH.', '..HHSSSSHH..', '....SSSS....'] },
+};
+/** how tall a standing figure with this look is */
+export const spriteHeight = (look?: string): number => ((look && LOOKS[look]?.head.length) || HEAD.length) + 9;
+
+export type Pose = 'stand' | 'walkA' | 'walkB' | 'typeA' | 'typeB' | 'handUp' | 'cup' | 'shake' | 'squat';
 
 export const SPRITE_W = 12;
 export const SPRITE_H = 17;
 
-function rows(pose: Pose): string[] {
+function rows(pose: Pose, head: string[]): string[] {
+  if (pose === 'squat') return [...head, ...SQUAT];
   const body =
     pose === 'handUp' ? BODY_HAND_UP : pose === 'typeA' ? BODY_TYPE_A : pose === 'typeB' ? BODY_TYPE_B : pose === 'cup' ? BODY_CUP : BODY_STAND;
-  const legs = pose === 'walkA' ? LEGS_WALK_A : pose === 'walkB' ? LEGS_WALK_B : LEGS_STAND;
-  return [...HEAD, ...body, ...legs];
+  const legs = pose === 'walkA' ? LEGS_WALK_A : pose === 'walkB' ? LEGS_WALK_B : pose === 'shake' ? LEGS_SHAKE : LEGS_STAND;
+  return [...head, ...body, ...legs];
 }
 
 const cache = new Map<string, HTMLCanvasElement>();
 
-export function characterSprite(p: Palette, pose: Pose, blink = false): HTMLCanvasElement {
-  const key = `${p.hair}${p.shirt}${p.pants}${p.skin}${pose}${blink}`;
+/**
+ * `nod` lowers the head a pixel (the neck disappears into the collar). The canvas is as tall as the figure:
+ * taller for a look that rises above the head, shorter when squatting — draw it from the feet up.
+ */
+export function characterSprite(p: Palette, pose: Pose, blink = false, nod = false): HTMLCanvasElement {
+  const key = `${p.hair}${p.shirt}${p.pants}${p.skin}${p.look ?? ''}${pose}${blink}${nod}`;
   const hit = cache.get(key);
   if (hit) return hit;
+  const look = p.look ? LOOKS[p.look] : undefined;
+  let head = look?.head ?? HEAD;
+  if (nod) head = ['............', ...head.slice(0, -1)];
+  const all = rows(pose, head);
   const c = document.createElement('canvas');
   c.width = SPRITE_W;
-  c.height = SPRITE_H;
+  c.height = all.length;
   const g = c.getContext('2d')!;
   const color: Record<string, string> = {
     H: p.hair,
@@ -90,14 +132,20 @@ export function characterSprite(p: Palette, pose: Pose, blink = false): HTMLCanv
     B: '#2a2018',
     W: '#f4f4f4',
     K: '#1b1b1b',
+    C: look?.hat === 'shirt' ? p.shirt : p.pants,
   };
-  rows(pose).forEach((row, y) =>
+  all.forEach((row, y) =>
     [...row].forEach((ch, x) => {
       if (ch === '.') return;
       g.fillStyle = color[ch];
       g.fillRect(x, y, 1, 1);
     }),
   );
+  if (pose !== 'squat')
+    for (const [x, y, ch] of look?.extra ?? []) {
+      g.fillStyle = color[ch];
+      g.fillRect(x, y + head.length - HEAD.length, 1, 1);
+    }
   cache.set(key, c);
   return c;
 }

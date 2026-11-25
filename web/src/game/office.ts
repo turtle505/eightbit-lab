@@ -1,7 +1,7 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
-import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
+import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
 const WALL_H = 36;
@@ -85,6 +85,8 @@ interface Actor {
 const seatPos = (seat: 'reception' | 'lead') => (seat === 'reception' ? { x: 206, y: H - 44 } : { x: 40, y: H - 36 });
 /** corner characters stand (no desk) between the bottom-left plant and the manager's rug */
 const cornerSpot = (i: number): Spot => ({ x: 44 + i * 32, y: H - 10 });
+/** how tall a character stands, in canvas pixels: a look can rise above the head, and the professor is on a podium */
+const tallOf = (v: { seat?: Seat; sprite?: { look?: string } }): number => (v.seat === 'podium' ? PROF_H + 2 : spriteHeight(v.sprite?.look));
 /** characters who stand at a fixed spot and talk in speech bubbles instead of working at a desk */
 const isChat = (v: { seat?: Seat }) => v.seat === 'corner' || v.seat === 'podium';
 const standSpot = (i: number, seat: Seat): Spot => (seat === 'podium' ? { x: PROF.x, y: PROF.y } : cornerSpot(i));
@@ -843,7 +845,7 @@ export class OfficeScene {
     }
     this.trashStreak = 0;
     for (const a of this.actors.values()) {
-      const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      const tall = tallOf(a.view);
       if (x < a.x - 10 || x > a.x + 10 || y < a.y - tall - 4 || y > a.y + 4) continue;
       const v = a.view;
       // it bounces off and ends up at their feet
@@ -1012,7 +1014,7 @@ export class OfficeScene {
         this.alerts.delete(id);
         continue;
       }
-      const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      const tall = tallOf(a.view);
       items.push({
         y: 1e8,
         draw: () => {
@@ -1178,7 +1180,7 @@ export class OfficeScene {
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
     for (const a of this.actors.values()) {
-      const h = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      const h = tallOf(a.view);
       if (x >= a.x - 9 && x <= a.x + 9 && y >= a.y - h - 3 && y <= a.y + 3) return a.id;
     }
     return null;
@@ -1971,11 +1973,26 @@ export class OfficeScene {
     const g = this.g;
     const v = a.view;
     let pose: Pose = 'stand';
+    let nod = false;
     if (a.walkPhase) pose = Math.floor(a.walkPhase / 8) % 2 ? 'walkA' : 'walkB';
     else if (v.id === 'thug' && this.kangPoseUntil > this.t) pose = 'handUp'; // throwing it back
     else if (v.id === 'counsel' && this.onNoteUntil > this.t) pose = Math.floor(this.t / 9) % 2 ? 'typeA' : 'typeB'; // writing
-    // corner characters have no desk to type at: they just stand there and talk
-    else if (isChat(v) && v.status !== 'waiting_permission') pose = 'stand';
+    // corner characters have no desk to type at: they stand there, talk, and have their habits
+    else if (isChat(v) && v.status !== 'waiting_permission') {
+      // not while a line of theirs is being typed out or a reply is on its way
+      const settled = a.awaitingSince == null && (!a.speech || a.speech.shown >= a.speech.chars.length);
+      if (v.id === 'thug') {
+        // Kang jiggles a leg, and every half minute squats for a while
+        const cyc = this.t % 1800;
+        if (settled && cyc >= 1200 && cyc < 1560) pose = 'squat';
+        else if (this.t % 360 < 120 && Math.floor(this.t / 4) % 2) pose = 'shake';
+      } else if (v.id === 'counsel') {
+        // On sips her tea, and nods: more often while someone is talking to her (or Kang is holding forth)
+        const listening = a.awaitingSince != null || !!this.who((o) => o.id === 'thug')?.speech?.banter;
+        if (settled && this.t % 720 < 90) pose = 'cup';
+        else nod = this.t % (listening ? 120 : 480) < 24;
+      }
+    }
     else if (seated && ['typing', 'running', 'researching'].includes(v.status)) pose = Math.floor(this.t / 7) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'remote') pose = Math.floor(this.t / 9) % 2 ? 'typeA' : 'typeB';
     else if (v.status === 'waiting_permission') pose = 'handUp';
@@ -1983,7 +2000,8 @@ export class OfficeScene {
     const blink = this.t % 200 < 6;
     const bob = v.status === 'waiting_permission' ? Math.round(Math.sin(this.t / 5)) : 0;
     let x = Math.round(a.x - SPRITE_W / 2);
-    let y = Math.round(a.y - SPRITE_H + bob);
+    const tall = tallOf(v);
+    let y = Math.round(a.y - tall + bob);
     if (v.seat === 'podium') {
       // the professor keeps his own look (and never raises a hand): podium, suit, hair in the wind
       ({ x, y } = this.drawProfessor(Math.round(a.x), Math.round(a.y)));
@@ -1991,17 +2009,29 @@ export class OfficeScene {
       // shadow
       g.fillStyle = 'rgba(0,0,0,0.18)';
       g.fillRect(x + 1, Math.round(a.y) - 1, SPRITE_W - 2, 2);
-      g.drawImage(characterSprite(v.sprite, pose, blink), x, y);
+      // drawn from the feet up: the sprite is taller with some looks and shorter when squatting
+      const spr = characterSprite(v.sprite, pose, blink, nod);
+      g.drawImage(spr, x, Math.round(a.y + bob) - spr.height);
+      if (pose === 'squat') {
+        const cyc = this.t % 1800;
+        if (cyc >= 1380 && cyc < 1400) {
+          // Kang spits to the side, the way he would
+          const k = cyc - 1380;
+          g.fillStyle = '#f4f4f4';
+          g.fillRect(x + 11 + Math.round(k * 0.5), Math.round(a.y) - 5 + Math.round((k * k) / 80), 1, 1);
+        }
+      }
       if (v.id === 'counsel' && this.onNoteUntil > this.t) {
-        // On's clipboard, and a pen going back and forth across it
+        // On's clipboard, and a pen going back and forth across it (placed from the shoulders, whatever the hair)
+        const by = y + tall - 17;
         g.fillStyle = '#8a5a3b';
-        g.fillRect(x + 3, y + 8, 7, 6);
+        g.fillRect(x + 3, by + 8, 7, 6);
         g.fillStyle = '#fbfbf7';
-        g.fillRect(x + 4, y + 9, 5, 4);
+        g.fillRect(x + 4, by + 9, 5, 4);
         g.fillStyle = '#9aa3ad';
-        g.fillRect(x + 5, y + 8, 3, 1);
+        g.fillRect(x + 5, by + 8, 3, 1);
         g.fillStyle = '#2e3440';
-        g.fillRect(x + 4 + (Math.floor(this.t / 5) % 4), y + 10 + (Math.floor(this.t / 20) % 2), 1, 1);
+        g.fillRect(x + 4 + (Math.floor(this.t / 5) % 4), by + 10 + (Math.floor(this.t / 20) % 2), 1, 1);
       }
     }
     if (v.deskStyle === 'lead') this.drawCrown(x + SPRITE_W / 2, y);
@@ -2055,7 +2085,7 @@ export class OfficeScene {
     for (const a of this.actors.values()) {
       if (!isChat(a.view)) {
         a.bubble.style.left = `${a.x * s}px`;
-        a.bubble.style.top = `${(a.y - SPRITE_H - 5) * s}px`;
+        a.bubble.style.top = `${(a.y - tallOf(a.view) - 5) * s}px`;
       }
       a.bubble.classList.toggle('selected', this.selected === a.id);
       a.tag.style.left = `${a.x * s}px`;
@@ -2081,7 +2111,7 @@ export class OfficeScene {
     const entries: Entry[] = [];
     for (const a of this.actors.values()) {
       if (!isChat(a.view) || a.bubble.hidden) continue;
-      const top = a.view.seat === 'podium' ? a.y - 2 - PROF_H - 5 : a.y - SPRITE_H - 5;
+      const top = a.y - tallOf(a.view) - 5;
       entries.push({ el: a.bubble, key: `${a.id}:${a.bubbleText}`, headX: a.x * s, headY: top * s, anchor: 0.5, since: a.speechSince, who: a.tag.textContent ?? '' });
     }
     if (!this.objBubble.hidden && this.caption)
