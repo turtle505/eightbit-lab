@@ -213,6 +213,72 @@ const coffeeLines = (who: 'thug' | 'counsel'): string[] =>
         tr({ ko: '오늘 잠은 주무실 수 있겠어요?', en: 'Will you be able to sleep tonight?' }),
       ];
 
+// ---- venting: paper balls, the desk, the punching bag ----
+/** a day's counter in localStorage (`{ day, n }`): back to 0 when the date changes */
+const dayCount = (key: string): number => {
+  try {
+    const c = JSON.parse(localStorage.getItem(key) ?? 'null');
+    return c && c.day === dayNumber() && typeof c.n === 'number' ? c.n : 0;
+  } catch {
+    return 0;
+  }
+};
+const bumpDayCount = (key: string): number => {
+  const n = dayCount(key) + 1;
+  try {
+    localStorage.setItem(key, JSON.stringify({ day: dayNumber(), n }));
+  } catch {
+    /* storage unavailable: nothing is counted */
+  }
+  return n;
+};
+const bagLabel = (): string => {
+  try {
+    return localStorage.getItem('office-bag-label') ?? '';
+  } catch {
+    return '';
+  }
+};
+/** how far a full-power throw goes, in canvas pixels */
+const MAX_THROW = 330;
+/** frames for the power gauge to go up and back down once (~0.7 s) */
+const GAUGE_PERIOD = 42;
+/** `?power=0.6` pins the gauge, for trying out where a throw lands (read lazily: the unit tests import this module without a browser) */
+const fixedPower = (): number | null => {
+  const q = new URLSearchParams(location.search).get('power');
+  return q != null && Number(q) >= 0 && Number(q) <= 1 ? Number(q) : null;
+};
+const paperLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
+  who === 'prof'
+    ? [tr({ ko: '누가 던졌나!', en: 'Who threw that!' }), tr({ ko: '지금 나한테 던진 건가?', en: 'Did you just throw that at me?' })]
+    : who === 'thug'
+      ? [
+          tr({ ko: '뭐야 씨발, 죽을래?', en: 'What the fuck, you want to die?' }),
+          tr({ ko: '한 번만 더 던져 봐.', en: 'Throw one more. I dare you.' }),
+          tr({ ko: '던질 힘으로 논문을 써.', en: 'Put that arm into writing your paper.' }),
+        ]
+      : [
+          tr({ ko: '아야… 많이 답답하셨나 봐요.', en: 'Ow… you must be really frustrated.' }),
+          tr({ ko: '저한테 던지셔도 괜찮아요. 조금 풀리셨어요?', en: "It's all right to throw it at me. Feel a little better?" }),
+        ];
+const slamLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
+  who === 'prof'
+    ? [tr({ ko: '조용히 좀 하게.', en: 'Keep it down.' }), tr({ ko: '그 힘으로 실험을 하게.', en: 'Put that energy into your experiments.' })]
+    : who === 'thug'
+      ? [tr({ ko: '오, 드디어 빡쳤냐.', en: 'Oh, finally pissed off?' }), tr({ ko: '책상이 무슨 죄냐, 병신아.', en: 'What did the desk do to you, idiot?' })]
+      : [
+          tr({ ko: '…괜찮으세요? 손은 안 다치셨어요?', en: '…Are you all right? Did you hurt your hand?' }),
+          tr({ ko: '화가 많이 나셨군요. 그럴 수 있어요.', en: "You're very angry. That's allowed." }),
+        ];
+const bagMilestone = (n: number): string | null =>
+  n === 10
+    ? tr({ ko: '그래, 그거나 쳐라.', en: 'Yeah, go hit that.' })
+    : n === 50
+      ? tr({ ko: '교수 얼굴이라고 생각하고 쳐.', en: "Pretend it's the professor's face." })
+      : n === 100
+        ? tr({ ko: '100대? 그 끈기로 연구를 했으면 졸업했다.', en: "A hundred? With that persistence you'd have graduated." })
+        : null;
+
 /** Kang says a line, On answers (when both are idle and nobody is selected) */
 const banterPairs = (): [string, string][] => [
   [tr({ ko: '저 새끼 오늘도 논다.', en: 'That bastard is slacking again today.' }), tr({ ko: '쉬는 날도 필요해요.', en: 'Everyone needs a day off.' })],
@@ -365,6 +431,25 @@ export class OfficeScene {
   private steamUntil = 0;
   private cups = coffeeToday();
   /** Kang–On banter: when the next exchange may start, and On's pending answer */
+  // venting
+  /** a crumpled sheet in the manager's hand, ready to throw */
+  private holding = false;
+  private aim: Spot = { x: 250, y: 150 };
+  /** frame the mouse button went down while holding: the power gauge swings until release */
+  private charging: number | null = null;
+  private suppressClick = false;
+  private flying: { x0: number; y0: number; x1: number; y1: number; from: number; arc: number }[] = [];
+  private litter: { x: number; y: number; born: number }[] = [];
+  private trashStreak = 0;
+  /** "!" over someone's head until this frame */
+  private alerts = new Map<string, number>();
+  private deskClicks: number[] = [];
+  private slamAt = -1e9;
+  private bagHitAt = -1e9;
+  private bagDir = 1;
+  private bagSpark: { x: number; y: number; until: number } | null = null;
+  private bagTag: HTMLDivElement;
+  private bagName = bagLabel();
   private nextBanterAt = banterGap();
   private banterReply: { at: number; text: string } | null = null;
   private lastBanter = '';
@@ -393,11 +478,38 @@ export class OfficeScene {
     this.objBubble.className = 'bubble speech';
     this.objBubble.hidden = true;
     overlay.append(this.objBubble);
+    this.bagTag = document.createElement('div');
+    this.bagTag.className = 'nametag';
+    overlay.append(this.bagTag);
     // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
     new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
 
+    // throwing: hold the button to swing the power gauge, release to throw towards the pointer
+    this.canvas.addEventListener('pointermove', (ev) => {
+      this.aim = this.at(ev);
+    });
+    this.canvas.addEventListener('pointerdown', (ev) => {
+      if (!this.holding) return;
+      this.aim = this.at(ev);
+      this.charging = this.t;
+      this.canvas.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    this.canvas.addEventListener('pointerup', (ev) => {
+      if (this.charging == null) return;
+      this.aim = this.at(ev);
+      this.suppressClick = true; // the click that follows this release is not a selection
+      this.throwPaper();
+    });
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && this.holding) this.dropPaper();
+    });
     this.canvas.addEventListener('click', (ev) => {
+      if (this.suppressClick || this.holding) {
+        this.suppressClick = false;
+        return;
+      }
       const plant = this.hitPlant(ev);
       if (plant) {
         waterPlant(plant);
@@ -405,6 +517,7 @@ export class OfficeScene {
         this.drip = { side: plant, until: this.t + 45 };
         return;
       }
+      if (this.clickVent(ev)) return;
       const fig = this.hitFigure(ev);
       if (fig) {
         const name = prompt(FIGURES[fig].ask(), this.figureTags.get(fig)?.textContent ?? '');
@@ -412,7 +525,7 @@ export class OfficeScene {
         return;
       }
       const id = this.hit(ev);
-      if (!id && this.clickThing(ev)) return;
+      if (!id && (this.clickDesk(ev) || this.clickThing(ev))) return;
       // clicking a character mid-line shows the rest at once, like skipping dialogue in a game
       const sp = id ? this.actors.get(id)?.speech : null;
       // clicking them again once the line is out gets another greeting
@@ -515,6 +628,249 @@ export class OfficeScene {
       return true;
     }
     return false;
+  }
+
+  /** pointer position in canvas pixels */
+  private at(ev: MouseEvent): Spot {
+    const r = this.canvas.getBoundingClientRect();
+    return { x: ((ev.clientX - r.left) / r.width) * W, y: ((ev.clientY - r.top) / r.height) * H };
+  }
+  /** the manager's throwing hand */
+  private get hand(): Spot {
+    return { x: 158, y: H - 50 };
+  }
+  private get trash(): Spot {
+    return { x: 236, y: H - 14 };
+  }
+  private get bag(): Spot {
+    return { x: 306, y: H - 12 };
+  }
+  /** 0..1, swinging up and down while the button is held */
+  private get gauge(): number {
+    if (this.charging == null) return 0;
+    const fixed = fixedPower();
+    if (fixed != null) return fixed;
+    const p = ((this.t - this.charging) % GAUGE_PERIOD) / GAUGE_PERIOD;
+    return p < 0.5 ? p * 2 : 2 - p * 2;
+  }
+
+  /** Papers on the manager's desk (pick one up to throw), the punching bag and its name tag. */
+  private clickVent(ev: MouseEvent): boolean {
+    const { x, y } = this.at(ev);
+    const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+    if (inside(127, H - 33, 139, H - 25)) {
+      this.holding = true;
+      this.canvas.style.cursor = 'crosshair';
+      return true;
+    }
+    const b = this.bag;
+    if (inside(b.x - 12, b.y + 1, b.x + 16, b.y + 12)) {
+      const name = prompt(tr({ ko: '샌드백에 붙일 이름 (비우면 "샌드백")', en: 'Name for the punching bag (empty = "Punching bag")' }), this.bagName);
+      if (name !== null) {
+        this.bagName = name.trim().slice(0, 20);
+        try {
+          localStorage.setItem('office-bag-label', this.bagName);
+        } catch {
+          /* storage unavailable */
+        }
+      }
+      return true;
+    }
+    if (inside(b.x - 9, b.y - 30, b.x + 4, b.y - 8)) {
+      const n = bumpDayCount('office-bag');
+      this.bagHitAt = this.t;
+      this.bagDir = x < b.x - 2 ? 1 : -1; // swings away from the punch
+      this.bagSpark = { x, y, until: this.t + 8 };
+      this.caption = { x: b.x - 2, y: b.y - 36, text: `👊 ${n}`, until: this.t + 90 };
+      const line = bagMilestone(n);
+      if (line) this.remark(this.who((v) => v.id === 'thug'), line, 7);
+      return true;
+    }
+    return false;
+  }
+
+  private dropPaper() {
+    this.holding = false;
+    this.charging = null;
+    this.canvas.style.cursor = '';
+  }
+
+  /** Release: the ball goes towards the pointer, as far as the gauge said. */
+  private throwPaper() {
+    const power = this.gauge;
+    const h = this.hand;
+    let dx = this.aim.x - h.x, dy = this.aim.y - h.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) (dx = 1), (dy = 0);
+    else (dx /= len), (dy /= len);
+    const dist = Math.max(8, power * MAX_THROW);
+    const x1 = Math.max(4, Math.min(W - 4, h.x + dx * dist));
+    const y1 = Math.max(WALL_H + 4, Math.min(H - 4, h.y + dy * dist));
+    this.flying.push({ x0: h.x, y0: h.y, x1, y1, from: this.t, arc: Math.min(36, dist / 4) });
+    this.dropPaper();
+  }
+
+  /** Where a ball came down: someone's head, the bin, or the floor. */
+  private land(x: number, y: number) {
+    const t = this.trash;
+    if (Math.hypot(x - t.x, y - (t.y - 4)) <= 7) {
+      const n = bumpDayCount('office-trash');
+      this.trashStreak++;
+      const streak = this.trashStreak > 1 ? tr({ ko: ` · ${this.trashStreak}연속`, en: ` · ${this.trashStreak} in a row` }) : '';
+      this.caption = { x: t.x, y: t.y - 12, text: tr({ ko: `🗑 ${n}개째${streak}`, en: `🗑 #${n}${streak}` }), until: this.t + 150 };
+      return;
+    }
+    this.trashStreak = 0;
+    let fx = x, fy = y;
+    for (const a of this.actors.values()) {
+      const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      if (x < a.x - 8 || x > a.x + 8 || y < a.y - tall - 2 || y > a.y + 2) continue;
+      const v = a.view;
+      if (v.seat === 'podium') {
+        this.angryFrom = this.t;
+        this.angryUntil = this.t + 1200;
+        a.lastGreet = this.pickNew(paperLines('prof'), a.lastGreet);
+        a.awaitingSince = null;
+        a.speech = { chars: Array.from(a.lastGreet), shown: 0, until: this.angryUntil };
+      } else if (v.id === 'thug' || v.id === 'counsel') this.remark(a, (a.lastGreet = this.pickNew(paperLines(v.id), a.lastGreet)), 6);
+      else this.alerts.set(a.id, this.t + 70);
+      // it bounces off and ends up at their feet
+      fx = a.x + (Math.random() < 0.5 ? -9 : 9);
+      fy = a.y + 3;
+      break;
+    }
+    this.litter.push({ x: Math.round(fx), y: Math.round(Math.min(H - 3, fy)), born: this.t });
+    if (this.litter.length > 20) this.litter.shift();
+  }
+
+  /** Three quick clicks on the manager's desk and the manager slams it. */
+  private clickDesk(ev: MouseEvent): boolean {
+    const { x, y } = this.at(ev);
+    if (x < 114 || x > 186 || y < H - 36 || y > H - 14) return false;
+    const now = performance.now();
+    this.deskClicks = [...this.deskClicks.filter((c) => now - c < 1000), now];
+    if (this.deskClicks.length < 3 || this.t - this.slamAt < 180) return true;
+    this.deskClicks = [];
+    this.slamAt = this.t;
+    this.caption = { x: 150, y: H - 44, text: tr({ ko: '쾅!', en: 'BANG!' }), until: this.t + 60 };
+    for (const a of this.actors.values()) this.alerts.set(a.id, this.t + 90);
+    const who = (['thug', 'counsel', 'prof'] as const)[Math.floor(Math.random() * 3)];
+    const a = this.who((v) => (who === 'prof' ? v.seat === 'podium' : v.id === who));
+    if (a) this.remark(a, (a.lastGreet = this.pickNew(slamLines(who), a.lastGreet)), 6);
+    return true;
+  }
+
+  /** the bin, the bag, paper on the floor and in the air, the aim line and the gauge */
+  private ventItems(items: { y: number; draw: () => void }[]) {
+    const g = this.g;
+    const t = this.trash;
+    items.push({
+      y: t.y,
+      draw: () => {
+        g.fillStyle = '#5f6b78';
+        g.fillRect(t.x - 3, t.y - 8, 7, 8);
+        g.fillStyle = '#7d8a99';
+        g.fillRect(t.x - 4, t.y - 9, 9, 2);
+        g.fillStyle = '#4a5560';
+        g.fillRect(t.x - 1, t.y - 6, 1, 5);
+        g.fillRect(t.x + 1, t.y - 6, 1, 5);
+      },
+    });
+    const b = this.bag;
+    items.push({
+      y: b.y,
+      draw: () => {
+        const age = this.t - this.bagHitAt;
+        const sway = age < 400 ? Math.round(this.bagDir * 5 * Math.exp(-age / 45) * Math.cos(age * 0.3)) : 0;
+        // stand: base, pole, arm
+        g.fillStyle = '#3a3f4a';
+        g.fillRect(b.x + 2, b.y - 1, 12, 2);
+        g.fillRect(b.x + 7, b.y - 34, 2, 33);
+        g.fillRect(b.x - 4, b.y - 34, 12, 2);
+        // chain and bag (the bag swings from the arm)
+        g.fillStyle = '#9aa3ad';
+        g.fillRect(b.x - 3 + Math.round(sway / 3), b.y - 32, 1, 3);
+        const bx = b.x - 7 + sway;
+        g.fillStyle = '#b3312b';
+        g.fillRect(bx, b.y - 29, 9, 20);
+        g.fillRect(bx + 1, b.y - 30, 7, 22);
+        g.fillStyle = '#d8554a';
+        g.fillRect(bx + 1, b.y - 28, 2, 17);
+        g.fillStyle = '#7d1f1b';
+        g.fillRect(bx, b.y - 20, 9, 1);
+        const sp = this.bagSpark;
+        if (sp && sp.until > this.t) {
+          g.fillStyle = '#fff4a8';
+          g.fillRect(Math.round(sp.x) - 2, Math.round(sp.y), 5, 1);
+          g.fillRect(Math.round(sp.x), Math.round(sp.y) - 2, 1, 5);
+        }
+      },
+    });
+    this.litter = this.litter.filter((p) => this.t - p.born < 7200);
+    for (const p of this.litter)
+      items.push({
+        y: p.y - 0.5,
+        draw: () => {
+          g.fillStyle = '#f4f1ea';
+          g.fillRect(p.x - 1, p.y - 2, 3, 2);
+          g.fillStyle = '#cfc9bb';
+          g.fillRect(p.x, p.y - 1, 2, 1);
+        },
+      });
+    for (const [id, until] of this.alerts) {
+      const a = this.actors.get(id);
+      if (!a || until <= this.t) {
+        this.alerts.delete(id);
+        continue;
+      }
+      const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
+      items.push({
+        y: 1e8,
+        draw: () => {
+          g.fillStyle = '#ffcc00';
+          g.fillRect(Math.round(a.x) + 7, Math.round(a.y) - tall - 6, 2, 5);
+          g.fillRect(Math.round(a.x) + 7, Math.round(a.y) - tall, 2, 2);
+        },
+      });
+    }
+    // balls in the air: a straight run with a hop in the middle, half a second
+    this.flying = this.flying.filter((f) => {
+      const p = (this.t - f.from) / 30;
+      if (p >= 1) {
+        this.land(f.x1, f.y1);
+        return false;
+      }
+      const x = f.x0 + (f.x1 - f.x0) * p, y = f.y0 + (f.y1 - f.y0) * p - Math.sin(Math.PI * p) * f.arc;
+      items.push({
+        y: 1e8 + 1,
+        draw: () => {
+          g.fillStyle = '#f4f1ea';
+          g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
+        },
+      });
+      return true;
+    });
+    if (!this.holding) return;
+    const h = this.hand;
+    items.push({
+      y: 1e8 + 2,
+      draw: () => {
+        // the ball in hand, a dotted line towards the pointer, and the gauge while the button is down
+        g.fillStyle = '#f4f1ea';
+        g.fillRect(h.x - 1, h.y - 1, 3, 3);
+        const dx = this.aim.x - h.x, dy = this.aim.y - h.y;
+        const len = Math.hypot(dx, dy) || 1;
+        g.fillStyle = 'rgba(255,255,255,0.8)';
+        for (let k = 8; k <= 32; k += 6) g.fillRect(Math.round(h.x + (dx / len) * k), Math.round(h.y + (dy / len) * k), 1, 1);
+        if (this.charging == null) return;
+        const v = this.gauge;
+        const gx = 137, gy = H - 34 - MANAGER_H - 9;
+        g.fillStyle = '#1b1f27';
+        g.fillRect(gx, gy, 26, 5);
+        g.fillStyle = v > 0.8 ? '#ff5a4d' : v > 0.5 ? '#ffcc4d' : '#6dd97a';
+        g.fillRect(gx + 1, gy + 1, Math.round(24 * v), 3);
+      },
+    });
   }
 
   /** Now and then, with nobody selected and both idle, Kang says something and On answers. */
@@ -999,6 +1355,14 @@ export class OfficeScene {
       }
       this.plants = { left: plantStage('left'), right: plantStage('right') };
     }
+    // a slammed desk shakes the whole room for a moment (the DOM bubbles stay put)
+    const shaking = this.t - this.slamAt < 18;
+    g.save();
+    if (shaking) {
+      g.fillStyle = '#2b2f38';
+      g.fillRect(0, 0, W, H);
+      g.translate(Math.round(Math.random() * 4 - 2), Math.round(Math.random() * 4 - 2));
+    }
     g.drawImage(this.floor, 0, 0);
     this.drawWhiteboard();
     this.drawClock();
@@ -1055,12 +1419,23 @@ export class OfficeScene {
     items.push({ y: -1e9 + 1, draw: () => this.drawBossRug() });
     items.push({ y: H - 35, draw: () => this.drawBossChair() });
     items.push({ y: H - 34, draw: () => this.drawBoss() });
-    items.push({ y: H - 33, draw: () => this.drawBossDesk() });
+    // the desk (and the cup on it) jumps when slammed
+    const hop = this.t - this.slamAt < 8 ? -2 : 0;
+    items.push({
+      y: H - 33,
+      draw: () => {
+        g.translate(0, hop);
+        this.drawBossDesk();
+        if (this.cups > 0) this.drawCup();
+        g.translate(0, -hop);
+      },
+    });
+    this.ventItems(items);
     // the professor's podium stays where it is, with or without him on it
     if ([...this.actors.values()].some((a) => a.view.seat === 'podium')) items.push({ y: PROF.y - 0.1, draw: () => this.drawPodium() });
-    if (this.cups > 0) items.push({ y: H - 32.5, draw: () => this.drawCup() });
     for (const side of ['left', 'right'] as PlantSide[]) items.push({ y: H - 12, draw: () => this.drawPlant(side) });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
+    g.restore();
 
     this.renderSpeech();
     this.layoutOverlay();
@@ -1411,6 +1786,10 @@ export class OfficeScene {
       a.tag.style.left = `${a.x * s}px`;
       a.tag.style.top = `${(a.y + 2) * s}px`;
     }
+    const label = this.bagName || tr({ ko: '샌드백', en: 'Punching bag' });
+    if (this.bagTag.textContent !== label) this.bagTag.textContent = label;
+    this.bagTag.style.left = `${(this.bag.x + 2) * s}px`;
+    this.bagTag.style.top = `${(this.bag.y + 2) * s}px`;
     if (!this.objBubble.hidden && this.caption) placeSpeech(this.objBubble, this.caption.x * s, this.caption.y * s, 0.5);
     // the manager's line: if a reply bubble is in the way, it moves up above it (older line on top, like a chat log)
     const mb = this.managerBubble;
