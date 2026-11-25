@@ -251,6 +251,12 @@ const MAX_THROW = 330;
  */
 const MARKER_SPEED = 1.5;
 const OVERSHOOT = 1.25;
+/**
+ * A thrown ball of paper, roughly as it really flies: a flat toss (about 20–25° up), so the peak is about a
+ * ninth of the distance, and a longer throw stays in the air longer.
+ */
+const arcOf = (dist: number) => dist * 0.11;
+const flightFrames = (dist: number) => Math.round(14 + dist / 8);
 /** how close to the bin's mouth counts as in */
 const BIN_RADIUS = 11;
 /** `?power=0.6` pins the gauge, for trying out where a throw lands (read lazily: the unit tests import this module without a browser) */
@@ -448,7 +454,7 @@ export class OfficeScene {
   /** frame the mouse button went down while holding: the power gauge swings until release */
   private charging: number | null = null;
   private suppressClick = false;
-  private flying: { x0: number; y0: number; x1: number; y1: number; from: number; arc: number }[] = [];
+  private flying: { x0: number; y0: number; x1: number; y1: number; from: number; arc: number; dur: number }[] = [];
   private litter: { x: number; y: number; born: number }[] = [];
   private trashStreak = 0;
   /** "!" over someone's head until this frame */
@@ -736,7 +742,7 @@ export class OfficeScene {
   private throwPaper() {
     const h = this.hand;
     const { x, y, dist } = this.landing();
-    this.flying.push({ x0: h.x, y0: h.y, x1: x, y1: y, from: this.t, arc: Math.min(36, dist / 4) });
+    this.flying.push({ x0: h.x, y0: h.y, x1: x, y1: y, from: this.t, arc: arcOf(dist), dur: flightFrames(dist) });
     this.dropPaper();
   }
 
@@ -863,9 +869,9 @@ export class OfficeScene {
         },
       });
     }
-    // balls in the air: a straight run with a hop in the middle, half a second
+    // balls in the air: a flat arc, longer in the air the farther they go
     this.flying = this.flying.filter((f) => {
-      const p = (this.t - f.from) / 30;
+      const p = (this.t - f.from) / f.dur;
       if (p >= 1) {
         this.land(f.x1, f.y1);
         return false;
@@ -891,8 +897,19 @@ export class OfficeScene {
         const dx = this.aim.x - h.x, dy = this.aim.y - h.y;
         const len = Math.hypot(dx, dy) || 1;
         g.fillStyle = 'rgba(255,255,255,0.8)';
-        for (let k = 8; k <= 32; k += 6) g.fillRect(Math.round(h.x + (dx / len) * k), Math.round(h.y + (dy / len) * k), 1, 1);
-        if (this.charging == null) return;
+        if (this.charging == null) {
+          // just holding: a short dotted line shows the direction
+          for (let k = 8; k <= 32; k += 6) g.fillRect(Math.round(h.x + (dx / len) * k), Math.round(h.y + (dy / len) * k), 1, 1);
+          return;
+        }
+        // charging: the arc the ball would fly if released now, growing and shrinking (the same curve the throw uses)
+        const l = this.landing();
+        const arc = arcOf(l.dist);
+        const dots = Math.max(3, Math.round(l.dist / 7));
+        for (let k = 1; k <= dots; k++) {
+          const p = k / dots;
+          g.fillRect(Math.round(h.x + (l.x - h.x) * p), Math.round(h.y + (l.y - h.y) * p - Math.sin(Math.PI * p) * arc), 1, 1);
+        }
         const v = this.gauge;
         const gx = 137, gy = H - 34 - MANAGER_H - 9;
         g.fillStyle = '#1b1f27';
@@ -900,16 +917,6 @@ export class OfficeScene {
         // green where it would land on the pointer (the pointer sits at 1 / OVERSHOOT of the bar)
         g.fillStyle = Math.abs(v - 1 / OVERSHOOT) < 0.08 ? '#6dd97a' : '#ffcc4d';
         g.fillRect(gx + 1, gy + 1, Math.round(24 * v), 3);
-        // a marker slides along the aim line to where the ball would land if released now
-        const l = this.landing();
-        const lx = Math.round(l.x), ly = Math.round(l.y);
-        g.fillStyle = '#ffffff';
-        g.fillRect(lx - 3, ly, 2, 1);
-        g.fillRect(lx + 2, ly, 2, 1);
-        g.fillRect(lx, ly - 3, 1, 2);
-        g.fillRect(lx, ly + 2, 1, 2);
-        g.fillStyle = '#ff5a4d';
-        g.fillRect(lx, ly, 1, 1);
       },
     });
   }
