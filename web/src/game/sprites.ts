@@ -203,7 +203,14 @@ export function paintMap(g: CanvasRenderingContext2D, map: string[], colors: Rec
 }
 
 export const PLANT = ['..GG.G..', '.GGGGGG.', 'GGgGGgGG', '.GGGGGG.', '..GgGG..', '..BBBB..', '..BBBB..', '...BB...'];
-export const PLANT_COLORS = { G: '#4f8a3b', g: '#6fae4f', B: '#8a5a3b' };
+export const PLANT_COLORS = { G: '#4f8a3b', g: '#6fae4f', B: '#8a5a3b', y: '#9a7b3c', F: '#ff8fb1', Y: '#ffe066' };
+/** the office plants grow when watered (see OfficeScene plants): wilted, normal, lush, in flower */
+export const PLANT_STAGES: Record<'wilt' | 'normal' | 'lush' | 'flower', string[]> = {
+  wilt: ['........', '..y..y..', '.yy..yy.', '.y.yy.y.', '..yyyy..', '..BBBB..', '..BBBB..', '...BB...'],
+  normal: PLANT,
+  lush: ['...GG...', '.GGgGGG.', ...PLANT],
+  flower: ['..F...F.', '.FYF.FYF', '..FGGGF.', '.GGgGGG.', ...PLANT],
+};
 
 export const COFFEE = [
   'KKKKKKKKKK',

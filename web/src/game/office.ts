@@ -1,7 +1,7 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
-import { COFFEE, COFFEE_COLORS, PLANT, PLANT_COLORS, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
+import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_H, SPRITE_W, characterSprite, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
 const WALL_H = 36;
@@ -92,9 +92,103 @@ const TYPE_SPEED = 0.5;
 /** frames the manager's line stays up after the reply has finished typing */
 const MANAGER_LINE_HOLD = 360;
 const BUSY: AgentStatus[] = ['queued', 'thinking', 'typing', 'running', 'researching', 'remote'];
-/** what a corner character says when selected before anyone has talked to them */
+// ---- easter eggs: the time of day, and the two plants (all in the browser, no server state) ----
+/** local time; `?hour=19` (optionally `&minute=30`) in the URL overrides it, for trying the evening look */
+const clockNow = (): { h: number; m: number } => {
+  const q = new URLSearchParams(location.search);
+  const d = new Date();
+  const h = q.has('hour') ? Number(q.get('hour')) : NaN;
+  const m = q.has('minute') ? Number(q.get('minute')) : NaN;
+  return { h: h >= 0 && h < 24 ? Math.floor(h) : d.getHours(), m: m >= 0 && m < 60 ? Math.floor(m) : q.has('hour') ? 0 : d.getMinutes() };
+};
+type DayPhase = 'day' | 'dusk' | 'night';
+/** overtime starts at six: dusk until eight, then night until six in the morning */
+const dayPhase = (): DayPhase => {
+  const { h } = clockNow();
+  return h >= 6 && h < 18 ? 'day' : h < 20 && h >= 18 ? 'dusk' : 'night';
+};
+
+type PlantSide = 'left' | 'right';
+type PlantStage = keyof typeof PLANT_STAGES;
+const PLANT_X: Record<PlantSide, number> = { left: 6, right: 372 };
+const dayNumber = (d = new Date()) => Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86_400_000);
+const readPlant = (side: PlantSide): { last: number; streak: number } | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(`office-plant-${side}`) ?? 'null');
+    return p && typeof p.last === 'number' && typeof p.streak === 'number' ? p : null;
+  } catch {
+    return null;
+  }
+};
+/** watered daily it grows (3 days: lush, 7: in flower); skip a day and the streak is gone; over 3 days dry it wilts */
+const plantStage = (side: PlantSide): PlantStage => {
+  const p = readPlant(side);
+  if (!p) return 'normal';
+  const dry = dayNumber() - p.last;
+  if (dry > 3) return 'wilt';
+  const streak = dry <= 1 ? p.streak : 0;
+  return streak >= 7 ? 'flower' : streak >= 3 ? 'lush' : 'normal';
+};
+/** once a day counts; returns nothing, the caller re-reads the stage */
+const waterPlant = (side: PlantSide) => {
+  const today = dayNumber();
+  const p = readPlant(side);
+  if (p?.last === today) return;
+  try {
+    localStorage.setItem(`office-plant-${side}`, JSON.stringify({ last: today, streak: p && today - p.last === 1 ? p.streak + 1 : 1 }));
+  } catch {
+    /* storage unavailable: the plant just stays as it is */
+  }
+};
+
+/** what the professor says while standing behind the manager (click him five times, quickly) */
+const hoverLines = (): string[] => [
+  tr({ ko: '신경 쓰지 말고 하던 거 하게.', en: "Don't mind me, carry on." }),
+  tr({ ko: '그냥 보는 거야.', en: "I'm just watching." }),
+  tr({ ko: '그 줄은 왜 그렇게 짰나?', en: 'Why did you write that line like that?' }),
+  tr({ ko: '편하게 해, 편하게.', en: 'Relax. Relax.' }),
+];
+
+/** Kang notices the plants */
+const plantJabs = (): string[] => {
+  const st = [plantStage('left'), plantStage('right')];
+  if (st.includes('wilt')) return [tr({ ko: '화분 꼴 좀 봐라, 니 연구 같다.', en: 'Look at that plant. Just like your research.' })];
+  if (st.every((x) => x === 'lush' || x === 'flower'))
+    return [tr({ ko: '화분은 존나 잘 키우네. 연구를 그렇게 좀 해 봐라.', en: 'You grow plants fucking well. Try doing research like that.' })];
+  return [];
+};
+
+/** after six the chat characters have evening lines instead */
+const nightGreetings = (v: EmployeeView): string[] | null =>
+  v.seat === 'podium'
+    ? [
+        tr({ ko: '아직 있었나? 마침 잘됐네.', en: 'Still here? Good timing.' }),
+        tr({ ko: '밤이 연구하기엔 제일 좋지.', en: 'Night is the best time for research.' }),
+        tr({ ko: '나 때는 연구실에서 잤네.', en: 'In my day we slept in the lab.' }),
+        tr({ ko: '내일 아침까지 볼 수 있지?', en: 'I can see it by tomorrow morning, right?' }),
+      ]
+    : v.id === 'thug'
+      ? [
+          tr({ ko: '이 시간까지 남아서 한 게 그거냐, 병신아?', en: "You stayed this late and that's all you did, you idiot?" }),
+          tr({ ko: '집에 안 가냐? 갈 데도 없냐, 새끼야.', en: 'Not going home? Nowhere to go, dumbass?' }),
+          tr({ ko: '야근한다고 일 잘하는 줄 아네, 씨발.', en: 'Thinks working late makes them good at it. Fuck.' }),
+          tr({ ko: '낮에 처놀다가 이제 와서 바쁜 척하냐?', en: 'Screwed around all day and now you act busy?' }),
+        ]
+      : v.id === 'counsel'
+        ? [
+            tr({ ko: '늦게까지 계시네요. 저녁은 드셨어요?', en: "You're here late. Have you had dinner?" }),
+            tr({ ko: '오늘은 여기까지만 해도 괜찮아요.', en: "It's all right to stop here for today." }),
+            tr({ ko: '이 시간엔 생각이 더 무겁게 느껴지죠.', en: 'Thoughts feel heavier at this hour, don\'t they.' }),
+            tr({ ko: '집에 가는 길에 숨 한번 크게 쉬세요.', en: 'Take one deep breath on your way home.' }),
+          ]
+        : null;
+
 /** what a chat character says when you walk up to them (selected); one is picked at random each time */
-const greetings = (v: EmployeeView): string[] =>
+const greetings = (v: EmployeeView): string[] => [
+  ...((dayPhase() !== 'day' && nightGreetings(v)) || dayGreetings(v)),
+  ...(v.id === 'thug' ? plantJabs() : []),
+];
+const dayGreetings = (v: EmployeeView): string[] =>
   v.seat === 'podium'
     ? [
         tr({ ko: '음, 그래서 결과는 나왔나?', en: 'So, any results yet?' }),
@@ -167,6 +261,14 @@ export class OfficeScene {
   private managerBubbleText = '';
   /** who was selected last frame, to notice a new selection (click, number key, command-bar picker) */
   private greetedSel: string | null = null;
+  // easter eggs
+  private phase: DayPhase = dayPhase();
+  private plants: Record<PlantSide, PlantStage> = { left: plantStage('left'), right: plantStage('right') };
+  /** a watering in progress: drops fall over that plant until this frame */
+  private drip: { side: PlantSide; until: number } | null = null;
+  /** recent clicks on the professor (ms); five within two seconds and he comes to stand behind the manager */
+  private profClicks: number[] = [];
+  private hoverUntil = 0;
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -193,6 +295,13 @@ export class OfficeScene {
     this.resize();
 
     this.canvas.addEventListener('click', (ev) => {
+      const plant = this.hitPlant(ev);
+      if (plant) {
+        waterPlant(plant);
+        this.plants[plant] = plantStage(plant);
+        this.drip = { side: plant, until: this.t + 45 };
+        return;
+      }
       const fig = this.hitFigure(ev);
       if (fig) {
         const name = prompt(FIGURES[fig].ask(), this.figureTags.get(fig)?.textContent ?? '');
@@ -207,6 +316,8 @@ export class OfficeScene {
       if (sp) sp.shown = sp.chars.length;
       this.selected = id;
       this.onSelect(id);
+      const hit = id ? this.actors.get(id) : null;
+      if (hit?.view.seat === 'podium') this.pokeProfessor(hit);
     });
     this.canvas.addEventListener('dragover', (ev) => {
       if (this.hit(ev)) ev.preventDefault();
@@ -232,6 +343,26 @@ export class OfficeScene {
     this.canvas.style.height = `${H * this.scale}px`;
     this.overlay.style.width = this.canvas.style.width;
     this.overlay.style.height = this.canvas.style.height;
+  }
+
+  /** Five quick clicks and the professor comes over to watch the manager work for half a minute. */
+  private pokeProfessor(a: Actor) {
+    const now = performance.now();
+    this.profClicks = [...this.profClicks.filter((c) => now - c < 2000), now];
+    if (this.profClicks.length < 5) return;
+    this.profClicks = [];
+    this.hoverUntil = this.t + 1800;
+    const lines = hoverLines();
+    a.speech = { chars: Array.from(lines[Math.floor(Math.random() * lines.length)]), shown: 0 };
+    a.awaitingSince = null;
+  }
+
+  private hitPlant(ev: MouseEvent): PlantSide | null {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * W;
+    const y = ((ev.clientY - r.top) / r.height) * H;
+    for (const side of ['left', 'right'] as PlantSide[]) if (x >= PLANT_X[side] - 2 && x <= PLANT_X[side] + 10 && y >= H - 26 && y <= H - 10) return side;
+    return null;
   }
 
   private hitFigure(ev: MouseEvent): FigureKey | null {
@@ -436,11 +567,32 @@ export class OfficeScene {
     // window
     g.fillStyle = '#6b5a45';
     g.fillRect(14, 5, 44, 24);
-    g.fillStyle = '#9fd3f5';
-    g.fillRect(16, 7, 40, 20);
-    g.fillStyle = '#ffffff';
-    g.fillRect(22, 11, 8, 3);
-    g.fillRect(36, 16, 10, 3);
+    if (this.phase === 'day') {
+      g.fillStyle = '#9fd3f5';
+      g.fillRect(16, 7, 40, 20);
+      g.fillStyle = '#ffffff';
+      g.fillRect(22, 11, 8, 3);
+      g.fillRect(36, 16, 10, 3);
+    } else if (this.phase === 'dusk') {
+      // sunset: orange at the horizon up to purple, a low sun
+      ['#5b4a8a', '#8a5a9a', '#c9668a', '#f08a5d', '#f7b267'].forEach((c, i) => {
+        g.fillStyle = c;
+        g.fillRect(16, 7 + i * 4, 40, 4);
+      });
+      g.fillStyle = '#ffe9a8';
+      g.fillRect(24, 20, 6, 4);
+      g.fillRect(25, 19, 4, 1);
+    } else {
+      // night: dark sky, a moon and a few stars
+      g.fillStyle = '#1b2440';
+      g.fillRect(16, 7, 40, 20);
+      g.fillStyle = '#f4f1d0';
+      g.fillRect(43, 10, 5, 5);
+      g.fillStyle = '#1b2440';
+      g.fillRect(45, 10, 3, 3); // bite out of the moon → a crescent
+      g.fillStyle = '#e8ecff';
+      for (const [sx, sy] of [[20, 10], [27, 16], [31, 9], [38, 21], [50, 22], [22, 22]]) g.fillRect(sx, sy, 1, 1);
+    }
     g.fillStyle = '#6b5a45';
     g.fillRect(35, 7, 2, 20);
     // whiteboard frame (task counts drawn dynamically)
@@ -493,9 +645,7 @@ export class OfficeScene {
     g.fillRect(352, 10, 16, 16);
     g.fillStyle = '#fbfbf7';
     g.fillRect(353, 11, 14, 14);
-    g.fillStyle = '#2e3440';
-    g.fillRect(359, 14, 1, 5);
-    g.fillRect(359, 18, 4, 1);
+    // (the hands are drawn per frame in drawClock, at the real time)
     // counter + coffee machine
     g.fillStyle = '#7a5537';
     g.fillRect(6, 44, 40, 14);
@@ -506,8 +656,7 @@ export class OfficeScene {
     g.fillRect(28, 40, 4, 4);
     g.fillRect(34, 40, 4, 4);
     // plants
-    paintMap(g, PLANT, PLANT_COLORS, 6, H - 20);
-    paintMap(g, PLANT, PLANT_COLORS, 372, H - 20);
+    // (the plants are drawn per frame in drawPlant: they grow)
     // water cooler beside the lounge, so the coffee corner is not alone
     g.fillStyle = '#cfd8dc';
     g.fillRect(54, 40, 10, 8);
@@ -531,6 +680,20 @@ export class OfficeScene {
     g.fillRect(rugX, rugY + rugH - 2, rugW, 2);
     g.fillRect(rugX, rugY, 2, rugH);
     g.fillRect(rugX + rugW - 2, rugY, 2, rugH);
+    // after six the room goes dim and the ceiling lights do the work
+    if (this.phase !== 'day') {
+      g.fillStyle = this.phase === 'dusk' ? 'rgba(60,30,60,0.14)' : 'rgba(14,18,48,0.30)';
+      g.fillRect(0, WALL_H, W, H - WALL_H);
+      g.fillStyle = this.phase === 'dusk' ? 'rgba(60,30,60,0.08)' : 'rgba(14,18,48,0.18)';
+      g.fillRect(0, 0, W, WALL_H);
+      for (const lx of COL_X.map((x) => x + 30)) {
+        const grad = g.createRadialGradient(lx, WALL_H, 4, lx, WALL_H, 80);
+        grad.addColorStop(0, this.phase === 'dusk' ? 'rgba(255,236,190,0.16)' : 'rgba(255,236,190,0.30)');
+        grad.addColorStop(1, 'rgba(255,236,190,0)');
+        g.fillStyle = grad;
+        g.fillRect(lx - 80, WALL_H, 160, 100);
+      }
+    }
     return c;
   }
 
@@ -623,6 +786,8 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
+    // the professor, poked five times, stands right behind the manager's chair for a while
+    if (v.seat === 'podium' && this.hoverUntil > this.t) return { x: 150, y: H - 44 };
     if (v.stayAtDesk || isChat(v)) return seatSpot(v.desk, v.seat);
     // the server room is gone from the drawing; remote work just shows in the bubble
     if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
@@ -636,8 +801,18 @@ export class OfficeScene {
     this.t++;
     const g = this.g;
     g.imageSmoothingEnabled = false;
+    // the look follows the clock: checked a few times a minute
+    if (this.t % 600 === 1) {
+      const ph = dayPhase();
+      if (ph !== this.phase) {
+        this.phase = ph;
+        this.floor = this.paintStatic();
+      }
+      this.plants = { left: plantStage('left'), right: plantStage('right') };
+    }
     g.drawImage(this.floor, 0, 0);
     this.drawWhiteboard();
+    this.drawClock();
 
     // move actors
     for (const a of this.actors.values()) {
@@ -691,6 +866,10 @@ export class OfficeScene {
     items.push({ y: H - 35, draw: () => this.drawBossChair() });
     items.push({ y: H - 34, draw: () => this.drawBoss() });
     items.push({ y: H - 33, draw: () => this.drawBossDesk() });
+    // the professor's podium stays where it is, with or without him on it
+    if ([...this.actors.values()].some((a) => a.view.seat === 'podium')) items.push({ y: PROF.y - 0.1, draw: () => this.drawPodium() });
+    if (this.hoverUntil > this.t) items.push({ y: H - 32, draw: () => this.drawSweat() });
+    for (const side of ['left', 'right'] as PlantSide[]) items.push({ y: H - 12, draw: () => this.drawPlant(side) });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
 
     this.renderSpeech();
@@ -710,15 +889,19 @@ export class OfficeScene {
     for (let k = 0; k < 3; k++) g.fillRect(x + 6, y + 6 + k * 4, w - 12, 1);
   }
 
-  /** the professor on his small podium, feet at (px, py - 2); returns the sprite's top-left for the status glyphs */
-  private drawProfessor(px: number, py: number) {
+  private drawPodium() {
     const g = this.g;
     g.fillStyle = '#c9a227';
-    g.fillRect(px - 12, py - 2, 24, 1);
+    g.fillRect(PROF.x - 12, PROF.y - 2, 24, 1);
     g.fillStyle = '#4e3020';
-    g.fillRect(px - 12, py - 1, 24, 4);
+    g.fillRect(PROF.x - 12, PROF.y - 1, 24, 4);
     g.fillStyle = '#3b2418';
-    g.fillRect(px - 12, py + 3, 24, 1);
+    g.fillRect(PROF.x - 12, PROF.y + 3, 24, 1);
+  }
+
+  /** the professor, feet at (px, py - 2); returns the sprite's top-left for the status glyphs */
+  private drawProfessor(px: number, py: number) {
+    const g = this.g;
     g.fillStyle = 'rgba(0,0,0,0.18)';
     g.fillRect(px - 5, py - 3, PROF_W - 2, 1);
     // hair flutters in gusts: a few seconds of wind every ~7 s
@@ -727,6 +910,45 @@ export class OfficeScene {
     const x = px - PROF_W / 2, y = py - 2 - PROF_H;
     g.drawImage(professorSprite(this.t % 300 < 5, frame), x, y);
     return { x, y };
+  }
+
+  /** wall clock hands at the real time (the face is in the static layer) */
+  private drawClock() {
+    const g = this.g;
+    const { h, m } = clockNow();
+    const hand = (turn: number, len: number) => {
+      const a = turn * Math.PI * 2;
+      for (let k = 0; k <= len; k++) g.fillRect(Math.round(359.5 + Math.sin(a) * k - 0.5), Math.round(17.5 - Math.cos(a) * k - 0.5), 1, 1);
+    };
+    g.fillStyle = '#2e3440';
+    hand(m / 60, 5);
+    hand(((h % 12) + m / 60) / 12, 3);
+  }
+
+  /** a plant at its current stage, bottom-aligned so taller stages grow upward; drops while being watered */
+  private drawPlant(side: PlantSide) {
+    const g = this.g;
+    const rows = PLANT_STAGES[this.plants[side]];
+    const x = PLANT_X[side];
+    paintMap(g, rows, PLANT_COLORS, x, H - 12 - rows.length);
+    if (this.drip?.side === side && this.drip.until > this.t) {
+      const k = 45 - (this.drip.until - this.t);
+      g.fillStyle = '#7fc8ff';
+      for (let d = 0; d < 3; d++) {
+        const fall = (k + d * 5) % 15;
+        g.fillRect(x + 1 + d * 3, H - 12 - rows.length - 12 + fall, 1, 2);
+      }
+    }
+  }
+
+  /** the manager sweats while the professor is standing behind them */
+  private drawSweat() {
+    if (Math.floor(this.t / 20) % 2) return;
+    const g = this.g;
+    const x = 150 + MANAGER_W / 2 + 1, y = H - 34 - MANAGER_H + 3 + (Math.floor(this.t / 40) % 2);
+    g.fillStyle = '#9fd8ff';
+    g.fillRect(x, y, 1, 1);
+    g.fillRect(x - 1, y + 1, 3, 2);
   }
 
   // ---- the manager (you): wine rug with gold border, high-back leather chair, wide walnut desk,
@@ -975,6 +1197,8 @@ export class OfficeScene {
       a.bubble.classList.toggle('selected', this.selected === a.id);
       a.tag.style.left = `${a.x * s}px`;
       a.tag.style.top = `${(a.y + 2) * s}px`;
+      // off his podium (standing behind the manager) the professor's tag would sit on the manager's face
+      a.tag.hidden = a.view.seat === 'podium' && (a.x !== PROF.x || a.y !== PROF.y);
     }
     // the manager's line: if a reply bubble is in the way, it moves up above it (older line on top, like a chat log)
     const mb = this.managerBubble;
