@@ -102,7 +102,7 @@ export function characterSprite(p: Palette, pose: Pose, blink = false): HTMLCanv
   return c;
 }
 
-// The professor: decoration only (not an employee). Messy black hair that flutters, dark-rimmed glasses,
+// The professor (the `seat: 'podium'` employee). Messy black hair that flutters, dark-rimmed glasses,
 // dark suit with white shirt and tie, hands clasped behind the back. 12x20, two hair frames.
 const PROF_HAIR = [
   ['..H..H..H...', '..HHHHHHHHH.', '.HHhhHHHHHHH', 'HHHHHHHHHHH.'],
@@ -130,16 +130,16 @@ export const PROF_W = 12;
 export const PROF_H = PROF_HAIR[0].length + PROF_BODY.length;
 
 /** frame 0/1 = hair blown one way or the other */
-export function professorSprite(blink = false, frame: 0 | 1 = 0): HTMLCanvasElement {
-  const key = `professor${blink}${frame}`;
+export function professorSprite(blink = false, frame: 0 | 1 = 0, angry = false): HTMLCanvasElement {
+  const key = `professor${blink}${frame}${angry}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = PROF_W;
   c.height = PROF_H;
-  const skin = '#f0c9a0';
+  const skin = angry ? '#ee7b6a' : '#f0c9a0'; // red in the face
   paintMap(c.getContext('2d')!, [...PROF_HAIR[frame], ...PROF_BODY], {
-    H: '#1f1f24', h: '#3a3a44', S: skin, K: '#4a4a52', E: blink ? '#cfe6f5' : '#1b1b1b', L: '#cfe6f5', m: '#8a5a4a',
+    H: '#1f1f24', h: '#3a3a44', S: skin, K: '#4a4a52', E: blink && !angry ? '#cfe6f5' : '#1b1b1b', L: angry ? '#ffd0c8' : '#cfe6f5', m: angry ? '#4a1410' : '#8a5a4a',
     D: '#2c3440', d: '#46536a', w: '#fafafa', R: '#8e2430', P: '#262c36', B: '#151515',
   }, 0, 0);
   cache.set(key, c);

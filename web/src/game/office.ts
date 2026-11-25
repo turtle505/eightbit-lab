@@ -54,6 +54,10 @@ interface Speech {
   shown: number;
   /** a canned greeting rather than a real reply: it goes away when the character is deselected */
   greet?: boolean;
+  /** a passing remark (easter eggs): gone at this frame */
+  until?: number;
+  /** part of a Kang–On exchange: dropped as soon as someone is selected */
+  banter?: boolean;
 }
 
 interface Actor {
@@ -141,13 +145,91 @@ const waterPlant = (side: PlantSide) => {
   }
 };
 
-/** what the professor says while standing behind the manager (click him five times, quickly) */
-const hoverLines = (): string[] => [
-  tr({ ko: '신경 쓰지 말고 하던 거 하게.', en: "Don't mind me, carry on." }),
-  tr({ ko: '그냥 보는 거야.', en: "I'm just watching." }),
-  tr({ ko: '그 줄은 왜 그렇게 짰나?', en: 'Why did you write that line like that?' }),
-  tr({ ko: '편하게 해, 편하게.', en: 'Relax. Relax.' }),
+/** the professor, poked five times in a row, loses his temper for a while */
+const angryLines = (): string[] => [
+  tr({ ko: '지금 뭐 하는 건가!', en: 'What do you think you are doing!' }),
+  tr({ ko: '내가 그렇게 만만해 보이나?', en: 'Do I look like a pushover to you?' }),
+  tr({ ko: '자네 졸업하기 싫은가?', en: "Don't you want to graduate?" }),
+  tr({ ko: '연구는 안 하고 장난이나 치고!', en: 'Playing around instead of doing research!' }),
+  tr({ ko: '당장 결과 가져오게!', en: 'Bring me results. Now!' }),
+  tr({ ko: '이제부터 미팅은 매일 하지, 매일!', en: 'From now on we meet every day. Every day!' }),
+  tr({ ko: '그 손가락으로 논문이나 쓰게!', en: 'Use that finger to write your paper!' }),
+  tr({ ko: '내 방으로 따라오게.', en: 'Come to my office.' }),
 ];
+/** what the professor says about the chart on the wall when you click it */
+const posterLines = (angry: boolean): string[] =>
+  angry
+    ? [tr({ ko: '그래프가 이게 뭔가!', en: 'What kind of chart is this!' }), tr({ ko: '이걸 그래프라고 그렸나!', en: 'You call this a chart!' })]
+    : [
+        tr({ ko: '이 그래프는 왜 이렇게 나왔나?', en: 'Why does this chart look like this?' }),
+        tr({ ko: 'error bar는 어디 갔나?', en: 'Where are the error bars?' }),
+        tr({ ko: '축 레이블이 없잖나.', en: 'There are no axis labels.' }),
+        tr({ ko: 'baseline이 이것뿐인가?', en: 'Are these all the baselines?' }),
+        tr({ ko: '이게 significant한가?', en: 'Is this significant?' }),
+        tr({ ko: '색을 좀 바꿔 보게.', en: 'Try different colours.' }),
+        tr({ ko: '마지막 막대만 높은 게 수상한데.', en: 'Only the last bar is high. Suspicious.' }),
+        tr({ ko: '이걸로 Figure 1이 되겠나?', en: 'Is this supposed to be Figure 1?' }),
+      ];
+const bookTitles = (): string[] => [
+  tr({ ko: '졸업하는 법 (비닐도 안 뜯음)', en: 'How to Graduate (still shrink-wrapped)' }),
+  tr({ ko: '교수님 저서 (사인본, 안 읽음)', en: "The professor's book (signed, unread)" }),
+  tr({ ko: '3년 전에 빌린 도서관 책', en: 'A library book borrowed three years ago' }),
+  tr({ ko: '선배가 두고 간 학위논문', en: 'A thesis a senior left behind' }),
+  tr({ ko: 'Deep Learning (베개로 사용 중)', en: 'Deep Learning (in use as a pillow)' }),
+  tr({ ko: '작년 학회 프로시딩 (기념품)', en: "Last year's proceedings (a souvenir)" }),
+  tr({ ko: '연구노트 1권 (3쪽까지 씀)', en: 'Lab notebook vol. 1 (three pages used)' }),
+  tr({ ko: '영어 논문 작성법 (필요한데 안 읽음)', en: 'Writing Papers in English (needed, unread)' }),
+  tr({ ko: '통계학 입문 (입문만 함)', en: 'Introduction to Statistics (introduced, nothing more)' }),
+  tr({ ko: '퇴사하고 싶을 때 읽는 책', en: 'A Book for When You Want to Quit' }),
+];
+
+/** cups of coffee today (click the coffee machine) */
+const coffeeToday = (): number => {
+  try {
+    const c = JSON.parse(localStorage.getItem('office-coffee') ?? 'null');
+    return c && c.day === dayNumber() && typeof c.n === 'number' ? c.n : 0;
+  } catch {
+    return 0;
+  }
+};
+const drinkCoffee = (): number => {
+  const n = coffeeToday() + 1;
+  try {
+    localStorage.setItem('office-coffee', JSON.stringify({ day: dayNumber(), n }));
+  } catch {
+    /* storage unavailable: nothing is counted */
+  }
+  return n;
+};
+/** from the fifth cup on, Kang and On have opinions */
+const coffeeLines = (who: 'thug' | 'counsel'): string[] =>
+  who === 'thug'
+    ? [
+        tr({ ko: '카페인으로 논문이 써지냐, 병신아.', en: 'You think caffeine writes papers, you idiot?' }),
+        tr({ ko: '손 떠는 거 봐라. 그만 처마셔.', en: 'Look at your hands shaking. Stop chugging it.' }),
+      ]
+    : [
+        tr({ ko: '물도 한 잔 같이 드세요.', en: 'Have a glass of water with that.' }),
+        tr({ ko: '오늘 잠은 주무실 수 있겠어요?', en: 'Will you be able to sleep tonight?' }),
+      ];
+
+/** Kang says a line, On answers (when both are idle and nobody is selected) */
+const banterPairs = (): [string, string][] => [
+  [tr({ ko: '저 새끼 오늘도 논다.', en: 'That bastard is slacking again today.' }), tr({ ko: '쉬는 날도 필요해요.', en: 'Everyone needs a day off.' })],
+  [tr({ ko: '쟤 졸업은 하겠냐?', en: 'Will that one ever graduate?' }), tr({ ko: '자기 속도로 가고 있어요.', en: "They're going at their own pace." })],
+  [tr({ ko: '넌 왜 맨날 쟤 편이냐.', en: 'Why are you always on their side?' }), tr({ ko: '깡 씨도 걱정돼서 그러는 거잖아요.', en: "You only say that because you're worried too." })],
+  [tr({ ko: '아 심심해. 누가 좀 징징대러 안 오나.', en: "I'm bored. Won't someone come and whine?" }), tr({ ko: '…그걸 기다리시는 거예요?', en: "…You're waiting for that?" })],
+  [tr({ ko: '교수 또 주말에 부르겠지, 씨발.', en: 'The professor will call them in on the weekend again. Fuck.' }), tr({ ko: '그건 저도 좀 걱정이에요.', en: 'That worries me a little too.' })],
+  [tr({ ko: '야, 넌 화 안 나냐?', en: "Hey, don't you ever get angry?" }), tr({ ko: '나죠. 그래서 숨을 쉬어요.', en: 'I do. That is why I breathe.' })],
+  ...(dayPhase() !== 'day'
+    ? [[tr({ ko: '이 시간에 왜 아직 있냐, 저 병신은.', en: 'Why is that idiot still here at this hour?' }), tr({ ko: '집에 가라고 한마디 해 줄까요?', en: 'Shall I tell them to go home?' })] as [string, string]]
+    : []),
+];
+/** seconds between exchanges: 3–5 minutes, or `?banter=<seconds>` for trying it out */
+const banterGap = (): number => {
+  const q = Number(new URLSearchParams(location.search).get('banter'));
+  return (q > 0 ? q : 180 + Math.random() * 120) * 60;
+};
 
 /** Kang notices the plants */
 const plantJabs = (): string[] => {
@@ -184,10 +266,14 @@ const nightGreetings = (v: EmployeeView): string[] | null =>
         : null;
 
 /** what a chat character says when you walk up to them (selected); one is picked at random each time */
-const greetings = (v: EmployeeView): string[] => [
-  ...((dayPhase() !== 'day' && nightGreetings(v)) || dayGreetings(v)),
-  ...(v.id === 'thug' ? plantJabs() : []),
-];
+const greetings = (v: EmployeeView, angry = false): string[] =>
+  v.seat === 'podium' && angry
+    ? angryLines()
+    : [
+        ...((dayPhase() !== 'day' && nightGreetings(v)) || dayGreetings(v)),
+        ...(v.id === 'thug' ? plantJabs() : []),
+        ...((v.id === 'thug' || v.id === 'counsel') && coffeeToday() >= 5 ? [coffeeLines(v.id)[0]] : []),
+      ];
 const dayGreetings = (v: EmployeeView): string[] =>
   v.seat === 'podium'
     ? [
@@ -266,9 +352,22 @@ export class OfficeScene {
   private plants: Record<PlantSide, PlantStage> = { left: plantStage('left'), right: plantStage('right') };
   /** a watering in progress: drops fall over that plant until this frame */
   private drip: { side: PlantSide; until: number } | null = null;
-  /** recent clicks on the professor (ms); five within two seconds and he comes to stand behind the manager */
+  /** recent clicks on the professor (ms); five within two seconds and he loses his temper */
   private profClicks: number[] = [];
-  private hoverUntil = 0;
+  private angryFrom = 0;
+  private angryUntil = 0;
+  private lastPosterLine = '';
+  private posterFlashUntil = 0;
+  /** a bubble over a thing rather than a character (coffee count, book title) */
+  private objBubble: HTMLDivElement;
+  private caption: { x: number; y: number; text: string; until: number } | null = null;
+  private lastBook = '';
+  private steamUntil = 0;
+  private cups = coffeeToday();
+  /** Kang–On banter: when the next exchange may start, and On's pending answer */
+  private nextBanterAt = banterGap();
+  private banterReply: { at: number; text: string } | null = null;
+  private lastBanter = '';
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -290,6 +389,10 @@ export class OfficeScene {
     this.managerBubble.className = 'bubble speech manager-line';
     this.managerBubble.hidden = true;
     overlay.append(this.managerBubble);
+    this.objBubble = document.createElement('div');
+    this.objBubble.className = 'bubble speech';
+    this.objBubble.hidden = true;
+    overlay.append(this.objBubble);
     // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
     new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
@@ -309,6 +412,7 @@ export class OfficeScene {
         return;
       }
       const id = this.hit(ev);
+      if (!id && this.clickThing(ev)) return;
       // clicking a character mid-line shows the rest at once, like skipping dialogue in a game
       const sp = id ? this.actors.get(id)?.speech : null;
       // clicking them again once the line is out gets another greeting
@@ -345,16 +449,99 @@ export class OfficeScene {
     this.overlay.style.height = this.canvas.style.height;
   }
 
-  /** Five quick clicks and the professor comes over to watch the manager work for half a minute. */
+  private get angry() {
+    return this.angryUntil > this.t;
+  }
+  private who(pred: (v: EmployeeView) => boolean): Actor | null {
+    for (const a of this.actors.values()) if (pred(a.view)) return a;
+    return null;
+  }
+
+  /** A passing line over a chat character's head; not while a real reply is on its way or being typed. */
+  private remark(a: Actor | null, text: string, seconds: number, extra: Partial<Speech> = {}): boolean {
+    if (!a || !isChat(a.view) || a.awaitingSince != null) return false;
+    if (a.speech && !a.speech.greet && !a.speech.until && a.speech.shown < a.speech.chars.length) return false;
+    a.speech = { chars: Array.from(text), shown: 0, until: this.t + seconds * 60, ...extra };
+    return true;
+  }
+  private pickNew(pool: string[], last: string): string {
+    const fresh = pool.filter((x) => x !== last);
+    const from = fresh.length ? fresh : pool;
+    return from[Math.floor(Math.random() * from.length)];
+  }
+
+  /** Five quick clicks and the professor loses his temper for twenty seconds. */
   private pokeProfessor(a: Actor) {
     const now = performance.now();
     this.profClicks = [...this.profClicks.filter((c) => now - c < 2000), now];
     if (this.profClicks.length < 5) return;
     this.profClicks = [];
-    this.hoverUntil = this.t + 1800;
-    const lines = hoverLines();
-    a.speech = { chars: Array.from(lines[Math.floor(Math.random() * lines.length)]), shown: 0 };
+    this.angryFrom = this.t;
+    this.angryUntil = this.t + 1200;
+    a.lastGreet = this.pickNew(angryLines(), a.lastGreet);
     a.awaitingSince = null;
+    a.speech = { chars: Array.from(a.lastGreet), shown: 0, until: this.angryUntil };
+  }
+
+  /** The chart, the coffee machine and the bookshelf react to a click. */
+  private clickThing(ev: MouseEvent): boolean {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * W;
+    const y = ((ev.clientY - r.top) / r.height) * H;
+    const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+    if (inside(236, 6, 276, 30)) {
+      const prof = this.who((v) => v.seat === 'podium');
+      if (!prof) return false;
+      this.lastPosterLine = this.pickNew(posterLines(this.angry), this.lastPosterLine);
+      this.remark(prof, this.lastPosterLine, 8);
+      this.posterFlashUntil = this.t + 14;
+      return true;
+    }
+    if (inside(6, 30, 46, 58)) {
+      this.cups = drinkCoffee();
+      this.steamUntil = this.t + 1800;
+      this.caption = { x: 26, y: 31, text: tr({ ko: `☕ 오늘 ${this.cups}잔째`, en: `☕ Cup ${this.cups} today` }), until: this.t + 240 };
+      if (this.cups === 5) this.remark(this.who((v) => v.id === 'counsel'), tr({ ko: '커피는 이제 그만 드시는 게 어때요?', en: "How about that's enough coffee for today?" }), 7);
+      else if (this.cups > 5) {
+        const id = this.cups % 2 ? 'counsel' : 'thug';
+        const a = this.who((v) => v.id === id);
+        if (a) this.remark(a, (a.lastGreet = this.pickNew(coffeeLines(id), a.lastGreet)), 7);
+      }
+      return true;
+    }
+    if (inside(366, 44, 394, 98)) {
+      this.lastBook = this.pickNew(bookTitles(), this.lastBook);
+      this.caption = { x: 380, y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
+      return true;
+    }
+    return false;
+  }
+
+  /** Now and then, with nobody selected and both idle, Kang says something and On answers. */
+  private banter() {
+    const kang = this.who((v) => v.id === 'thug');
+    const on = this.who((v) => v.id === 'counsel');
+    if (!kang || !on) return;
+    if (this.selected) {
+      // someone walked up: the two fall quiet
+      for (const a of [kang, on]) if (a.speech?.banter) a.speech = null;
+      this.banterReply = null;
+      return;
+    }
+    if (this.banterReply && this.t >= this.banterReply.at) {
+      this.remark(on, this.banterReply.text, 7, { banter: true });
+      this.banterReply = null;
+    }
+    if (this.t < this.nextBanterAt) return;
+    this.nextBanterAt = this.t + banterGap();
+    const idle = (a: Actor) => !a.speech && a.awaitingSince == null && a.view.status === 'idle';
+    if (!idle(kang) || !idle(on)) return;
+    const pairs = banterPairs();
+    const fresh = pairs.filter((p) => p[0] !== this.lastBanter);
+    const [k, o] = (fresh.length ? fresh : pairs)[Math.floor(Math.random() * (fresh.length || pairs.length))];
+    this.lastBanter = k;
+    this.remark(kang, k, 7, { banter: true });
+    this.banterReply = { at: this.t + 180, text: o };
   }
 
   private hitPlant(ev: MouseEvent): PlantSide | null {
@@ -479,19 +666,22 @@ export class OfficeScene {
       const a = this.selected ? this.actors.get(this.selected) : null;
       // not while a reply is on its way or still being typed out
       if (a && isChat(a.view) && a.awaitingSince == null && (!a.speech || a.speech.shown >= a.speech.chars.length)) {
-        const pool = greetings(a.view);
-        const fresh = pool.filter((g) => g !== a.lastGreet);
-        const pick = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
-        a.lastGreet = pick;
-        a.speech = { chars: Array.from(pick), shown: 0, greet: true };
+        const mad = a.view.seat === 'podium' && this.angry;
+        a.lastGreet = this.pickNew(greetings(a.view, mad), a.lastGreet);
+        // an angry line does not outlast the anger
+        a.speech = { chars: Array.from(a.lastGreet), shown: 0, greet: true, ...(mad ? { until: this.angryUntil } : {}) };
       }
       this.greetedSel = this.selected;
     }
+    this.banter();
+    const cap = this.caption && this.caption.until > this.t ? this.caption : (this.caption = null);
+    if ((cap?.text ?? '') !== this.objBubble.textContent) this.objBubble.textContent = cap?.text ?? '';
+    this.objBubble.hidden = !cap;
     const ml = this.managerLine;
     if (ml) {
       ml.speech.shown = Math.min(ml.speech.chars.length, ml.speech.shown + TYPE_SPEED);
       const to = this.actors.get(ml.to);
-      const reply = to?.speech?.greet ? null : to?.speech;
+      const reply = to?.speech?.greet || to?.speech?.until ? null : to?.speech;
       // fade out a while after the reply has finished typing, or once nobody is answering any more
       if (ml.hideAt == null && reply && reply.shown >= reply.chars.length) ml.hideAt = this.t + MANAGER_LINE_HOLD;
       if (ml.hideAt == null && to && !reply && to.awaitingSince == null) ml.hideAt = this.t + MANAGER_LINE_HOLD;
@@ -513,6 +703,7 @@ export class OfficeScene {
     for (const a of this.actors.values()) {
       const v = a.view;
       if (!isChat(v)) continue;
+      if (a.speech?.until != null && this.t >= a.speech.until) a.speech = null;
       // a turn that ended without a reply (stopped, failed) stops the waiting dots
       if (a.awaitingSince != null && !BUSY.includes(v.status) && this.t - a.awaitingSince > 120) a.awaitingSince = null;
       let out: string;
@@ -786,8 +977,6 @@ export class OfficeScene {
 
   private target(a: Actor): Spot {
     const v = a.view;
-    // the professor, poked five times, stands right behind the manager's chair for a while
-    if (v.seat === 'podium' && this.hoverUntil > this.t) return { x: 150, y: H - 44 };
     if (v.stayAtDesk || isChat(v)) return seatSpot(v.desk, v.seat);
     // the server room is gone from the drawing; remote work just shows in the bubble
     if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
@@ -813,6 +1002,7 @@ export class OfficeScene {
     g.drawImage(this.floor, 0, 0);
     this.drawWhiteboard();
     this.drawClock();
+    if (this.posterFlashUntil > this.t) this.drawPosterFlash();
 
     // move actors
     for (const a of this.actors.values()) {
@@ -868,7 +1058,7 @@ export class OfficeScene {
     items.push({ y: H - 33, draw: () => this.drawBossDesk() });
     // the professor's podium stays where it is, with or without him on it
     if ([...this.actors.values()].some((a) => a.view.seat === 'podium')) items.push({ y: PROF.y - 0.1, draw: () => this.drawPodium() });
-    if (this.hoverUntil > this.t) items.push({ y: H - 32, draw: () => this.drawSweat() });
+    if (this.cups > 0) items.push({ y: H - 32.5, draw: () => this.drawCup() });
     for (const side of ['left', 'right'] as PlantSide[]) items.push({ y: H - 12, draw: () => this.drawPlant(side) });
     items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
 
@@ -904,11 +1094,20 @@ export class OfficeScene {
     const g = this.g;
     g.fillStyle = 'rgba(0,0,0,0.18)';
     g.fillRect(px - 5, py - 3, PROF_W - 2, 1);
-    // hair flutters in gusts: a few seconds of wind every ~7 s
-    const gust = this.t % 420 < 150;
-    const frame = gust && Math.floor(this.t / 10) % 2 ? 1 : 0;
-    const x = px - PROF_W / 2, y = py - 2 - PROF_H;
-    g.drawImage(professorSprite(this.t % 300 < 5, frame), x, y);
+    const mad = this.angry;
+    // hair flutters in gusts: a few seconds of wind every ~7 s (all the time, and faster, when he is angry)
+    const gust = mad || this.t % 420 < 150;
+    const frame = gust && Math.floor(this.t / (mad ? 5 : 10)) % 2 ? 1 : 0;
+    // he shakes for a second when he blows up
+    const shake = mad && this.t - this.angryFrom < 60 ? (Math.floor(this.t / 2) % 2 ? 1 : -1) : 0;
+    const x = px - PROF_W / 2 + shake, y = py - 2 - PROF_H;
+    g.drawImage(professorSprite(this.t % 300 < 5, frame, mad), x, y);
+    if (mad && Math.floor(this.t / 15) % 3) {
+      // anger mark by his head
+      g.fillStyle = '#e5352b';
+      const ax = x + PROF_W, ay = y - 3;
+      for (const [dx, dy] of [[1, 0], [3, 0], [0, 1], [1, 1], [3, 1], [4, 1], [0, 3], [1, 3], [3, 3], [4, 3], [1, 4], [3, 4]]) g.fillRect(ax + dx, ay + dy, 1, 1);
+    }
     return { x, y };
   }
 
@@ -941,14 +1140,28 @@ export class OfficeScene {
     }
   }
 
-  /** the manager sweats while the professor is standing behind them */
-  private drawSweat() {
-    if (Math.floor(this.t / 20) % 2) return;
+  /** today's coffee on the manager's desk, steaming for a while after a fresh cup */
+  private drawCup() {
     const g = this.g;
-    const x = 150 + MANAGER_W / 2 + 1, y = H - 34 - MANAGER_H + 3 + (Math.floor(this.t / 40) % 2);
-    g.fillStyle = '#9fd8ff';
-    g.fillRect(x, y, 1, 1);
-    g.fillRect(x - 1, y + 1, 3, 2);
+    const x = 114 + 50, y = H - 36 + 4;
+    g.fillStyle = '#f4f1ea';
+    g.fillRect(x, y, 4, 4);
+    g.fillRect(x + 4, y + 1, 1, 2); // handle
+    g.fillStyle = '#5a3a22';
+    g.fillRect(x + 1, y, 2, 1);
+    if (this.steamUntil > this.t) {
+      g.fillStyle = 'rgba(255,255,255,0.75)';
+      const k = Math.floor(this.t / 12) % 2;
+      g.fillRect(x + 1 + k, y - 2, 1, 1);
+      g.fillRect(x + 2 - k, y - 4, 1, 1);
+    }
+  }
+
+  /** the chart's bars blink when clicked */
+  private drawPosterFlash() {
+    const g = this.g;
+    g.fillStyle = '#ffffff';
+    [6, 10, 8, 14, 12, 17].forEach((h, i) => g.fillRect(241 + i * 5, 27 - h, 3, h));
   }
 
   // ---- the manager (you): wine rug with gold border, high-back leather chair, wide walnut desk,
@@ -1197,9 +1410,8 @@ export class OfficeScene {
       a.bubble.classList.toggle('selected', this.selected === a.id);
       a.tag.style.left = `${a.x * s}px`;
       a.tag.style.top = `${(a.y + 2) * s}px`;
-      // off his podium (standing behind the manager) the professor's tag would sit on the manager's face
-      a.tag.hidden = a.view.seat === 'podium' && (a.x !== PROF.x || a.y !== PROF.y);
     }
+    if (!this.objBubble.hidden && this.caption) placeSpeech(this.objBubble, this.caption.x * s, this.caption.y * s, 0.5);
     // the manager's line: if a reply bubble is in the way, it moves up above it (older line on top, like a chat log)
     const mb = this.managerBubble;
     mb.classList.remove('stacked');
