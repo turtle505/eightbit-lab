@@ -279,6 +279,43 @@ const paperLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
           tr({ ko: '아야… 많이 답답하셨나 봐요.', en: 'Ow… you must be really frustrated.' }),
           tr({ ko: '저한테 던지셔도 괜찮아요. 조금 풀리셨어요?', en: "It's all right to throw it at me. Feel a little better?" }),
         ];
+/** Kang does not get angry: he picks the ball up and throws it back */
+const kangReturnLines = (): string[] => [
+  tr({ ko: '돌려준다, 병신아.', en: 'Right back at you, idiot.' }),
+  tr({ ko: '던지는 건 이렇게 하는 거다.', en: 'This is how you throw.' }),
+  tr({ ko: '어디다 던져, 씨발.', en: 'Where the fuck are you throwing?' }),
+  tr({ ko: '받아라.', en: 'Catch.' }),
+];
+/** On takes notes instead; the nth hit of the day */
+const onNote = (n: number): string =>
+  n === 1
+    ? tr({ ko: '(메모: 공격성 관찰됨.)', en: '(Note: aggression observed.)' })
+    : n === 2
+      ? tr({ ko: '(메모: 오늘 두 번째. 패턴으로 보임.)', en: '(Note: second time today. Looks like a pattern.)' })
+      : n === 3
+        ? tr({ ko: '(메모: 세 번째. 조준 실력은 향상 중.)', en: '(Note: third. Aim is improving.)' })
+        : [
+            tr({ ko: '(메모: 종이는 넉넉한 듯.)', en: '(Note: paper supply seems ample.)' }),
+            tr({ ko: '(메모: 다음 상담 주제 확정.)', en: "(Note: next session's topic is settled.)" }),
+            tr({ ko: '(메모: 본인은 재미있어함.)', en: '(Note: the client is enjoying this.)' }),
+            tr({ ko: '(메모: 상담사의 인내심, 양호.)', en: "(Note: the counselor's patience: holding.)" }),
+          ][n % 4];
+/** what the working staff say when a ball of paper lands on them (one line: their bubble does not wrap) */
+const staffQuips = (id: string): string[] =>
+  id === 'lit'
+    ? [tr({ ko: '논문 읽는 중이었는데요…', en: 'I was reading a paper…' }), tr({ ko: '이것도 인용할까요?', en: 'Shall I cite this too?' })]
+    : id === 'eval'
+      ? [tr({ ko: '명중률 계산해 드릴까요?', en: 'Shall I compute your hit rate?' }), tr({ ko: '표본이 하나 늘었네요.', en: 'One more sample.' })]
+      : id === 'aide1'
+        ? [tr({ ko: '앗, 저 뭐 잘못했나요?', en: 'Oh! Did I do something wrong?' }), tr({ ko: '주워 드릴까요?', en: 'Shall I pick that up?' })]
+        : id === 'aide2'
+          ? [tr({ ko: '아야. 일 더 주시는 건가요?', en: 'Ow. Is this more work?' }), tr({ ko: '종이 재활용함은 저쪽이에요.', en: 'Paper recycling is over there.' })]
+          : id === 'sec'
+            ? [tr({ ko: '치우는 건 제 일이에요…', en: "I'm the one who cleans up…" }), tr({ ko: "일정표에 '종이 던지기'로 적어 둘게요.", en: "I'll put 'paper throwing' on the calendar." })]
+            : id === 'exec'
+              ? [tr({ ko: '지금 커밋 중인데요.', en: "I'm in the middle of a commit." }), tr({ ko: '이건 리뷰 코멘트로 받겠습니다.', en: "I'll take that as a review comment." })]
+              : [tr({ ko: '…?', en: '…?' }), tr({ ko: '네?', en: 'Sorry?' })];
+
 const slamLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
   who === 'prof'
     ? [tr({ ko: '조용히 좀 하게.', en: 'Keep it down.' }), tr({ ko: '그 힘으로 실험을 하게.', en: 'Put that energy into your experiments.' })]
@@ -457,8 +494,24 @@ export class OfficeScene {
   /** frame the mouse button went down while holding: the power gauge swings until release */
   private charging: number | null = null;
   private suppressClick = false;
-  private flying: { x0: number; y0: number; x1: number; y1: number; from: number; arc: number; dur: number }[] = [];
-  private litter: { x: number; y: number; born: number }[] = [];
+  private flying: { x0: number; y0: number; x1: number; y1: number; from: number; arc: number; dur: number; to?: 'manager' }[] = [];
+  /** paper on the floor; `held` = Kang is about to pick this one up and throw it back */
+  private litter: { x: number; y: number; born: number; held?: boolean }[] = [];
+  /** Kang's pending throws back at the manager */
+  private kangThrows: { at: number; ball: OfficeScene['litter'][number] | null; line: string | null }[] = [];
+  private kangHits: number[] = [];
+  private kangPoseUntil = 0;
+  private managerHitAt = -1e9;
+  /** On is writing on her clipboard until this frame */
+  private onNoteUntil = 0;
+  private clockSpinFrom = -1e9;
+  private spills: { x: number; y: number; until: number }[] = [];
+  private fallenBooks: { x: number; y: number; color: string; until: number }[] = [];
+  private leaves: { x: number; y: number; from: number; drift: number }[] = [];
+  /** a line in a working employee's status bubble for a few seconds */
+  private quips = new Map<string, { text: string; until: number }>();
+  /** Hana is going round picking paper up */
+  private cleaning = false;
   private trashStreak = 0;
   /** "!" over someone's head until this frame */
   private alerts = new Map<string, number>();
@@ -514,7 +567,12 @@ export class OfficeScene {
     // throwing, in one gesture: press on the papers, drag towards the target while the arc swings, release to throw
     this.canvas.addEventListener('pointerdown', (ev) => {
       const p = this.at(ev);
-      if (p.x < 127 || p.x > 139 || p.y < H - 33 || p.y > H - 25) return;
+      if (p.x < 127 || p.x > 139 || p.y < H - 33 || p.y > H - 25) {
+        // not the papers on the desk: a ball on the floor can be picked up again the same way
+        const k = this.litter.findLastIndex((l) => !l.held && Math.abs(l.x - p.x) <= 4 && Math.abs(l.y - 1 - p.y) <= 4);
+        if (k < 0) return;
+        this.litter.splice(k, 1);
+      }
       this.holding = true;
       this.charging = null;
       this.pressAt = p;
@@ -635,14 +693,7 @@ export class OfficeScene {
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
     const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-    if (inside(236, 6, 276, 30)) {
-      const prof = this.who((v) => v.seat === 'podium');
-      if (!prof) return false;
-      this.lastPosterLine = this.pickNew(posterLines(this.angry), this.lastPosterLine);
-      this.remark(prof, this.lastPosterLine, 8);
-      this.posterFlashUntil = this.t + 14;
-      return true;
-    }
+    if (inside(236, 6, 276, 30)) return this.pokePoster();
     if (inside(6, 30, 46, 58)) {
       this.cups = drinkCoffee();
       this.steamUntil = this.t + 1800;
@@ -737,7 +788,7 @@ export class OfficeScene {
     if (len < 1) (dx = 1), (dy = 0);
     else (dx /= len), (dy /= len);
     const dist = Math.max(8, this.throwDist());
-    return { x: Math.max(4, Math.min(W - 4, h.x + dx * dist)), y: Math.max(WALL_H + 4, Math.min(H - 4, h.y + dy * dist)), dist };
+    return { x: Math.max(4, Math.min(W - 4, h.x + dx * dist)), y: Math.max(4, Math.min(H - 4, h.y + dy * dist)), dist };
   }
 
   /** Release: the ball goes towards the pointer, as far as the gauge said. */
@@ -748,8 +799,40 @@ export class OfficeScene {
     this.dropPaper();
   }
 
-  /** Where a ball came down: someone's head, the bin, or the floor. */
-  private land(x: number, y: number) {
+  private quip(a: Actor, text: string, seconds: number) {
+    this.quips.set(a.id, { text, until: this.t + seconds * 60 });
+  }
+
+  /** The chart on the wall: the bars blink and the professor has something to say about it. */
+  private pokePoster(): boolean {
+    const prof = this.who((v) => v.seat === 'podium');
+    if (!prof) return false;
+    this.lastPosterLine = this.pickNew(posterLines(this.angry), this.lastPosterLine);
+    this.remark(prof, this.lastPosterLine, 8);
+    this.posterFlashUntil = this.t + 14;
+    return true;
+  }
+
+  /** Where a ball came down: the bin, someone's head, a thing, or the floor. */
+  private land(f: OfficeScene['flying'][number]) {
+    const x = f.x1, y = f.y1;
+    const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+    const drop = (fx: number, fy: number) => {
+      // a ball that hit the wall falls to the floor under it
+      const ball = { x: Math.round(Math.max(4, Math.min(W - 4, fx))), y: Math.round(Math.max(WALL_H + 8, Math.min(H - 3, fy))), born: this.t } as OfficeScene['litter'][number];
+      this.litter.push(ball);
+      if (this.litter.length > 20) {
+        const oldest = this.litter.findIndex((l) => !l.held);
+        if (oldest >= 0) this.litter.splice(oldest, 1);
+      }
+      return ball;
+    };
+    if (f.to === 'manager') {
+      // Kang's return throw: the manager takes it on the head
+      this.managerHitAt = this.t;
+      drop(190 + Math.random() * 10, H - 6);
+      return;
+    }
     const t = this.trash;
     if (Math.hypot(x - t.x, y - (t.y - 4)) <= BIN_RADIUS) {
       const n = bumpDayCount('office-trash');
@@ -759,26 +842,93 @@ export class OfficeScene {
       return;
     }
     this.trashStreak = 0;
-    let fx = x, fy = y;
     for (const a of this.actors.values()) {
       const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
       if (x < a.x - 10 || x > a.x + 10 || y < a.y - tall - 4 || y > a.y + 4) continue;
       const v = a.view;
+      // it bounces off and ends up at their feet
+      const ball = drop(a.x + (Math.random() < 0.5 ? -9 : 9), a.y + 3);
       if (v.seat === 'podium') {
         this.angryFrom = this.t;
         this.angryUntil = this.t + 1200;
         a.lastGreet = this.pickNew(paperLines('prof'), a.lastGreet);
         a.awaitingSince = null;
         a.speech = { chars: Array.from(a.lastGreet), shown: 0, until: this.angryUntil };
-      } else if (v.id === 'thug' || v.id === 'counsel') this.remark(a, (a.lastGreet = this.pickNew(paperLines(v.id), a.lastGreet)), 6);
-      else this.alerts.set(a.id, this.t + 70);
-      // it bounces off and ends up at their feet
-      fx = a.x + (Math.random() < 0.5 ? -9 : 9);
-      fy = a.y + 3;
-      break;
+      } else if (v.id === 'thug') {
+        // he picks it up and throws it back; the third hit in half a minute gets two
+        this.kangHits = [...this.kangHits.filter((h) => this.t - h < 1800), this.t];
+        const double = this.kangHits.length >= 3;
+        if (double) this.kangHits = [];
+        ball.held = true;
+        a.lastGreet = this.pickNew(kangReturnLines(), a.lastGreet);
+        this.kangThrows.push({ at: this.t + 24, ball, line: a.lastGreet });
+        if (double) {
+          const extra = this.litter.find((l) => !l.held) ?? null;
+          if (extra) {
+            extra.held = true;
+            this.kangThrows.push({ at: this.t + 54, ball: extra, line: tr({ ko: '하나 더 받아라.', en: 'Have another.' }) });
+          }
+        }
+      } else if (v.id === 'counsel') {
+        this.onNoteUntil = this.t + 240;
+        this.remark(a, onNote(bumpDayCount('office-on-hits')), 4);
+      } else {
+        this.alerts.set(a.id, this.t + 70);
+        const cur = this.quips.get(a.id)?.text ?? '';
+        this.quip(a, this.pickNew(staffQuips(v.id), cur), 4);
+      }
+      return;
     }
-    this.litter.push({ x: Math.round(fx), y: Math.round(Math.min(H - 3, fy)), born: this.t });
-    if (this.litter.length > 20) this.litter.shift();
+    // things
+    const b = this.bag;
+    if (inside(352, 10, 368, 26)) this.clockSpinFrom = this.t;
+    else if (inside(236, 6, 276, 30)) this.pokePoster();
+    else if (inside(366, 44, 394, 98)) {
+      this.lastBook = this.pickNew(bookTitles(), this.lastBook);
+      this.caption = { x: 380, y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
+      const colors = ['#c0504d', '#4f81bd', '#9bbb59', '#e8c55a', '#8064a2'];
+      this.fallenBooks.push({ x: 368 + Math.round(Math.random() * 18), y: 104 + Math.round(Math.random() * 4), color: colors[Math.floor(Math.random() * colors.length)], until: this.t + 1800 });
+    } else if (inside(6, 30, 46, 58)) this.spills.push({ x: 14 + Math.round(Math.random() * 16), y: 63, until: this.t + 1800 });
+    else if (inside(b.x - 9, b.y - 30, b.x + 4, b.y - 8)) {
+      this.bagHitAt = this.t;
+      this.bagDir = f.x1 >= f.x0 ? 1 : -1; // pushed the way the ball was going
+    } else
+      for (const side of ['left', 'right'] as PlantSide[])
+        if (inside(PLANT_X[side] - 2, H - 26, PLANT_X[side] + 10, H - 10))
+          for (let k = 0; k < 5; k++) this.leaves.push({ x: PLANT_X[side] + 1 + k * 1.5, y: H - 20, from: this.t + k * 3, drift: Math.random() * 2 - 1 });
+    drop(x, y);
+  }
+
+  /** Kang's return throws, and Hana picking paper up once there is too much of it. */
+  private paperChores() {
+    const kang = this.who((v) => v.id === 'thug');
+    this.kangThrows = this.kangThrows.filter((k) => {
+      if (this.t < k.at) return true;
+      if (k.ball) this.litter = this.litter.filter((l) => l !== k.ball);
+      if (!kang) return false;
+      const x0 = kang.x + 4, y0 = kang.y - 13, x1 = 150, y1 = H - 34 - MANAGER_H + 3;
+      const dist = Math.hypot(x1 - x0, y1 - y0);
+      this.flying.push({ x0, y0, x1, y1, from: this.t, arc: arcOf(dist), dur: flightFrames(dist), to: 'manager' });
+      this.kangPoseUntil = this.t + 22;
+      if (k.line) this.remark(kang, k.line, 5);
+      return false;
+    });
+    const hana = this.who((v) => v.id === 'sec');
+    const free = !!hana && hana.view.status === 'idle' && hana.view.desk >= 0 && this.selected !== hana.id;
+    const loose = this.litter.filter((l) => !l.held);
+    if (!this.cleaning && free && loose.length > 10) {
+      this.cleaning = true;
+      this.quip(hana!, tr({ ko: '하… 또 어지르셨네요.', en: 'Sigh… you made a mess again.' }), 4);
+    } else if (this.cleaning && (!free || !loose.length)) this.cleaning = false; // real work comes first
+    if (this.cleaning && hana) {
+      const near = this.nearestLitter(hana);
+      if (near && Math.abs(near.x - hana.x) < 1 && Math.abs(near.y + 1 - hana.y) < 1) this.litter = this.litter.filter((l) => l !== near);
+    }
+  }
+  private nearestLitter(a: Actor) {
+    let best: OfficeScene['litter'][number] | null = null;
+    for (const l of this.litter) if (!l.held && (!best || Math.hypot(l.x - a.x, l.y - a.y) < Math.hypot(best.x - a.x, best.y - a.y))) best = l;
+    return best;
   }
 
   /** Three quick clicks on the manager's desk and the manager slams it. */
@@ -875,7 +1025,7 @@ export class OfficeScene {
     this.flying = this.flying.filter((f) => {
       const p = (this.t - f.from) / f.dur;
       if (p >= 1) {
-        this.land(f.x1, f.y1);
+        this.land(f);
         return false;
       }
       const x = f.x0 + (f.x1 - f.x0) * p, y = f.y0 + (f.y1 - f.y0) * p - Math.sin(Math.PI * p) * f.arc;
@@ -907,8 +1057,63 @@ export class OfficeScene {
           const p = k / dots;
           g.fillRect(Math.round(h.x + (l.x - h.x) * p), Math.round(h.y + (l.y - h.y) * p - Math.sin(Math.PI * p) * arc), 1, 1);
         }
+        // how far out the arc is right now, as a plain bar (no hint about where the target is)
+        const gx = 137, gy = H - 34 - MANAGER_H - 9;
+        g.fillStyle = '#1b1f27';
+        g.fillRect(gx, gy, 26, 5);
+        g.fillStyle = '#ffcc4d';
+        g.fillRect(gx + 1, gy + 1, Math.round((24 * this.throwDist()) / this.reach()), 3);
       },
     });
+  }
+
+  /** what a thrown ball left behind: spilt coffee, a book off the shelf, falling leaves, a "!" over the manager */
+  private aftermathItems(items: { y: number; draw: () => void }[]) {
+    const g = this.g;
+    this.spills = this.spills.filter((sp) => sp.until > this.t);
+    for (const sp of this.spills)
+      items.push({
+        y: -1e9 + 2,
+        draw: () => {
+          g.fillStyle = '#5a3a22';
+          g.fillRect(sp.x, sp.y, 12, 3);
+          g.fillRect(sp.x + 2, sp.y - 1, 8, 5);
+          g.fillStyle = '#7a5537';
+          g.fillRect(sp.x + 3, sp.y, 3, 1);
+        },
+      });
+    this.fallenBooks = this.fallenBooks.filter((bk) => bk.until > this.t);
+    for (const bk of this.fallenBooks)
+      items.push({
+        y: bk.y,
+        draw: () => {
+          g.fillStyle = bk.color;
+          g.fillRect(bk.x, bk.y - 3, 6, 3);
+          g.fillStyle = '#fbfbf7';
+          g.fillRect(bk.x + 1, bk.y - 1, 4, 1);
+        },
+      });
+    this.leaves = this.leaves.filter((lf) => this.t - lf.from < 50);
+    for (const lf of this.leaves) {
+      const age = this.t - lf.from;
+      if (age < 0) continue;
+      items.push({
+        y: 1e8,
+        draw: () => {
+          g.fillStyle = age % 8 < 4 ? '#6fae4f' : '#4f8a3b';
+          g.fillRect(Math.round(lf.x + lf.drift * age * 0.25 + Math.sin(age / 5) * 2), Math.round(lf.y - 6 + age * 0.3), 1, 1);
+        },
+      });
+    }
+    if (this.t - this.managerHitAt < 60)
+      items.push({
+        y: 1e8,
+        draw: () => {
+          g.fillStyle = '#ffcc00';
+          g.fillRect(150 + 8, H - 34 - MANAGER_H - 6, 2, 5);
+          g.fillRect(150 + 8, H - 34 - MANAGER_H, 2, 2);
+        },
+      });
   }
 
   /** Now and then, with nobody selected and both idle, Kang says something and On answers. */
@@ -1025,7 +1230,7 @@ export class OfficeScene {
     this.layout();
     // corner characters speak their replies instead (see renderSpeech, called every frame)
     a.bubble.classList.toggle('speech', isChat(v));
-    if (!isChat(v)) a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
+    if (!isChat(v) && !this.quips.has(v.id)) a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
     a.bubble.title = v.activity;
     a.bubble.dataset.status = v.status;
     a.tag.textContent = v.name.replace(/^.*"(.*)".*$/, '$1');
@@ -1066,6 +1271,14 @@ export class OfficeScene {
         a.speech = { chars: Array.from(a.lastGreet), shown: 0, greet: true, ...(mad ? { until: this.angryUntil } : {}) };
       }
       this.greetedSel = this.selected;
+    }
+    for (const [id, q] of this.quips) {
+      const a = this.actors.get(id);
+      if (!a || isChat(a.view)) this.quips.delete(id);
+      else if (q.until <= this.t) {
+        this.quips.delete(id);
+        a.bubble.textContent = a.view.status === 'idle' ? '☕' : a.view.activity; // back to the status line
+      } else if (a.bubble.textContent !== q.text) a.bubble.textContent = q.text;
     }
     this.banter();
     const cap = this.caption && this.caption.until > this.t ? this.caption : (this.caption = null);
@@ -1384,6 +1597,11 @@ export class OfficeScene {
   private target(a: Actor): Spot {
     const v = a.view;
     if (v.stayAtDesk || isChat(v)) return seatSpot(v.desk, v.seat);
+    // Hana goes from one ball of paper to the next while she is tidying up
+    if (this.cleaning && v.id === 'sec') {
+      const l = this.nearestLitter(a);
+      if (l) return { x: l.x, y: l.y + 1 };
+    }
     // the server room is gone from the drawing; remote work just shows in the bubble
     if (SEATED.includes(v.status) || v.status === 'remote') return seatSpot(v.desk, v.seat);
     if (BESIDE.includes(v.status)) return besideSpot(v.desk, v.seat);
@@ -1418,6 +1636,7 @@ export class OfficeScene {
     this.drawClock();
     if (this.posterFlashUntil > this.t) this.drawPosterFlash();
 
+    this.paperChores();
     // move actors
     for (const a of this.actors.values()) {
       const tg = this.target(a);
@@ -1481,6 +1700,7 @@ export class OfficeScene {
       },
     });
     this.ventItems(items);
+    this.aftermathItems(items);
     // the professor's podium stays where it is, with or without him on it
     if ([...this.actors.values()].some((a) => a.view.seat === 'podium')) items.push({ y: PROF.y - 0.1, draw: () => this.drawPodium() });
     for (const side of ['left', 'right'] as PlantSide[]) items.push({ y: H - 12, draw: () => this.drawPlant(side) });
@@ -1545,8 +1765,10 @@ export class OfficeScene {
       for (let k = 0; k <= len; k++) g.fillRect(Math.round(359.5 + Math.sin(a) * k - 0.5), Math.round(17.5 - Math.cos(a) * k - 0.5), 1, 1);
     };
     g.fillStyle = '#2e3440';
-    hand(m / 60, 5);
-    hand(((h % 12) + m / 60) / 12, 3);
+    // hit by a ball of paper, the hands whirl round once before settling back on the time
+    const spin = this.t - this.clockSpinFrom < 60 ? (this.t - this.clockSpinFrom) / 60 : 0;
+    hand(m / 60 + spin, 5);
+    hand(((h % 12) + m / 60) / 12 + spin * 2, 3);
   }
 
   /** a plant at its current stage, bottom-aligned so taller stages grow upward; drops while being watered */
@@ -1697,7 +1919,8 @@ export class OfficeScene {
   private drawBoss() {
     const g = this.g;
     const t = this.t;
-    const cx = 150;
+    // hit by Kang's return throw, the manager flinches for a moment
+    const cx = 150 + (this.t - this.managerHitAt < 18 ? (Math.floor(this.t / 3) % 2 ? 1 : -1) : 0);
     const x = cx - MANAGER_W / 2;
     const y = H - 34 - MANAGER_H; // sits up a little so the chain shows above the desk, which hides the legs
     // crimson cape with gold trim, hem swaying a little
@@ -1748,6 +1971,8 @@ export class OfficeScene {
     const v = a.view;
     let pose: Pose = 'stand';
     if (a.walkPhase) pose = Math.floor(a.walkPhase / 8) % 2 ? 'walkA' : 'walkB';
+    else if (v.id === 'thug' && this.kangPoseUntil > this.t) pose = 'handUp'; // throwing it back
+    else if (v.id === 'counsel' && this.onNoteUntil > this.t) pose = Math.floor(this.t / 9) % 2 ? 'typeA' : 'typeB'; // writing
     // corner characters have no desk to type at: they just stand there and talk
     else if (isChat(v) && v.status !== 'waiting_permission') pose = 'stand';
     else if (seated && ['typing', 'running', 'researching'].includes(v.status)) pose = Math.floor(this.t / 7) % 2 ? 'typeA' : 'typeB';
@@ -1766,6 +1991,17 @@ export class OfficeScene {
       g.fillStyle = 'rgba(0,0,0,0.18)';
       g.fillRect(x + 1, Math.round(a.y) - 1, SPRITE_W - 2, 2);
       g.drawImage(characterSprite(v.sprite, pose, blink), x, y);
+      if (v.id === 'counsel' && this.onNoteUntil > this.t) {
+        // On's clipboard, and a pen going back and forth across it
+        g.fillStyle = '#8a5a3b';
+        g.fillRect(x + 3, y + 8, 7, 6);
+        g.fillStyle = '#fbfbf7';
+        g.fillRect(x + 4, y + 9, 5, 4);
+        g.fillStyle = '#9aa3ad';
+        g.fillRect(x + 5, y + 8, 3, 1);
+        g.fillStyle = '#2e3440';
+        g.fillRect(x + 4 + (Math.floor(this.t / 5) % 4), y + 10 + (Math.floor(this.t / 20) % 2), 1, 1);
+      }
     }
     if (v.deskStyle === 'lead') this.drawCrown(x + SPRITE_W / 2, y);
     // selection marker
