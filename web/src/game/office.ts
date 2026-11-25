@@ -244,8 +244,13 @@ const bagLabel = (): string => {
 };
 /** how far a full-power throw goes, in canvas pixels */
 const MAX_THROW = 330;
-/** frames for the power gauge to go up and back down once (~1.6 s; at 0.7 s it was too hard to time) */
-const GAUGE_PERIOD = 96;
+/**
+ * The landing marker slides out along the aim line and back at this many canvas pixels per frame (~90 px/s),
+ * as far as a little past the pointer. A fixed speed keeps the release window the same (about a quarter of a
+ * second on the bin) whether the target is near or far; sweeping the whole 330 px range left only ~50 ms.
+ */
+const MARKER_SPEED = 1.5;
+const OVERSHOOT = 1.25;
 /** how close to the bin's mouth counts as in */
 const BIN_RADIUS = 11;
 /** `?power=0.6` pins the gauge, for trying out where a throw lands (read lazily: the unit tests import this module without a browser) */
@@ -658,11 +663,21 @@ export class OfficeScene {
   }
   /** 0..1, swinging up and down while the button is held */
   private get gauge(): number {
+    return this.throwDist() / this.reach();
+  }
+  /** how far the marker travels before turning back: a little past the pointer */
+  private reach(): number {
+    const h = this.hand;
+    return Math.max(40, Math.min(MAX_THROW, Math.hypot(this.aim.x - h.x, this.aim.y - h.y) * OVERSHOOT));
+  }
+  /** distance the ball would go if released now: out to `reach()` and back, at a steady speed */
+  private throwDist(): number {
     if (this.charging == null) return 0;
     const fixed = fixedPower();
-    if (fixed != null) return fixed;
-    const p = ((this.t - this.charging) % GAUGE_PERIOD) / GAUGE_PERIOD;
-    return p < 0.5 ? p * 2 : 2 - p * 2;
+    if (fixed != null) return fixed * MAX_THROW;
+    const reach = this.reach();
+    const d = ((this.t - this.charging) * MARKER_SPEED) % (reach * 2);
+    return d < reach ? d : reach * 2 - d;
   }
 
   /** Papers on the manager's desk (pick one up to throw), the punching bag and its name tag. */
@@ -713,7 +728,7 @@ export class OfficeScene {
     const len = Math.hypot(dx, dy);
     if (len < 1) (dx = 1), (dy = 0);
     else (dx /= len), (dy /= len);
-    const dist = Math.max(8, this.gauge * MAX_THROW);
+    const dist = Math.max(8, this.throwDist());
     return { x: Math.max(4, Math.min(W - 4, h.x + dx * dist)), y: Math.max(WALL_H + 4, Math.min(H - 4, h.y + dy * dist)), dist };
   }
 
@@ -882,7 +897,8 @@ export class OfficeScene {
         const gx = 137, gy = H - 34 - MANAGER_H - 9;
         g.fillStyle = '#1b1f27';
         g.fillRect(gx, gy, 26, 5);
-        g.fillStyle = v > 0.8 ? '#ff5a4d' : v > 0.5 ? '#ffcc4d' : '#6dd97a';
+        // green where it would land on the pointer (the pointer sits at 1 / OVERSHOOT of the bar)
+        g.fillStyle = Math.abs(v - 1 / OVERSHOOT) < 0.08 ? '#6dd97a' : '#ffcc4d';
         g.fillRect(gx + 1, gy + 1, Math.round(24 * v), 3);
         // a marker slides along the aim line to where the ball would land if released now
         const l = this.landing();
