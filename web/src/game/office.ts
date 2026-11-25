@@ -244,8 +244,10 @@ const bagLabel = (): string => {
 };
 /** how far a full-power throw goes, in canvas pixels */
 const MAX_THROW = 330;
-/** frames for the power gauge to go up and back down once (~0.7 s) */
-const GAUGE_PERIOD = 42;
+/** frames for the power gauge to go up and back down once (~1.6 s; at 0.7 s it was too hard to time) */
+const GAUGE_PERIOD = 96;
+/** how close to the bin's mouth counts as in */
+const BIN_RADIUS = 11;
 /** `?power=0.6` pins the gauge, for trying out where a throw lands (read lazily: the unit tests import this module without a browser) */
 const fixedPower = (): number | null => {
   const q = new URLSearchParams(location.search).get('power');
@@ -704,25 +706,29 @@ export class OfficeScene {
     this.canvas.style.cursor = '';
   }
 
-  /** Release: the ball goes towards the pointer, as far as the gauge said. */
-  private throwPaper() {
-    const power = this.gauge;
+  /** where the ball would come down right now: towards the pointer, as far as the gauge says */
+  private landing(): { x: number; y: number; dist: number } {
     const h = this.hand;
     let dx = this.aim.x - h.x, dy = this.aim.y - h.y;
     const len = Math.hypot(dx, dy);
     if (len < 1) (dx = 1), (dy = 0);
     else (dx /= len), (dy /= len);
-    const dist = Math.max(8, power * MAX_THROW);
-    const x1 = Math.max(4, Math.min(W - 4, h.x + dx * dist));
-    const y1 = Math.max(WALL_H + 4, Math.min(H - 4, h.y + dy * dist));
-    this.flying.push({ x0: h.x, y0: h.y, x1, y1, from: this.t, arc: Math.min(36, dist / 4) });
+    const dist = Math.max(8, this.gauge * MAX_THROW);
+    return { x: Math.max(4, Math.min(W - 4, h.x + dx * dist)), y: Math.max(WALL_H + 4, Math.min(H - 4, h.y + dy * dist)), dist };
+  }
+
+  /** Release: the ball goes towards the pointer, as far as the gauge said. */
+  private throwPaper() {
+    const h = this.hand;
+    const { x, y, dist } = this.landing();
+    this.flying.push({ x0: h.x, y0: h.y, x1: x, y1: y, from: this.t, arc: Math.min(36, dist / 4) });
     this.dropPaper();
   }
 
   /** Where a ball came down: someone's head, the bin, or the floor. */
   private land(x: number, y: number) {
     const t = this.trash;
-    if (Math.hypot(x - t.x, y - (t.y - 4)) <= 7) {
+    if (Math.hypot(x - t.x, y - (t.y - 4)) <= BIN_RADIUS) {
       const n = bumpDayCount('office-trash');
       this.trashStreak++;
       const streak = this.trashStreak > 1 ? tr({ ko: ` · ${this.trashStreak}연속`, en: ` · ${this.trashStreak} in a row` }) : '';
@@ -733,7 +739,7 @@ export class OfficeScene {
     let fx = x, fy = y;
     for (const a of this.actors.values()) {
       const tall = a.view.seat === 'podium' ? PROF_H + 2 : SPRITE_H;
-      if (x < a.x - 8 || x > a.x + 8 || y < a.y - tall - 2 || y > a.y + 2) continue;
+      if (x < a.x - 10 || x > a.x + 10 || y < a.y - tall - 4 || y > a.y + 4) continue;
       const v = a.view;
       if (v.seat === 'podium') {
         this.angryFrom = this.t;
@@ -878,6 +884,16 @@ export class OfficeScene {
         g.fillRect(gx, gy, 26, 5);
         g.fillStyle = v > 0.8 ? '#ff5a4d' : v > 0.5 ? '#ffcc4d' : '#6dd97a';
         g.fillRect(gx + 1, gy + 1, Math.round(24 * v), 3);
+        // a marker slides along the aim line to where the ball would land if released now
+        const l = this.landing();
+        const lx = Math.round(l.x), ly = Math.round(l.y);
+        g.fillStyle = '#ffffff';
+        g.fillRect(lx - 3, ly, 2, 1);
+        g.fillRect(lx + 2, ly, 2, 1);
+        g.fillRect(lx, ly - 3, 1, 2);
+        g.fillRect(lx, ly + 2, 1, 2);
+        g.fillStyle = '#ff5a4d';
+        g.fillRect(lx, ly, 1, 1);
       },
     });
   }
