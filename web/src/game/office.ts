@@ -881,7 +881,8 @@ export class OfficeScene {
     }
     // things
     const b = this.bag;
-    if (inside(352, 10, 368, 26)) this.clockSpinFrom = this.t;
+    // the clock is small and far away: anything within 8 px of it counts
+    if (inside(344, 2, 376, 34)) this.clockSpinFrom = this.t;
     else if (inside(236, 6, 276, 30)) this.pokePoster();
     else if (inside(366, 44, 394, 98)) {
       this.lastBook = this.pickNew(bookTitles(), this.lastBook);
