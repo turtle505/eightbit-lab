@@ -6,6 +6,7 @@ import { ROOT } from './config.ts';
 import { type AttachmentRow, toView } from './attachments.ts';
 import { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { likePattern } from './search.ts';
 
 export interface ProjectRow {
   id: string;
@@ -493,6 +494,26 @@ export class Store {
   }
   softDeleteRoutine(id: string) {
     this.db.prepare('UPDATE routines SET deletedAt = ? WHERE id = ?').run(Date.now(), id);
+  }
+
+  // ---- search (see search.ts): every token must occur, case-insensitively for ASCII; newest first
+  private likeAll(column: string, tokens: string[]): { where: string; args: string[] } {
+    return { where: tokens.map(() => `${column} LIKE ? ESCAPE '\\'`).join(' AND '), args: tokens.map(likePattern) };
+  }
+  searchLogs(tokens: string[], limit: number): LogLine[] {
+    if (!tokens.length) return [];
+    const { where, args } = this.likeAll('text', tokens);
+    return this.db.prepare(`SELECT employeeId, ts, kind, text, engine FROM logs WHERE ${where} ORDER BY id DESC LIMIT ?`).all(...args, limit) as unknown as LogLine[];
+  }
+  searchTasks(tokens: string[], limit: number): Task[] {
+    if (!tokens.length) return [];
+    const { where, args } = this.likeAll("(title || ' ' || detail || ' ' || coalesce(result, ''))", tokens);
+    return (this.db.prepare(`SELECT * FROM tasks WHERE ${where} ORDER BY updatedAt DESC LIMIT ?`).all(...args, limit) as any[]).map((r) => rowToTask(r, []));
+  }
+  searchFeed(tokens: string[], limit: number): FeedItem[] {
+    if (!tokens.length) return [];
+    const { where, args } = this.likeAll("(title || ' ' || body)", tokens);
+    return (this.db.prepare(`SELECT * FROM feed WHERE ${where} ORDER BY id DESC LIMIT ?`).all(...args, limit) as any[]).map(toFeed);
   }
 
   // ---- report feed

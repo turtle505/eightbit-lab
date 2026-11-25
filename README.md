@@ -112,6 +112,7 @@ Once the tutorial is cleared, this is the full list of controls.
 | Approve / deny | Use the yellow approval panel (<kbd>a</kbd> / <kbd>d</kbd> in the console view) |
 | Check results | Finished cards move to **Review** (newest on top): click a card title to open its report, then **Done**, or **All done** for the whole column. Done keeps the latest five in view |
 | Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
+| Find something from before | The search box in the top bar (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>): looks through report text, employee logs, task cards and the report feed. Several words must all occur |
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |
 | Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Alan summarise the new papers"* |
@@ -121,7 +122,7 @@ Once the tutorial is cleared, this is the full list of controls.
 
 **Views.** *Game* is the pixel office. *Console* shows the same data as tables: staff, tasks, a combined activity feed and approvals, all driven from the keyboard. *Reports* is a reader for report files. Add `?view=console` or `?view=reports` to the URL to open one directly.
 
-**Hotkeys** (console): <kbd>1</kbd>–<kbd>6</kbd> select · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruct · <kbd>a</kbd>/<kbd>d</kbd> approve/deny · <kbd>Esc</kbd> deselect.
+**Hotkeys** (console): <kbd>1</kbd>–<kbd>6</kbd> select · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>/</kbd> instruct · <kbd>a</kbd>/<kbd>d</kbd> approve/deny · <kbd>Esc</kbd> deselect. <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> searches the records from any view.
 
 **Status signs.** A glance at a character tells you what they're doing.
 

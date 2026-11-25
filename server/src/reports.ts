@@ -49,6 +49,8 @@ function titleOf(file: string): string {
 export class ReportLibrary {
   private files = new Map<string, ReportFile & { abs: string }>();
   private titles = new Map<string, { mtime: number; title: string }>();
+  /** file text for search, lower-cased, re-read only when the file changed */
+  private texts = new Map<string, { mtime: number; text: string; low: string }>();
 
   constructor(private roots: () => ReportRoot[]) {}
 
@@ -96,6 +98,34 @@ export class ReportLibrary {
     const changed = list.filter((f) => prev.get(f.path) !== f.mtime);
     const removed = [...prev.keys()].some((k) => !this.files.has(k));
     return { list, changed, any: changed.length > 0 || removed };
+  }
+
+  /**
+   * Reports whose title or text contains every token (lower-case), newest first. Only files from the last scan
+   * are read, each up to MAX_READ, and their text is cached until the file changes.
+   */
+  search(tokens: string[], limit: number): (ReportFile & { text: string })[] {
+    if (!tokens.length) return [];
+    const out: (ReportFile & { text: string })[] = [];
+    for (const { abs, ...f } of [...this.files.values()].sort((a, b) => b.mtime - a.mtime)) {
+      let c = this.texts.get(abs);
+      if (!c || c.mtime !== f.mtime) {
+        let text = '';
+        try {
+          text = readFileSync(abs).subarray(0, MAX_READ).toString('utf8');
+        } catch {
+          continue; // removed since the scan
+        }
+        c = { mtime: f.mtime, text, low: `${f.title}\n${text}`.toLowerCase() };
+        this.texts.set(abs, c);
+      }
+      const low = c.low;
+      if (!tokens.every((k) => low.includes(k))) continue;
+      out.push({ ...f, text: c.text });
+      if (out.length >= limit) break;
+    }
+    for (const abs of this.texts.keys()) if (![...this.files.values()].some((f) => f.abs === abs)) this.texts.delete(abs);
+    return out;
   }
 
   /** Only paths from the last scan can be read (no arbitrary file access from the browser). */

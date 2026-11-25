@@ -13,6 +13,7 @@ import { PermissionBroker } from './permissions/broker.ts';
 import { RoutineScheduler } from './routines.ts';
 import { SkillLibrary } from './skills.ts';
 import { ReportLibrary, reportRoots } from './reports.ts';
+import { searchAll } from './search.ts';
 import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
 import type { Engine, FeedItem } from '../../shared/protocol.ts';
@@ -402,6 +403,10 @@ function handle(msg: ClientMsg, ws: WebSocket) {
           bus.send({ t: 'notice', level: 'info', text: tr({ ko: '🗒️ 오늘 노트를 만들었습니다.', en: "🗒️ Created today's note." }) });
         })
         .catch((e) => reply({ t: 'notice', level: 'error', text: String(e.message) }));
+      break;
+    case 'search':
+      // answered to the browser that asked only
+      reply({ t: 'searchResults', q: msg.q, hits: searchAll(String(msg.q ?? '').slice(0, 200), store, reports, (id) => agents.views().find((v) => v.id === id)?.name ?? id) });
       break;
     case 'getReport': {
       const r = reports.read(msg.path);

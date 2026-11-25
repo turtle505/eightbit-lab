@@ -3,7 +3,7 @@ import { FIGURE_KEYS, figureDefaultName, type ClientMsg, type FigureKey, type Se
 import { getLang, initLang, applyLang } from './ui/lang.ts';
 import { tr } from '../../shared/i18n.ts';
 import { OfficeScene } from './game/office.ts';
-import { bindConsoleTaskForm, renderFeed, renderStaffTable, renderTaskTable, renderUsagePanel, sortedEmployees } from './ui/console.ts';
+import { bindConsoleTaskForm, expandTask, renderFeed, renderStaffTable, renderTaskTable, renderUsagePanel, sortedEmployees } from './ui/console.ts';
 import {
   type ViewMode,
   type UIState,
@@ -20,8 +20,9 @@ import { applyView, initialView, viewTitle } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
 import { renderCommandBar } from './ui/command.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
-import { initReports, onReportContent, renderReports, unreadReports } from './ui/reports.ts';
+import { initReports, onReportContent, openReport, renderReports, unreadReports } from './ui/reports.ts';
 import { renderProjects, setHostDirs } from './ui/projects.ts';
+import { initSearch, onSearchResults, renderSearch } from './ui/search.ts';
 
 const FEED_MAX = 300;
 
@@ -62,6 +63,7 @@ function setView(v: ViewMode) {
 }
 
 function renderAll() {
+  renderSearch(state);
   scene.pendingApprovals = state.snap.approvals.length; // the manager figure frets when they pile up
   renderHeader(state, send);
   const unread = unreadReports(state);
@@ -232,6 +234,9 @@ function onMsg(m: ServerMsg) {
     case 'reportContent':
       onReportContent(m.path, m.content, m.mtime);
       break;
+    case 'searchResults':
+      onSearchResults(m.q, m.hits);
+      return; // nothing in the office changed
     case 'routineDeleted':
       s.routines = s.routines.filter((r) => r.id !== m.id);
       break;
@@ -331,6 +336,21 @@ window.addEventListener('keydown', (ev) => {
 });
 
 initReports(send, () => setView('reports'));
+initSearch({
+  send,
+  openReport: (path) => {
+    setView('reports');
+    openReport(path);
+  },
+  openTask: (taskId) => {
+    expandTask(taskId);
+    setView('console');
+  },
+  selectEmployee: (id) => {
+    if (state.view !== 'game' && state.view !== 'console') setView('game');
+    select(id);
+  },
+});
 bindNewTaskForm(send);
 bindConsoleTaskForm(send);
 setView(state.view);

@@ -75,6 +75,8 @@ export function renderStaffTable(st: UIState, send: Send, select: (id: string | 
 }
 
 const expanded = new Set<number>();
+/** Open a task's row (from search): shown the next time the table renders. */
+export const expandTask = (id: number) => void expanded.add(id);
 /** show every Done row instead of the latest DONE_ROWS */
 let doneAll = false;
 const DONE_ROWS = 10;

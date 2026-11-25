@@ -1906,3 +1906,108 @@ describe('log history per engine', async () => {
     expect(migrated.recentLogs('lit').map((l) => l.engine)).toEqual(['claude', 'claude', 'codex', 'codex']);
   });
 });
+
+describe('search', async () => {
+  const { searchTokens, likePattern, matchesAll, snippet, searchAll, PER_KIND } = await import('../src/search.ts');
+
+  it('splits a query into words that must all match: lower-cased, no repeats, six at most, no single ASCII characters', () => {
+    expect(searchTokens('  RMSD   Baseline rmsd ')).toEqual(['rmsd', 'baseline']);
+    expect(searchTokens('a 실험 b 결과')).toEqual(['실험', '결과']);
+    expect(searchTokens('designability 표')).toEqual(['designability', '표']); // one Hangul syllable is a word
+    expect(searchTokens('값 1 x')).toEqual(['값']);
+    expect(searchTokens('x')).toEqual([]);
+    expect(searchTokens('aa bb cc dd ee ff gg hh')).toHaveLength(6);
+    expect(matchesAll('The RMSD beat the baseline', ['rmsd', 'baseline'])).toBe(true);
+    expect(matchesAll('The RMSD only', ['rmsd', 'baseline'])).toBe(false);
+  });
+
+  it('cuts a snippet around the first match, on one line, marking where it was cut', () => {
+    const long = `${'가'.repeat(200)} 찾는말 ${'나'.repeat(200)}`;
+    const s = snippet(long, ['찾는말'], 20);
+    expect(s.startsWith('…') && s.endsWith('…')).toBe(true);
+    expect(s).toContain('찾는말');
+    expect(s.length).toBeLessThan(50);
+    expect(snippet('앞\n\n찾는말   뒤', ['찾는말'])).toBe('앞 찾는말 뒤'); // short text: whole, whitespace collapsed
+    expect(snippet('찾는말 is at the very start of this text', ['찾는말'], 10)).toBe('찾는말 is at …'); // ten characters from the match, cut after them
+    expect(snippet('nothing here', ['zzz'], 3)).toBe('nothin…'); // no match (matched on a title only): the beginning
+  });
+
+  it('finds logs, tasks and feed items, newest first, treating % and _ as plain characters', () => {
+    const s = new Store(':memory:');
+    s.addLog({ employeeId: 'lit', ts: 1000, kind: 'assistant', text: 'Baseline RMSD는 2.31 Å입니다' });
+    s.addLog({ employeeId: 'eval', ts: 2000, kind: 'user', text: 'rmsd 표를 다시 만들어 줘' });
+    s.addLog({ employeeId: 'eval', ts: 3000, kind: 'assistant', text: '정확도 100% 달성' });
+    s.addLog({ employeeId: 'eval', ts: 4000, kind: 'tool', text: 'Read(run_10/config.yaml)' });
+    s.addLog({ employeeId: 'eval', ts: 5000, kind: 'tool', text: 'Read(run510/config.yaml)' });
+    expect(s.searchLogs(['rmsd'], 10).map((l) => l.ts)).toEqual([2000, 1000]); // case-insensitive, newest first
+    expect(s.searchLogs(['rmsd', 'baseline'], 10).map((l) => l.ts)).toEqual([1000]); // AND
+    expect(s.searchLogs(['rmsd'], 1)).toHaveLength(1);
+    expect(s.searchLogs(['100%'], 10).map((l) => l.ts)).toEqual([3000]);
+    expect(s.searchLogs(['0%'], 10).map((l) => l.ts)).toEqual([3000]); // "%" is not "anything"
+    expect(s.searchLogs(['run_10'], 10).map((l) => l.ts)).toEqual([4000]); // "_" is not "any one character"
+    expect(likePattern('50%_a\\b')).toBe('%50\\%\\_a\\\\b%');
+    expect(s.searchLogs([], 10)).toEqual([]);
+
+    const t1 = s.createTask('논문 요약', '최신 diffusion 논문 3편', null);
+    const t2 = s.createTask('지표 계산', '', null);
+    s.updateTask(t2.id, { result: 'TM-score 평균 0.71 (diffusion 모델)' });
+    expect(s.searchTasks(['diffusion'], 10).map((t) => t.id).sort()).toEqual([t1.id, t2.id].sort()); // title, detail and result
+    expect(s.searchTasks(['tm-score'], 10).map((t) => t.id)).toEqual([t2.id]);
+
+    s.addFeed({ ts: 10, kind: 'result', employeeId: 'sec', title: '⏰ 아침 브리핑', body: '오늘 GPU 3대 비어 있음', path: null, ok: true });
+    s.addFeed({ ts: 20, kind: 'report', employeeId: 'lit', title: '논문 정리', body: '# GPU 메모리 최적화', path: 'lit/reports/a.md', ok: true });
+    expect(s.searchFeed(['gpu'], 10).map((f) => f.ts)).toEqual([20, 10]);
+    expect(s.searchFeed(['브리핑'], 10).map((f) => f.ts)).toEqual([10]); // the title too
+  });
+
+  it('reads report files for their text, but only files from the last scan', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'office-search-'));
+    const w = (rel: string, text: string) => {
+      mkdirSync(join(ws, rel, '..'), { recursive: true });
+      writeFileSync(join(ws, rel), text);
+    };
+    w('lit/reports/a.md', '# 구조 예측 정리\n\nAlphaFold3의 리간드 결합 정확도');
+    w('lit/reports/b.md', '# 생성 모델\n\nRFdiffusion 설계 성공률');
+    const lib = new ReportLibrary(() => reportRoots(ws, [], () => 'lit'));
+    expect(lib.search(['alphafold3'], 10)).toEqual([]); // nothing scanned yet
+    lib.scan();
+    expect(lib.search(['alphafold3'], 10).map((r) => r.path)).toEqual(['lit/reports/a.md']);
+    expect(lib.search(['구조', '리간드'], 10).map((r) => r.path)).toEqual(['lit/reports/a.md']); // title + body, AND
+    expect(lib.search(['구조', 'rfdiffusion'], 10)).toEqual([]);
+    w('lit/reports/c.md', '# 새 파일\n\nAlphaFold3 후속');
+    expect(lib.search(['alphafold3'], 10).map((r) => r.path)).toEqual(['lit/reports/a.md']); // c.md not scanned yet
+    lib.scan();
+    expect(lib.search(['alphafold3'], 10)).toHaveLength(2);
+    // an edited file is read again
+    const past = new Date(Date.now() - 60_000);
+    w('lit/reports/a.md', '# 구조 예측 정리\n\n내용을 바꿈');
+    utimesSync(join(ws, 'lit/reports/a.md'), past, past);
+    lib.scan();
+    expect(lib.search(['alphafold3'], 10).map((r) => r.path)).toEqual(['lit/reports/c.md']);
+  });
+
+  it('puts the four kinds together, with a title, a snippet and something to open', () => {
+    const s = new Store(':memory:');
+    const ws = mkdtempSync(join(tmpdir(), 'office-search-'));
+    mkdirSync(join(ws, 'lit/reports'), { recursive: true });
+    writeFileSync(join(ws, 'lit/reports/r.md'), '# 주간 정리\n\n이번 주 designability 실험 결과');
+    const lib = new ReportLibrary(() => reportRoots(ws, [], () => 'lit'));
+    lib.scan();
+    s.addLog({ employeeId: 'lit', ts: 1, kind: 'assistant', text: 'designability는 0.62로 나왔습니다' });
+    const t = s.createTask('designability 재계산', '', 'eval');
+    s.addFeed({ ts: 2, kind: 'result', employeeId: 'lit', title: '결과', body: 'designability 표 첨부', path: null, ok: true });
+    const hits = searchAll('Designability', s, lib, (id) => (id === 'lit' ? 'Alan' : id));
+    expect(hits.map((h) => h.kind).sort()).toEqual(['feed', 'log', 'report', 'task']);
+    const by = Object.fromEntries(hits.map((h) => [h.kind, h]));
+    expect(by.report).toMatchObject({ path: 'lit/reports/r.md', title: '주간 정리', employeeId: 'lit' });
+    expect(by.report.text).toBeUndefined(); // reports are opened by path, not sent along
+    expect(by.log).toMatchObject({ title: 'Alan', employeeId: 'lit', logKind: 'assistant' });
+    expect(by.log.snippet).toContain('designability');
+    expect(by.task).toMatchObject({ taskId: t.id, title: `#${t.id} designability 재계산`, employeeId: 'eval' });
+    expect(by.feed).toMatchObject({ title: '결과', text: 'designability 표 첨부' });
+    expect(searchAll('x', s, lib, (id) => id)).toEqual([]); // too short to search
+    expect(searchAll('   ', s, lib, (id) => id)).toEqual([]);
+    for (let i = 0; i < PER_KIND + 5; i++) s.addLog({ employeeId: 'lit', ts: 10 + i, kind: 'tool', text: `designability run ${i}` });
+    expect(searchAll('designability', s, lib, (id) => id).filter((h) => h.kind === 'log')).toHaveLength(PER_KIND);
+  });
+});

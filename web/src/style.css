@@ -1645,3 +1645,69 @@ body .md-body h4 {
 .eng-mark.e-claude { color: var(--accent); }
 .eng-mark.e-codex { color: var(--ok); }
 .emp-logmode { margin-left: auto; font-size: 12px; }
+
+/* search across the records (ui/search.ts): a box in the top bar, results in a panel under it */
+.search-box {
+  position: relative;
+  flex: 0 1 240px;
+  min-width: 140px;
+}
+.search-box input {
+  width: 100%;
+  padding: 4px 8px;
+}
+.search-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(560px, 92vw);
+  max-height: 70vh;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.25);
+}
+.search-group h3 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+.search-group:first-child h3 {
+  margin-top: 0;
+}
+.search-hit {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: rgba(127, 127, 127, 0.14);
+}
+.search-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.search-head .link {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.search-snippet {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.search-snippet b {
+  background: rgba(255, 224, 102, 0.55);
+  color: inherit;
+}
+.search-full {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--line);
+  font-size: 12px;
+  max-height: 40vh;
+  overflow: auto;
+}

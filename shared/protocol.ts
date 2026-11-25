@@ -230,6 +230,23 @@ export interface FeedItem {
   ok: boolean;
 }
 
+/** One result of a search across reports, logs, task cards and the report feed. */
+export interface SearchHit {
+  kind: 'report' | 'log' | 'task' | 'feed';
+  ts: number;
+  title: string;
+  /** the text around the first match, on one line */
+  snippet: string;
+  /** the whole thing (capped), to read in place; reports are opened by `path` instead */
+  text?: string;
+  /** report file (kind 'report', or a feed item about a report) */
+  path?: string;
+  employeeId?: string;
+  taskId?: number;
+  /** kind 'log': user | assistant | tool | result | system | error */
+  logKind?: string;
+}
+
 /** A checkbox line in today's Obsidian daily note. `line`+`raw` identify it for edits (stale edits are refused). */
 export interface TodoItem {
   line: number;
@@ -352,6 +369,7 @@ export type ServerMsg =
   | { t: 'reports'; data: ReportFile[] }
   | { t: 'feed'; data: FeedItem }
   | { t: 'reportContent'; path: string; content: string; mtime: number }
+  | { t: 'searchResults'; q: string; hits: SearchHit[] }
   | { t: 'todos'; data: TodayTodos }
   | { t: 'usage'; data: UsageView }
   | { t: 'codexUsage'; data: UsageView }
@@ -390,6 +408,7 @@ export type ClientMsg =
   | { t: 'saveRoutine'; id?: string; name: string; schedule: string; employee: string; prompt: string; skill?: string | null; enabled?: boolean }
   | { t: 'approveSkill'; name: string }
   | { t: 'getReport'; path: string }
+  | { t: 'search'; q: string }
   | { t: 'todoOp'; op: TodoOp }
   | { t: 'createTodayNote' }
   | { t: 'deleteRoutine'; id: string }
