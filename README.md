@@ -12,7 +12,15 @@
   <a href="README.ko.md"><img src="https://img.shields.io/badge/language-EN%20%2F%20KO-f0c050" alt="English and Korean"></a>
 </p>
 
-<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#installation">Installation</a> · <a href="#tutorial">Tutorial</a> · <a href="#controls">Controls</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
+<p align="center"><strong>English</strong> · <a href="README.ko.md">한국어</a> &nbsp;|&nbsp; <a href="#why">Why</a> · <a href="#installation">Installation</a> · <a href="#tutorial">Tutorial</a> · <a href="#controls">Controls</a> · <a href="#optional-features">Features</a> · <a href="#safety">Safety</a></p>
+
+## Why
+
+If you run Claude Code or Codex in several terminals, it gets hard to follow who is doing what once there are more than a few. You find a window that stopped to ask for approval twenty minutes ago, or scroll back through output looking for a result.
+
+8-bit Lab puts those agents on one screen. The characters show what each one is doing. Anything that needs care, like deleting files, git push or connecting to a lab server, asks before it runs. Finished work stays in the report feed and on the task board. Recurring work can be scheduled as a routine, and when a GPU job finishes, the employee who submitted it reports the result.
+
+I built it for my own use in a research lab as a grad student, so the default staff cover literature search, evaluation and experiments. The roles are set in a config file and can be changed.
 
 | Your team | Your desk |
 |---|---|
