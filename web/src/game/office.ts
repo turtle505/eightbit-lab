@@ -251,6 +251,8 @@ const MAX_THROW = 330;
  */
 const MARKER_SPEED = 1.5;
 const OVERSHOOT = 1.25;
+/** how much of the arc preview is drawn, from the hand: the rest has to be judged */
+const ARC_SHOWN = 0.6;
 /**
  * A thrown ball of paper, roughly as it really flies: a flat toss (about 20–25° up), so the peak is about a
  * ninth of the distance, and a longer throw stays in the air longer.
@@ -451,6 +453,7 @@ export class OfficeScene {
   /** a crumpled sheet in the manager's hand, ready to throw */
   private holding = false;
   private aim: Spot = { x: 250, y: 150 };
+  private pressAt: Spot = { x: 0, y: 0 };
   /** frame the mouse button went down while holding: the power gauge swings until release */
   private charging: number | null = null;
   private suppressClick = false;
@@ -508,21 +511,29 @@ export class OfficeScene {
     this.resize();
 
     // throwing: hold the button to swing the power gauge, release to throw towards the pointer
-    this.canvas.addEventListener('pointermove', (ev) => {
-      this.aim = this.at(ev);
-    });
+    // throwing, in one gesture: press on the papers, drag towards the target while the arc swings, release to throw
     this.canvas.addEventListener('pointerdown', (ev) => {
-      if (!this.holding) return;
-      this.aim = this.at(ev);
-      this.charging = this.t;
+      const p = this.at(ev);
+      if (p.x < 127 || p.x > 139 || p.y < H - 33 || p.y > H - 25) return;
+      this.holding = true;
+      this.charging = null;
+      this.pressAt = p;
+      this.aim = p;
+      this.canvas.style.cursor = 'crosshair';
       this.canvas.setPointerCapture(ev.pointerId);
       ev.preventDefault();
     });
+    this.canvas.addEventListener('pointermove', (ev) => {
+      this.aim = this.at(ev);
+      // the arc starts swinging once the pointer has left the papers, so there is a direction to throw in
+      if (this.holding && this.charging == null && Math.hypot(this.aim.x - this.pressAt.x, this.aim.y - this.pressAt.y) > 8) this.charging = this.t;
+    });
     this.canvas.addEventListener('pointerup', (ev) => {
-      if (this.charging == null) return;
+      if (!this.holding) return;
       this.aim = this.at(ev);
       this.suppressClick = true; // the click that follows this release is not a selection
-      this.throwPaper();
+      if (this.charging == null) this.dropPaper(); // let go without aiming: the sheet goes back on the desk
+      else this.throwPaper();
     });
     window.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape' && this.holding) this.dropPaper();
@@ -667,10 +678,6 @@ export class OfficeScene {
   private get bag(): Spot {
     return { x: 306, y: H - 12 };
   }
-  /** 0..1, swinging up and down while the button is held */
-  private get gauge(): number {
-    return this.throwDist() / this.reach();
-  }
   /** how far the marker travels before turning back: a little past the pointer */
   private reach(): number {
     const h = this.hand;
@@ -690,11 +697,6 @@ export class OfficeScene {
   private clickVent(ev: MouseEvent): boolean {
     const { x, y } = this.at(ev);
     const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-    if (inside(127, H - 33, 139, H - 25)) {
-      this.holding = true;
-      this.canvas.style.cursor = 'crosshair';
-      return true;
-    }
     const b = this.bag;
     if (inside(b.x - 12, b.y + 1, b.x + 16, b.y + 12)) {
       const name = prompt(tr({ ko: '샌드백에 붙일 이름 (비우면 "샌드백")', en: 'Name for the punching bag (empty = "Punching bag")' }), this.bagName);
@@ -894,29 +896,17 @@ export class OfficeScene {
         // the ball in hand, a dotted line towards the pointer, and the gauge while the button is down
         g.fillStyle = '#f4f1ea';
         g.fillRect(h.x - 1, h.y - 1, 3, 3);
-        const dx = this.aim.x - h.x, dy = this.aim.y - h.y;
-        const len = Math.hypot(dx, dy) || 1;
+        if (this.charging == null) return;
         g.fillStyle = 'rgba(255,255,255,0.8)';
-        if (this.charging == null) {
-          // just holding: a short dotted line shows the direction
-          for (let k = 8; k <= 32; k += 6) g.fillRect(Math.round(h.x + (dx / len) * k), Math.round(h.y + (dy / len) * k), 1, 1);
-          return;
-        }
-        // charging: the arc the ball would fly if released now, growing and shrinking (the same curve the throw uses)
+        // the arc the ball would fly if released now, growing and shrinking (the same curve the throw uses).
+        // Only its first part is drawn: where it comes down is for the thrower to judge.
         const l = this.landing();
         const arc = arcOf(l.dist);
         const dots = Math.max(3, Math.round(l.dist / 7));
-        for (let k = 1; k <= dots; k++) {
+        for (let k = 1; k <= Math.ceil(dots * ARC_SHOWN); k++) {
           const p = k / dots;
           g.fillRect(Math.round(h.x + (l.x - h.x) * p), Math.round(h.y + (l.y - h.y) * p - Math.sin(Math.PI * p) * arc), 1, 1);
         }
-        const v = this.gauge;
-        const gx = 137, gy = H - 34 - MANAGER_H - 9;
-        g.fillStyle = '#1b1f27';
-        g.fillRect(gx, gy, 26, 5);
-        // green where it would land on the pointer (the pointer sits at 1 / OVERSHOOT of the bar)
-        g.fillStyle = Math.abs(v - 1 / OVERSHOOT) < 0.08 ? '#6dd97a' : '#ffcc4d';
-        g.fillRect(gx + 1, gy + 1, Math.round(24 * v), 3);
       },
     });
   }
