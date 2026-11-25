@@ -223,16 +223,34 @@ const MANAGER = [
 export const MANAGER_W = 14;
 export const MANAGER_H = MANAGER.length;
 
-export function managerSprite(blink = false): HTMLCanvasElement {
-  const key = `manager${blink}`;
+/** rows of the head (drawn separately by the office so it can nod, shake and drop onto the desk) */
+export const MANAGER_HEAD = 8;
+export interface ManagerPose {
+  /** where the eyes point */
+  eyes?: 'l' | 'r';
+  hands?: 'typeA' | 'typeB' | 'pointL' | 'pointR';
+  yawn?: boolean;
+}
+
+export function managerSprite(blink = false, pose: ManagerPose = {}): HTMLCanvasElement {
+  const key = `manager${blink}${pose.eyes ?? ''}${pose.hands ?? ''}${pose.yawn ?? ''}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = MANAGER_W;
   c.height = MANAGER_H;
   const skin = '#f1c27d';
-  paintMap(c.getContext('2d')!, MANAGER, {
-    H: '#2e2e2e', S: skin, E: blink ? skin : '#1b1b1b',
+  const rows = [...MANAGER];
+  if (pose.eyes === 'l') rows[4] = '...SESSESSS...';
+  else if (pose.eyes === 'r') rows[4] = '...SSSESSES...';
+  if (pose.yawn) (rows[5] = '...SSSKKSSS...'), (rows[6] = '....SSKKSS....'); // a wide-open mouth
+  // hands: one drops to the keys at a time, or an arm is out pointing (the office draws the arm itself)
+  if (pose.hands === 'typeA') (rows[12] = '.VVVVVCRCVVVS.'), (rows[13] = '.SVVVVVYVVVVV.');
+  else if (pose.hands === 'typeB') (rows[12] = '.SVVVVCRCVVVV.'), (rows[13] = '.VVVVVVYVVVVS.');
+  else if (pose.hands === 'pointL') (rows[12] = '.VVVVVCRCVVVS.'), (rows[13] = '.VVVVVVYVVVVS.');
+  else if (pose.hands === 'pointR') (rows[12] = '.SVVVVCRCVVVV.'), (rows[13] = '.SVVVVVYVVVVV.');
+  paintMap(c.getContext('2d')!, rows, {
+    H: '#2e2e2e', S: skin, E: blink || pose.yawn ? skin : '#1b1b1b', K: '#3a1a14',
     W: '#fafafa', V: '#5b2a86', v: '#46206a', L: '#e8c55a', R: '#c0283c', Q: '#ff7eb6', C: '#ffd966',
     P: '#2b2140', B: '#111111',
   }, 0, 0);

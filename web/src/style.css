@@ -304,6 +304,18 @@ textarea:focus-visible {
 .bubble.speech.stacked::after {
   display: none;
 }
+/* what the manager is thinking, not saying */
+.bubble.speech.thought {
+  font-style: italic;
+  color: #555;
+  border-color: #9a9a9a;
+  border-style: dashed;
+  background: #f7f7f2;
+}
+.bubble.speech.thought::after {
+  background: #f7f7f2;
+  border-color: #9a9a9a;
+}
 /* a bubble moved away from its speaker (to clear another bubble) says whose it is */
 .bubble.speech.stacked[data-who]::before {
   content: attr(data-who);

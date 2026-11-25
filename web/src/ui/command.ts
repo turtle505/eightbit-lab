@@ -73,6 +73,8 @@ function build(send: Send, select: (id: string | null) => void) {
     input.style.overflowY = input.scrollHeight > max ? 'auto' : 'hidden'; // a scrollbar only once it stops growing
   };
   input.addEventListener('input', grow);
+  // the manager in the office types along
+  input.addEventListener('input', () => window.dispatchEvent(new CustomEvent('office-manager', { detail: { kind: 'typing' } })));
   requestAnimationFrame(grow);
 
   ($('cmd-target') as HTMLSelectElement).addEventListener('change', (ev) => {
@@ -92,6 +94,7 @@ function build(send: Send, select: (id: string | null) => void) {
     const attachmentIds = att.take();
     if (!text && !attachmentIds.length) return;
     send({ t: 'instruct', employeeId: target.id, text, attachmentIds });
+    window.dispatchEvent(new CustomEvent('office-manager', { detail: { kind: 'instruct', id: target.id } }));
     input.value = '';
     grow();
     input.focus();

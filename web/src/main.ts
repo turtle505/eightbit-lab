@@ -62,6 +62,7 @@ function setView(v: ViewMode) {
 }
 
 function renderAll() {
+  scene.pendingApprovals = state.snap.approvals.length; // the manager figure frets when they pile up
   renderHeader(state, send);
   const unread = unreadReports(state);
   const badge = document.getElementById('reports-unread')!;
@@ -324,6 +325,7 @@ window.addEventListener('keydown', (ev) => {
   if (first && (ev.key === 'a' || ev.key === 'd')) {
     if (ev.key === 'a' && !confirmApprove(first, state.snap)) return;
     send({ t: 'approve', id: first.id, allow: ev.key === 'a' });
+    window.dispatchEvent(new CustomEvent('office-manager', { detail: { kind: ev.key === 'a' ? 'approve' : 'deny' } }));
     toast(`${ev.key === 'a' ? tr({ ko: '승인', en: 'Approved' }) : tr({ ko: '거부', en: 'Denied' })}: ${first.toolName}`, ev.key === 'a' ? 'info' : 'warn');
   }
 });

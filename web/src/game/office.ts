@@ -1,7 +1,7 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
-import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, managerSprite, paintMap, professorSprite, type Pose } from './sprites.ts';
+import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, MANAGER_HEAD, managerSprite, type ManagerPose, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 export const W = 400;
 const WALL_H = 36;
@@ -336,6 +336,40 @@ const bagMilestone = (n: number): string | null =>
         ? tr({ ko: '100대? 그 끈기로 연구를 했으면 졸업했다.', en: "A hundred? With that persistence you'd have graduated." })
         : null;
 
+// ---- the manager is you: what you do shows on the figure ----
+/** seconds from the URL for trying things out (`?idle=5`, `?mutter=5`), else the default */
+const secondsParam = (name: string, fallback: number): number => {
+  const q = Number(new URLSearchParams(location.search).get(name));
+  return q > 0 ? q : fallback;
+};
+/** minutes actually spent at it today (input within the last minute counts), kept in localStorage */
+const workedToday = (): number => dayCount('office-worked');
+const sleepLines = (who: 'thug' | 'counsel'): string[] =>
+  who === 'thug'
+    ? [tr({ ko: '자냐? 그래, 자는 게 연구보다 낫겠다.', en: 'Asleep? Fine, sleeping beats your research.' }), tr({ ko: '코 고는 소리 봐라.', en: 'Listen to that snoring.' })]
+    : [tr({ ko: '푹 주무세요. 깨우지 않을게요.', en: "Sleep well. I won't wake you." })];
+const caughtLines = (who: 'prof' | 'thug', angry: boolean): string[] =>
+  who === 'thug'
+    ? [tr({ ko: '또 딴짓하냐.', en: 'Slacking off again?' }), tr({ ko: '그럴 시간에 한 줄이라도 써라.', en: 'Write one line in that time.' })]
+    : angry
+      ? [tr({ ko: '지금 장난칠 땐가!', en: 'Is this the time to play around!' })]
+      : [
+          tr({ ko: '자네, 지금 뭐 하나?', en: 'What are you doing right now?' }),
+          tr({ ko: '연구는 다 했나 보지?', en: 'So the research is all done, I take it?' }),
+          tr({ ko: '한가해 보이는데, 일 하나 더 줄까?', en: 'You look free. Shall I give you one more task?' }),
+        ];
+/** what goes through the manager's head, picked from whatever fits the moment */
+const mutterLines = (c: { night: boolean; approvals: number; justDone: boolean; working: number; tired: boolean }): string[] => {
+  const out: string[] = [];
+  if (c.night) out.push(tr({ ko: '집에 가고 싶다…', en: 'I want to go home…' }), tr({ ko: '오늘도 이 시간이네.', en: 'This late again.' }));
+  if (c.approvals >= 3) out.push(tr({ ko: '이걸 다 봐야 하나…', en: 'Do I have to read all of these…' }), tr({ ko: '승인 누르는 게 내 일인가.', en: 'Is pressing approve my job now?' }));
+  if (c.justDone) out.push(tr({ ko: '오, 벌써?', en: 'Oh, already?' }), tr({ ko: '나보다 빠르네.', en: 'Faster than me.' }));
+  if (c.working >= 3) out.push(tr({ ko: '다들 열심히네. 나만 빼고.', en: 'Everyone is hard at it. Except me.' }), tr({ ko: '구독 한도 괜찮으려나.', en: 'I hope the quota holds.' }));
+  if (c.working === 0) out.push(tr({ ko: '뭘 시키지…', en: 'What should I hand out…' }), tr({ ko: '조용하네.', en: 'Quiet in here.' }));
+  if (c.tired) out.push(tr({ ko: '커피…', en: 'Coffee…' }), tr({ ko: '눈이 감긴다.', en: 'My eyes are closing.' }));
+  return out.length ? out : [tr({ ko: '논문 써야 하는데.', en: 'I should be writing the paper.' }), tr({ ko: '점심 뭐 먹지.', en: 'What to have for lunch.' })];
+};
+
 /** Kang says a line, On answers (when both are idle and nobody is selected) */
 const banterPairs = (): [string, string][] => [
   [tr({ ko: '저 새끼 오늘도 논다.', en: 'That bastard is slacking again today.' }), tr({ ko: '쉬는 날도 필요해요.', en: 'Everyone needs a day off.' })],
@@ -530,6 +564,29 @@ export class OfficeScene {
   private managerLineSince = 0;
   private speechLayoutKey = '';
   private bagName = bagLabel();
+  // the manager (you)
+  /** approvals waiting, set by main.ts */
+  pendingApprovals = 0;
+  private lastActivity = Date.now();
+  private asleep = false;
+  private sleepStart = 0;
+  private sleepRemarked = false;
+  private typingUntil = 0;
+  private fakeTypingUntil = 0;
+  private gesture: { kind: 'pointL' | 'pointR' | 'nod' | 'shake'; until: number } | null = null;
+  private worked = workedToday();
+  private workTick = Date.now();
+  private coffeeBoostUntil = 0;
+  private tiredSeen = -1;
+  private pranks: number[] = [];
+  private caughtUntil = 0;
+  private lastDoneAt = -1e9;
+  private thought: { text: string; until: number } | null = null;
+  private thoughtRef: OfficeScene['thought'] = null;
+  private thoughtSince = 0;
+  private thoughtBubble: HTMLDivElement;
+  private lastThought = '';
+  private nextMutterAt = 0;
   private nextBanterAt = banterGap();
   private banterReply: { at: number; text: string } | null = null;
   private lastBanter = '';
@@ -558,6 +615,19 @@ export class OfficeScene {
     this.objBubble.className = 'bubble speech';
     this.objBubble.hidden = true;
     overlay.append(this.objBubble);
+    this.thoughtBubble = document.createElement('div');
+    this.thoughtBubble.className = 'bubble speech thought';
+    this.thoughtBubble.hidden = true;
+    overlay.append(this.thoughtBubble);
+    this.nextMutterAt = secondsParam('mutter', 180 + Math.random() * 180) * 60;
+    // what you do in the page shows on the manager: typing, sending, approving; and being away
+    window.addEventListener('office-manager', (ev) => this.managerDo((ev as CustomEvent).detail));
+    const active = () => this.touch();
+    for (const name of ['mousemove', 'keydown', 'pointerdown', 'wheel'] as const) window.addEventListener(name, active, { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      // a hidden tab is not drawn at all: on coming back the manager is found asleep and wakes at the first move
+      if (document.hidden) this.dozeOff();
+    });
     this.bagTag = document.createElement('div');
     this.bagTag.className = 'nametag';
     overlay.append(this.bagTag);
@@ -606,6 +676,7 @@ export class OfficeScene {
       const plant = this.hitPlant(ev);
       if (plant) {
         waterPlant(plant);
+        this.prank();
         this.plants[plant] = plantStage(plant);
         this.drip = { side: plant, until: this.t + 45 };
         return;
@@ -682,6 +753,7 @@ export class OfficeScene {
     this.profClicks = [...this.profClicks.filter((c) => now - c < 2000), now];
     if (this.profClicks.length < 5) return;
     this.profClicks = [];
+    this.prank();
     this.angryFrom = this.t;
     this.angryUntil = this.t + 1200;
     a.lastGreet = this.pickNew(angryLines(), a.lastGreet);
@@ -695,9 +767,14 @@ export class OfficeScene {
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
     const inside = (x0: number, y0: number, x1: number, y1: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
-    if (inside(236, 6, 276, 30)) return this.pokePoster();
+    if (inside(236, 6, 276, 30)) {
+      this.prank();
+      return this.pokePoster();
+    }
     if (inside(6, 30, 46, 58)) {
+      this.prank();
       this.cups = drinkCoffee();
+      if (this.cups < 5) this.coffeeBoostUntil = Date.now() + 20 * 60_000; // perks the manager up for a while
       this.steamUntil = this.t + 1800;
       this.caption = { x: 26, y: 31, text: tr({ ko: `☕ 오늘 ${this.cups}잔째`, en: `☕ Cup ${this.cups} today` }), until: this.t + 240 };
       if (this.cups === 5) this.remark(this.who((v) => v.id === 'counsel'), tr({ ko: '커피는 이제 그만 드시는 게 어때요?', en: "How about that's enough coffee for today?" }), 7);
@@ -709,6 +786,7 @@ export class OfficeScene {
       return true;
     }
     if (inside(366, 44, 394, 98)) {
+      this.prank();
       this.lastBook = this.pickNew(bookTitles(), this.lastBook);
       this.caption = { x: 380, y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
       return true;
@@ -765,6 +843,7 @@ export class OfficeScene {
     }
     if (inside(b.x - 9, b.y - 30, b.x + 4, b.y - 8)) {
       const n = bumpDayCount('office-bag');
+      this.prank();
       this.bagHitAt = this.t;
       this.bagDir = x < b.x - 2 ? 1 : -1; // swings away from the punch
       this.bagSpark = { x, y, until: this.t + 8 };
@@ -795,6 +874,7 @@ export class OfficeScene {
 
   /** Release: the ball goes towards the pointer, as far as the gauge said. */
   private throwPaper() {
+    this.prank();
     const h = this.hand;
     const { x, y, dist } = this.landing();
     this.flying.push({ x0: h.x, y0: h.y, x1: x, y1: y, from: this.t, arc: arcOf(dist), dur: flightFrames(dist) });
@@ -943,6 +1023,7 @@ export class OfficeScene {
     if (this.deskClicks.length < 3 || this.t - this.slamAt < 180) return true;
     this.deskClicks = [];
     this.slamAt = this.t;
+    this.prank();
     this.caption = { x: 150, y: H - 44, text: tr({ ko: '쾅!', en: 'BANG!' }), until: this.t + 60 };
     for (const a of this.actors.values()) this.alerts.set(a.id, this.t + 90);
     const who = (['thug', 'counsel', 'prof'] as const)[Math.floor(Math.random() * 3)];
@@ -1119,6 +1200,110 @@ export class OfficeScene {
       });
   }
 
+  /** You did something in the page (see `office-manager` events in command.ts, panels.ts, main.ts). */
+  private managerDo(d: { kind: 'typing' | 'instruct' | 'approve' | 'deny'; id?: string }) {
+    this.touch();
+    if (d.kind === 'typing') this.typingUntil = this.t + 60;
+    else if (d.kind === 'instruct') {
+      const a = d.id ? this.actors.get(d.id) : null;
+      this.gesture = { kind: a && a.x < 150 ? 'pointL' : 'pointR', until: this.t + 42 };
+    } else this.gesture = { kind: d.kind === 'approve' ? 'nod' : 'shake', until: this.t + 36 };
+  }
+  /** any sign of life: the clock for dozing off starts again, and a sleeping manager wakes with a start */
+  private touch() {
+    this.lastActivity = Date.now();
+    if (!this.asleep) return;
+    this.asleep = false;
+    this.managerHitAt = this.t; // the same start and "!" as being hit by a ball of paper
+  }
+  private dozeOff() {
+    if (this.asleep) return;
+    this.asleep = true;
+    this.sleepStart = Date.now();
+    this.sleepRemarked = false;
+  }
+  /** 0 fresh, 1 yawning, 2 nodding off: from the time put in today, worse in the evening, a cup of coffee takes one off for a while */
+  private get tired(): number {
+    const base = this.worked >= 360 || (this.phase !== 'day' && this.worked >= 180) ? 2 : this.worked >= 180 ? 1 : 0;
+    return Math.max(0, base - (Date.now() < this.coffeeBoostUntil ? 1 : 0));
+  }
+  /** A bit of mischief (throwing paper, the bag, the desk, poking things). Six in a minute and someone notices. */
+  private prank() {
+    const now = Date.now();
+    this.pranks = [...this.pranks.filter((p) => now - p < 60_000), now];
+    if (this.pranks.length < 6 || now < this.caughtUntil) return;
+    this.pranks = [];
+    this.caughtUntil = now + 120_000;
+    const n = bumpDayCount('office-caught');
+    const prof = this.who((v) => v.seat === 'podium');
+    const kang = this.who((v) => v.id === 'thug');
+    const who = prof && (!kang || Math.random() < 0.5) ? prof : kang;
+    if (who) this.remark(who, (who.lastGreet = this.pickNew(caughtLines(who === prof ? 'prof' : 'thug', this.angry), who.lastGreet)), 6);
+    if (n >= 3) this.remark(this.who((v) => v.id === 'counsel'), tr({ ko: '(메모: 회피 행동 증가.)', en: '(Note: avoidance behaviour increasing.)' }), 6);
+    // caught: a start, then three seconds of looking very busy
+    this.managerHitAt = this.t;
+    this.fakeTypingUntil = this.t + 180;
+  }
+
+  /** The manager's clock: dozing off, time worked, and what crosses their mind. Once a frame. */
+  private managerLife() {
+    const now = Date.now();
+    if (!this.asleep && now - this.lastActivity > secondsParam('idle', 180) * 1000) this.dozeOff();
+    if (this.asleep && !this.sleepRemarked && now - this.sleepStart > secondsParam('idle', 180) * 1000 * 1.7) {
+      this.sleepRemarked = true;
+      const id = Math.random() < 0.6 ? 'thug' : 'counsel';
+      const a = this.who((v) => v.id === id);
+      if (a) this.remark(a, (a.lastGreet = this.pickNew(sleepLines(id), a.lastGreet)), 7);
+    }
+    if (now - this.workTick >= 60_000) {
+      // a minute counts if you touched anything during it
+      if (now - this.lastActivity < 60_000) this.worked = bumpDayCount('office-worked');
+      this.workTick = now;
+    }
+    const tired = this.tired;
+    if (this.tiredSeen < 0) this.tiredSeen = tired;
+    else if (tired > this.tiredSeen) {
+      this.tiredSeen = tired;
+      this.remark(this.who((v) => v.id === 'counsel'), tr({ ko: '오늘 오래 하셨어요. 잠깐 쉬어도 돼요.', en: "You've been at it a long time today. It's all right to take a break." }), 7);
+    }
+    // a passing thought now and then, not while talking to someone or asleep
+    if (this.thought && this.thought.until <= this.t) this.thought = null;
+    if (this.t >= this.nextMutterAt) {
+      this.nextMutterAt = this.t + secondsParam('mutter', 180 + Math.random() * 180) * 60;
+      const talking = !!this.managerLine || [...this.actors.values()].some((a) => isChat(a.view) && a.awaitingSince != null);
+      if (!this.asleep && !talking && !this.holding) {
+        const staff = [...this.actors.values()].filter((a) => !isChat(a.view));
+        this.lastThought = this.pickNew(
+          mutterLines({
+            night: this.phase !== 'day',
+            approvals: this.pendingApprovals,
+            justDone: this.t - this.lastDoneAt < 3600,
+            working: staff.filter((a) => BUSY.includes(a.view.status)).length,
+            tired: tired >= 2,
+          }),
+          this.lastThought,
+        );
+        this.thought = { text: this.lastThought, until: this.t + 300 };
+      }
+    }
+    const txt = this.thought?.text ?? '';
+    if (this.thoughtBubble.textContent !== txt) this.thoughtBubble.textContent = txt;
+    this.thoughtBubble.hidden = !txt;
+    if (this.thought !== this.thoughtRef) {
+      this.thoughtRef = this.thought;
+      this.thoughtSince = this.t;
+    }
+  }
+
+  /** who the manager is looking at: someone waiting for approval first, else whoever is working, in turn */
+  private watched(): Actor | null {
+    const staff = [...this.actors.values()].filter((a) => !isChat(a.view));
+    const waiting = staff.find((a) => a.view.status === 'waiting_permission');
+    if (waiting) return waiting;
+    const busy = staff.filter((a) => BUSY.includes(a.view.status) && a.view.status !== 'queued');
+    return busy.length ? busy[Math.floor(this.t / 300) % busy.length] : null;
+  }
+
   /** Now and then, with nobody selected and both idle, Kang says something and On answers. */
   private banter() {
     const kang = this.who((v) => v.id === 'thug');
@@ -1229,6 +1414,7 @@ export class OfficeScene {
       a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '', lastGreet: '', speechRef: null, speechSince: 0 };
       this.actors.set(v.id, a);
     }
+    if (a.view.status !== 'done' && v.status === 'done' && !isChat(v)) this.lastDoneAt = this.t;
     a.view = v;
     this.layout();
     // corner characters speak their replies instead (see renderSpeech, called every frame)
@@ -1640,6 +1826,7 @@ export class OfficeScene {
     if (this.posterFlashUntil > this.t) this.drawPosterFlash();
 
     this.paperChores();
+    this.managerLife();
     // move actors
     for (const a of this.actors.values()) {
       const tg = this.target(a);
@@ -1704,6 +1891,20 @@ export class OfficeScene {
     });
     this.ventItems(items);
     this.aftermathItems(items);
+    const point = this.gesture && this.gesture.until > this.t && !this.asleep && !this.holding ? this.gesture.kind : null;
+    if (point === 'pointL' || point === 'pointR')
+      items.push({
+        // the arm out towards whoever just got the instruction, drawn in front of the monitors so it shows
+        y: H - 32,
+        draw: () => {
+          const dir = point === 'pointL' ? -1 : 1;
+          const sx = 150 + dir * 7, sy = H - 34 - MANAGER_H + 10;
+          g.fillStyle = '#5b2a86';
+          for (let k = 0; k < 7; k++) g.fillRect(sx + dir * k, sy - Math.floor(k / 3), 1, 2);
+          g.fillStyle = '#f1c27d';
+          g.fillRect(sx + dir * 7, sy - 3, 2, 2);
+        },
+      });
     // the professor's podium stays where it is, with or without him on it
     if ([...this.actors.values()].some((a) => a.view.seat === 'podium')) items.push({ y: PROF.y - 0.1, draw: () => this.drawPodium() });
     for (const side of ['left', 'right'] as PlantSide[]) items.push({ y: H - 12, draw: () => this.drawPlant(side) });
@@ -1880,6 +2081,11 @@ export class OfficeScene {
       g.fillRect(mx + 1, y - 10, 14, 1);
       g.fillStyle = '#23262d';
       g.fillRect(mx + 6, y + 1, 4, 2);
+      if (this.typingUntil > this.t || this.fakeTypingUntil > this.t) {
+        // screens lit while you type: the light spills over the top edge
+        g.fillStyle = 'rgba(127,178,255,0.75)';
+        g.fillRect(mx + 1, y - 12, 14, 1);
+      }
     }
     // walnut desk top + gold moulding
     g.fillStyle = '#4e3020';
@@ -1937,7 +2143,51 @@ export class OfficeScene {
       g.fillRect(cx - half + dx, y + 9 + r, 1, 1);
       g.fillRect(cx + half - 1 + dx, y + 9 + r, 1, 1);
     }
-    g.drawImage(managerSprite(t % 240 < 6), x, y);
+    // --- what you are doing right now, in order of what wins ---
+    const tired = this.tired;
+    const typing = this.typingUntil > t || this.fakeTypingUntil > t;
+    const act = this.gesture && this.gesture.until > t ? this.gesture.kind : null;
+    const yawning = !typing && !act && tired > 0 && t % (tired > 1 ? 2400 : 7200) < 90;
+    const dozing = !typing && !act && tired > 1 && t % 1500 >= 700 && t % 1500 < 760;
+    const pose: ManagerPose = {};
+    let headDx = 0, headDy = 0;
+    let blink = t % 240 < (tired > 1 ? 16 : 6);
+    if (this.holding) {
+      // aiming a ball of paper: nothing else
+    } else if (this.asleep) {
+      headDy = 4;
+      blink = true;
+    } else if (act === 'pointL' || act === 'pointR') pose.hands = act;
+    else if (act === 'nod') headDy = Math.floor((this.gesture!.until - t) / 9) % 2 ? 1 : 0;
+    else if (act === 'shake') headDx = Math.floor((this.gesture!.until - t) / 6) % 2 ? 1 : -1;
+    else if (typing) pose.hands = Math.floor(t / (this.fakeTypingUntil > t ? 3 : 6)) % 2 ? 'typeA' : 'typeB';
+    else if (yawning) pose.yawn = true;
+    else if (dozing) (headDy = 2), (blink = true);
+    else {
+      const w = this.watched();
+      if (w) pose.eyes = w.x < cx ? 'l' : 'r';
+    }
+    // the body, then the head on top of it (so it can nod, shake and sink onto the desk)
+    const spr = managerSprite(blink, pose);
+    g.drawImage(spr, 0, MANAGER_HEAD, MANAGER_W, MANAGER_H - MANAGER_HEAD, x, y + MANAGER_HEAD, MANAGER_W, MANAGER_H - MANAGER_HEAD);
+    g.drawImage(spr, 0, 0, MANAGER_W, MANAGER_HEAD, x + headDx, y + headDy, MANAGER_W, MANAGER_HEAD);
+    if (this.asleep) {
+      // Zs drifting up
+      g.fillStyle = '#ffffff';
+      for (let k = 0; k < 3; k++) {
+        const ph = (t + k * 40) % 120;
+        if (ph > 90) continue;
+        const zx = cx + 8 + k * 3 + Math.round(ph / 30), zy = y - 2 - Math.round(ph / 6) - k * 2;
+        g.fillRect(zx, zy, 3, 1);
+        g.fillRect(zx + 1, zy + 1, 1, 1);
+        g.fillRect(zx, zy + 2, 3, 1);
+      }
+    } else if (!this.holding && !typing && !act && this.watched()?.view.status === 'waiting_permission') {
+      // someone wants an answer
+      g.fillStyle = '#ffcc00';
+      const qx = cx + 9, qy = y - 5;
+      for (const [dx, dy] of [[0, 0], [1, 0], [2, 1], [1, 2], [1, 4]]) g.fillRect(qx + dx, qy + dy, 1, 1);
+    }
     // sparkles twinkling around, each on its own phase
     const spots = [[-13, 2], [12, -3], [-10, 14], [14, 10], [0, -6]];
     spots.forEach(([sx, sy], k) => {
@@ -2116,6 +2366,8 @@ export class OfficeScene {
     }
     if (!this.objBubble.hidden && this.caption)
       entries.push({ el: this.objBubble, key: `thing:${this.caption.text}`, headX: this.caption.x * s, headY: this.caption.y * s, anchor: 0.5, since: this.captionSince, who: '' });
+    if (!this.thoughtBubble.hidden)
+      entries.push({ el: this.thoughtBubble, key: `thought:${this.thought?.text ?? ''}`, headX: 150 * s, headY: (H - 34 - MANAGER_H - 2) * s, anchor: 0.5, since: this.thoughtSince, who: '' });
     if (!this.managerBubble.hidden)
       entries.push({ el: this.managerBubble, key: `manager:${this.managerBubbleText}`, headX: 150 * s, headY: (H - 34 - MANAGER_H - 2) * s, anchor: 0.15, since: this.managerLineSince, who: '' });
     const layoutKey = `${s}|${H}|` + entries.map((e) => `${e.key}@${Math.round(e.headX)},${Math.round(e.headY)}`).join('|');

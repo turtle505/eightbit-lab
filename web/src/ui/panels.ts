@@ -196,6 +196,7 @@ export function renderApprovals(st: UIState, send: Send) {
       const a = st.snap.approvals.find((x) => x.id === id);
       if (allow && a && !confirmApprove(a, st.snap)) return;
       send({ t: 'approve', id, allow });
+      window.dispatchEvent(new CustomEvent('office-manager', { detail: { kind: allow ? 'approve' : 'deny' } }));
     }),
   );
 }
