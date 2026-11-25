@@ -1,5 +1,13 @@
 import { figureDefaultName, type FigureKey } from '../../../shared/protocol.ts';
 import { tr } from '../../../shared/i18n.ts';
+import {
+  angryLines, banterPairs, bagMilestone, bookTitles, caughtLines, coffeeLines, greetings, kangReturnLines, mutterLines, onNote, paperLines, posterLines,
+  sleepLines, slamLines, staffQuips,
+} from './lines.ts';
+import {
+  type DayPhase, type PlantStage, arcOf, bumpedDayCount, dayCountOf, dayNumber, dayPhaseOf, flightFrames, landingPoint, parsePlant, pickNew, plantStageOf,
+  reachOf, stackBubbles, throwDistAt, tiredStage, wateredPlant, MAX_THROW,
+} from './rules.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
 import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, MANAGER_HEAD, managerSprite, type ManagerPose, paintMap, professorSprite, type Pose } from './sprites.ts';
 
@@ -101,7 +109,8 @@ const TYPE_SPEED = 0.5;
 /** frames the manager's line stays up after the reply has finished typing */
 const MANAGER_LINE_HOLD = 360;
 const BUSY: AgentStatus[] = ['queued', 'thinking', 'typing', 'running', 'researching', 'remote'];
-// ---- easter eggs: the time of day, and the two plants (all in the browser, no server state) ----
+// ---- the thin layer between the rules (rules.ts) and the browser: the clock, the URL and localStorage ----
+// Nothing here runs at module load: the unit tests import this file under Node.
 /** local time; `?hour=19` (optionally `&minute=30`) in the URL overrides it, for trying the evening look */
 const clockNow = (): { h: number; m: number } => {
   const q = new URLSearchParams(location.search);
@@ -110,157 +119,42 @@ const clockNow = (): { h: number; m: number } => {
   const m = q.has('minute') ? Number(q.get('minute')) : NaN;
   return { h: h >= 0 && h < 24 ? Math.floor(h) : d.getHours(), m: m >= 0 && m < 60 ? Math.floor(m) : q.has('hour') ? 0 : d.getMinutes() };
 };
-type DayPhase = 'day' | 'dusk' | 'night';
-/** overtime starts at six: dusk until eight, then night until six in the morning */
-const dayPhase = (): DayPhase => {
-  const { h } = clockNow();
-  return h >= 6 && h < 18 ? 'day' : h < 20 && h >= 18 ? 'dusk' : 'night';
-};
-
-type PlantSide = 'left' | 'right';
-type PlantStage = keyof typeof PLANT_STAGES;
-const PLANT_X: Record<PlantSide, number> = { left: 6, right: 372 };
-const dayNumber = (d = new Date()) => Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86_400_000);
-const readPlant = (side: PlantSide): { last: number; streak: number } | null => {
+const dayPhase = (): DayPhase => dayPhaseOf(clockNow().h);
+/** localStorage that never throws (private windows, blocked site data): a missing value and a failed write are both fine */
+const stored = (key: string): string | null => {
   try {
-    const p = JSON.parse(localStorage.getItem(`office-plant-${side}`) ?? 'null');
-    return p && typeof p.last === 'number' && typeof p.streak === 'number' ? p : null;
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 };
-/** watered daily it grows (3 days: lush, 7: in flower); skip a day and the streak is gone; over 3 days dry it wilts */
-const plantStage = (side: PlantSide): PlantStage => {
-  const p = readPlant(side);
-  if (!p) return 'normal';
-  const dry = dayNumber() - p.last;
-  if (dry > 3) return 'wilt';
-  const streak = dry <= 1 ? p.streak : 0;
-  return streak >= 7 ? 'flower' : streak >= 3 ? 'lush' : 'normal';
-};
-/** once a day counts; returns nothing, the caller re-reads the stage */
-const waterPlant = (side: PlantSide) => {
-  const today = dayNumber();
-  const p = readPlant(side);
-  if (p?.last === today) return;
+const store = (key: string, value: string) => {
   try {
-    localStorage.setItem(`office-plant-${side}`, JSON.stringify({ last: today, streak: p && today - p.last === 1 ? p.streak + 1 : 1 }));
+    localStorage.setItem(key, value);
   } catch {
-    /* storage unavailable: the plant just stays as it is */
+    /* storage unavailable: nothing is remembered */
   }
 };
-
-/** the professor, poked five times in a row, loses his temper for a while */
-const angryLines = (): string[] => [
-  tr({ ko: '지금 뭐 하는 건가!', en: 'What do you think you are doing!' }),
-  tr({ ko: '내가 그렇게 만만해 보이나?', en: 'Do I look like a pushover to you?' }),
-  tr({ ko: '자네 졸업하기 싫은가?', en: "Don't you want to graduate?" }),
-  tr({ ko: '연구는 안 하고 장난이나 치고!', en: 'Playing around instead of doing research!' }),
-  tr({ ko: '당장 결과 가져오게!', en: 'Bring me results. Now!' }),
-  tr({ ko: '이제부터 미팅은 매일 하지, 매일!', en: 'From now on we meet every day. Every day!' }),
-  tr({ ko: '그 손가락으로 논문이나 쓰게!', en: 'Use that finger to write your paper!' }),
-  tr({ ko: '내 방으로 따라오게.', en: 'Come to my office.' }),
-];
-/** what the professor says about the chart on the wall when you click it */
-const posterLines = (angry: boolean): string[] =>
-  angry
-    ? [tr({ ko: '그래프가 이게 뭔가!', en: 'What kind of chart is this!' }), tr({ ko: '이걸 그래프라고 그렸나!', en: 'You call this a chart!' })]
-    : [
-        tr({ ko: '이 그래프는 왜 이렇게 나왔나?', en: 'Why does this chart look like this?' }),
-        tr({ ko: 'error bar는 어디 갔나?', en: 'Where are the error bars?' }),
-        tr({ ko: '축 레이블이 없잖나.', en: 'There are no axis labels.' }),
-        tr({ ko: 'baseline이 이것뿐인가?', en: 'Are these all the baselines?' }),
-        tr({ ko: '이게 significant한가?', en: 'Is this significant?' }),
-        tr({ ko: '색을 좀 바꿔 보게.', en: 'Try different colours.' }),
-        tr({ ko: '마지막 막대만 높은 게 수상한데.', en: 'Only the last bar is high. Suspicious.' }),
-        tr({ ko: '이걸로 Figure 1이 되겠나?', en: 'Is this supposed to be Figure 1?' }),
-      ];
-const bookTitles = (): string[] => [
-  tr({ ko: '졸업하는 법 (비닐도 안 뜯음)', en: 'How to Graduate (still shrink-wrapped)' }),
-  tr({ ko: '교수님 저서 (사인본, 안 읽음)', en: "The professor's book (signed, unread)" }),
-  tr({ ko: '3년 전에 빌린 도서관 책', en: 'A library book borrowed three years ago' }),
-  tr({ ko: '선배가 두고 간 학위논문', en: 'A thesis a senior left behind' }),
-  tr({ ko: 'Deep Learning (베개로 사용 중)', en: 'Deep Learning (in use as a pillow)' }),
-  tr({ ko: '작년 학회 프로시딩 (기념품)', en: "Last year's proceedings (a souvenir)" }),
-  tr({ ko: '연구노트 1권 (3쪽까지 씀)', en: 'Lab notebook vol. 1 (three pages used)' }),
-  tr({ ko: '영어 논문 작성법 (필요한데 안 읽음)', en: 'Writing Papers in English (needed, unread)' }),
-  tr({ ko: '통계학 입문 (입문만 함)', en: 'Introduction to Statistics (introduced, nothing more)' }),
-  tr({ ko: '퇴사하고 싶을 때 읽는 책', en: 'A Book for When You Want to Quit' }),
-];
-
-/** cups of coffee today (click the coffee machine) */
-const coffeeToday = (): number => {
-  try {
-    const c = JSON.parse(localStorage.getItem('office-coffee') ?? 'null');
-    return c && c.day === dayNumber() && typeof c.n === 'number' ? c.n : 0;
-  } catch {
-    return 0;
-  }
-};
-const drinkCoffee = (): number => {
-  const n = coffeeToday() + 1;
-  try {
-    localStorage.setItem('office-coffee', JSON.stringify({ day: dayNumber(), n }));
-  } catch {
-    /* storage unavailable: nothing is counted */
-  }
-  return n;
-};
-/** from the fifth cup on, Kang and On have opinions */
-const coffeeLines = (who: 'thug' | 'counsel'): string[] =>
-  who === 'thug'
-    ? [
-        tr({ ko: '카페인으로 논문이 써지냐, 병신아.', en: 'You think caffeine writes papers, you idiot?' }),
-        tr({ ko: '손 떠는 거 봐라. 그만 처마셔.', en: 'Look at your hands shaking. Stop chugging it.' }),
-      ]
-    : [
-        tr({ ko: '물도 한 잔 같이 드세요.', en: 'Have a glass of water with that.' }),
-        tr({ ko: '오늘 잠은 주무실 수 있겠어요?', en: 'Will you be able to sleep tonight?' }),
-      ];
-
-// ---- venting: paper balls, the desk, the punching bag ----
-/** a day's counter in localStorage (`{ day, n }`): back to 0 when the date changes */
-const dayCount = (key: string): number => {
-  try {
-    const c = JSON.parse(localStorage.getItem(key) ?? 'null');
-    return c && c.day === dayNumber() && typeof c.n === 'number' ? c.n : 0;
-  } catch {
-    return 0;
-  }
-};
+/** a day's counter (`{ day, n }`): back to 0 when the date changes */
+const dayCount = (key: string): number => dayCountOf(stored(key), dayNumber());
 const bumpDayCount = (key: string): number => {
-  const n = dayCount(key) + 1;
-  try {
-    localStorage.setItem(key, JSON.stringify({ day: dayNumber(), n }));
-  } catch {
-    /* storage unavailable: nothing is counted */
-  }
-  return n;
+  const next = bumpedDayCount(stored(key), dayNumber());
+  store(key, next.raw);
+  return next.n;
 };
-const bagLabel = (): string => {
-  try {
-    return localStorage.getItem('office-bag-label') ?? '';
-  } catch {
-    return '';
-  }
+type PlantSide = 'left' | 'right';
+const PLANT_X: Record<PlantSide, number> = { left: 6, right: 372 };
+const plantStage = (side: PlantSide): PlantStage => plantStageOf(parsePlant(stored(`office-plant-${side}`)), dayNumber());
+const waterPlant = (side: PlantSide) => {
+  const next = wateredPlant(parsePlant(stored(`office-plant-${side}`)), dayNumber());
+  if (next) store(`office-plant-${side}`, JSON.stringify(next));
 };
-/** how far a full-power throw goes, in canvas pixels */
-const MAX_THROW = 330;
-/**
- * The landing marker slides out along the aim line and back at this many canvas pixels per frame (~90 px/s),
- * as far as a little past the pointer. A fixed speed keeps the release window the same (about a quarter of a
- * second on the bin) whether the target is near or far; sweeping the whole 330 px range left only ~50 ms.
- */
-const MARKER_SPEED = 1.5;
-const OVERSHOOT = 1.25;
+const bagLabel = (): string => stored('office-bag-label') ?? '';
+/** what a chat character says when you walk up: the lines depend on the hour, the plants and today's coffee */
+const greetingsFor = (v: EmployeeView, angry: boolean): string[] =>
+  greetings(v, { angry, night: dayPhase() !== 'day', plants: [plantStage('left'), plantStage('right')], cups: dayCount('office-coffee') });
 /** how much of the arc preview is drawn, from the hand: the rest has to be judged */
 const ARC_SHOWN = 0.6;
-/**
- * A thrown ball of paper, roughly as it really flies: a flat toss (about 20–25° up), so the peak is about a
- * ninth of the distance, and a longer throw stays in the air longer.
- */
-const arcOf = (dist: number) => dist * 0.11;
-const flightFrames = (dist: number) => Math.round(14 + dist / 8);
 /** how close to the bin's mouth counts as in */
 const BIN_RADIUS = 11;
 /** `?power=0.6` pins the gauge, for trying out where a throw lands (read lazily: the unit tests import this module without a browser) */
@@ -268,204 +162,18 @@ const fixedPower = (): number | null => {
   const q = new URLSearchParams(location.search).get('power');
   return q != null && Number(q) >= 0 && Number(q) <= 1 ? Number(q) : null;
 };
-const paperLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
-  who === 'prof'
-    ? [tr({ ko: '누가 던졌나!', en: 'Who threw that!' }), tr({ ko: '지금 나한테 던진 건가?', en: 'Did you just throw that at me?' })]
-    : who === 'thug'
-      ? [
-          tr({ ko: '뭐야 씨발, 죽을래?', en: 'What the fuck, you want to die?' }),
-          tr({ ko: '한 번만 더 던져 봐.', en: 'Throw one more. I dare you.' }),
-          tr({ ko: '던질 힘으로 논문을 써.', en: 'Put that arm into writing your paper.' }),
-        ]
-      : [
-          tr({ ko: '아야… 많이 답답하셨나 봐요.', en: 'Ow… you must be really frustrated.' }),
-          tr({ ko: '저한테 던지셔도 괜찮아요. 조금 풀리셨어요?', en: "It's all right to throw it at me. Feel a little better?" }),
-        ];
-/** Kang does not get angry: he picks the ball up and throws it back */
-const kangReturnLines = (): string[] => [
-  tr({ ko: '돌려준다, 병신아.', en: 'Right back at you, idiot.' }),
-  tr({ ko: '던지는 건 이렇게 하는 거다.', en: 'This is how you throw.' }),
-  tr({ ko: '어디다 던져, 씨발.', en: 'Where the fuck are you throwing?' }),
-  tr({ ko: '받아라.', en: 'Catch.' }),
-];
-/** On takes notes instead; the nth hit of the day */
-const onNote = (n: number): string =>
-  n === 1
-    ? tr({ ko: '(메모: 공격성 관찰됨.)', en: '(Note: aggression observed.)' })
-    : n === 2
-      ? tr({ ko: '(메모: 오늘 두 번째. 패턴으로 보임.)', en: '(Note: second time today. Looks like a pattern.)' })
-      : n === 3
-        ? tr({ ko: '(메모: 세 번째. 조준 실력은 향상 중.)', en: '(Note: third. Aim is improving.)' })
-        : [
-            tr({ ko: '(메모: 종이는 넉넉한 듯.)', en: '(Note: paper supply seems ample.)' }),
-            tr({ ko: '(메모: 다음 상담 주제 확정.)', en: "(Note: next session's topic is settled.)" }),
-            tr({ ko: '(메모: 본인은 재미있어함.)', en: '(Note: the client is enjoying this.)' }),
-            tr({ ko: '(메모: 상담사의 인내심, 양호.)', en: "(Note: the counselor's patience: holding.)" }),
-          ][n % 4];
-/** what the working staff say when a ball of paper lands on them (one line: their bubble does not wrap) */
-const staffQuips = (id: string): string[] =>
-  id === 'lit'
-    ? [tr({ ko: '논문 읽는 중이었는데요…', en: 'I was reading a paper…' }), tr({ ko: '이것도 인용할까요?', en: 'Shall I cite this too?' })]
-    : id === 'eval'
-      ? [tr({ ko: '명중률 계산해 드릴까요?', en: 'Shall I compute your hit rate?' }), tr({ ko: '표본이 하나 늘었네요.', en: 'One more sample.' })]
-      : id === 'aide1'
-        ? [tr({ ko: '앗, 저 뭐 잘못했나요?', en: 'Oh! Did I do something wrong?' }), tr({ ko: '주워 드릴까요?', en: 'Shall I pick that up?' })]
-        : id === 'aide2'
-          ? [tr({ ko: '아야. 일 더 주시는 건가요?', en: 'Ow. Is this more work?' }), tr({ ko: '종이 재활용함은 저쪽이에요.', en: 'Paper recycling is over there.' })]
-          : id === 'sec'
-            ? [tr({ ko: '치우는 건 제 일이에요…', en: "I'm the one who cleans up…" }), tr({ ko: "일정표에 '종이 던지기'로 적어 둘게요.", en: "I'll put 'paper throwing' on the calendar." })]
-            : id === 'exec'
-              ? [tr({ ko: '지금 커밋 중인데요.', en: "I'm in the middle of a commit." }), tr({ ko: '이건 리뷰 코멘트로 받겠습니다.', en: "I'll take that as a review comment." })]
-              : [tr({ ko: '…?', en: '…?' }), tr({ ko: '네?', en: 'Sorry?' })];
-
-const slamLines = (who: 'prof' | 'thug' | 'counsel'): string[] =>
-  who === 'prof'
-    ? [tr({ ko: '조용히 좀 하게.', en: 'Keep it down.' }), tr({ ko: '그 힘으로 실험을 하게.', en: 'Put that energy into your experiments.' })]
-    : who === 'thug'
-      ? [tr({ ko: '오, 드디어 빡쳤냐.', en: 'Oh, finally pissed off?' }), tr({ ko: '책상이 무슨 죄냐, 병신아.', en: 'What did the desk do to you, idiot?' })]
-      : [
-          tr({ ko: '…괜찮으세요? 손은 안 다치셨어요?', en: '…Are you all right? Did you hurt your hand?' }),
-          tr({ ko: '화가 많이 나셨군요. 그럴 수 있어요.', en: "You're very angry. That's allowed." }),
-        ];
-const bagMilestone = (n: number): string | null =>
-  n === 10
-    ? tr({ ko: '그래, 그거나 쳐라.', en: 'Yeah, go hit that.' })
-    : n === 50
-      ? tr({ ko: '교수 얼굴이라고 생각하고 쳐.', en: "Pretend it's the professor's face." })
-      : n === 100
-        ? tr({ ko: '100대? 그 끈기로 연구를 했으면 졸업했다.', en: "A hundred? With that persistence you'd have graduated." })
-        : null;
-
 // ---- the manager is you: what you do shows on the figure ----
 /** seconds from the URL for trying things out (`?idle=5`, `?mutter=5`), else the default */
 const secondsParam = (name: string, fallback: number): number => {
   const q = Number(new URLSearchParams(location.search).get(name));
   return q > 0 ? q : fallback;
 };
-/** minutes actually spent at it today (input within the last minute counts), kept in localStorage */
-const workedToday = (): number => dayCount('office-worked');
-const sleepLines = (who: 'thug' | 'counsel'): string[] =>
-  who === 'thug'
-    ? [tr({ ko: '자냐? 그래, 자는 게 연구보다 낫겠다.', en: 'Asleep? Fine, sleeping beats your research.' }), tr({ ko: '코 고는 소리 봐라.', en: 'Listen to that snoring.' })]
-    : [tr({ ko: '푹 주무세요. 깨우지 않을게요.', en: "Sleep well. I won't wake you." })];
-const caughtLines = (who: 'prof' | 'thug', angry: boolean): string[] =>
-  who === 'thug'
-    ? [tr({ ko: '또 딴짓하냐.', en: 'Slacking off again?' }), tr({ ko: '그럴 시간에 한 줄이라도 써라.', en: 'Write one line in that time.' })]
-    : angry
-      ? [tr({ ko: '지금 장난칠 땐가!', en: 'Is this the time to play around!' })]
-      : [
-          tr({ ko: '자네, 지금 뭐 하나?', en: 'What are you doing right now?' }),
-          tr({ ko: '연구는 다 했나 보지?', en: 'So the research is all done, I take it?' }),
-          tr({ ko: '한가해 보이는데, 일 하나 더 줄까?', en: 'You look free. Shall I give you one more task?' }),
-        ];
-/** what goes through the manager's head, picked from whatever fits the moment */
-const mutterLines = (c: { night: boolean; approvals: number; justDone: boolean; working: number; tired: boolean }): string[] => {
-  const out: string[] = [];
-  if (c.night) out.push(tr({ ko: '집에 가고 싶다…', en: 'I want to go home…' }), tr({ ko: '오늘도 이 시간이네.', en: 'This late again.' }));
-  if (c.approvals >= 3) out.push(tr({ ko: '이걸 다 봐야 하나…', en: 'Do I have to read all of these…' }), tr({ ko: '승인 누르는 게 내 일인가.', en: 'Is pressing approve my job now?' }));
-  if (c.justDone) out.push(tr({ ko: '오, 벌써?', en: 'Oh, already?' }), tr({ ko: '나보다 빠르네.', en: 'Faster than me.' }));
-  if (c.working >= 3) out.push(tr({ ko: '다들 열심히네. 나만 빼고.', en: 'Everyone is hard at it. Except me.' }), tr({ ko: '구독 한도 괜찮으려나.', en: 'I hope the quota holds.' }));
-  if (c.working === 0) out.push(tr({ ko: '뭘 시키지…', en: 'What should I hand out…' }), tr({ ko: '조용하네.', en: 'Quiet in here.' }));
-  if (c.tired) out.push(tr({ ko: '커피…', en: 'Coffee…' }), tr({ ko: '눈이 감긴다.', en: 'My eyes are closing.' }));
-  return out.length ? out : [tr({ ko: '논문 써야 하는데.', en: 'I should be writing the paper.' }), tr({ ko: '점심 뭐 먹지.', en: 'What to have for lunch.' })];
-};
-
-/** Kang says a line, On answers (when both are idle and nobody is selected) */
-const banterPairs = (): [string, string][] => [
-  [tr({ ko: '저 새끼 오늘도 논다.', en: 'That bastard is slacking again today.' }), tr({ ko: '쉬는 날도 필요해요.', en: 'Everyone needs a day off.' })],
-  [tr({ ko: '쟤 졸업은 하겠냐?', en: 'Will that one ever graduate?' }), tr({ ko: '자기 속도로 가고 있어요.', en: "They're going at their own pace." })],
-  [tr({ ko: '넌 왜 맨날 쟤 편이냐.', en: 'Why are you always on their side?' }), tr({ ko: '깡 씨도 걱정돼서 그러는 거잖아요.', en: "You only say that because you're worried too." })],
-  [tr({ ko: '아 심심해. 누가 좀 징징대러 안 오나.', en: "I'm bored. Won't someone come and whine?" }), tr({ ko: '…그걸 기다리시는 거예요?', en: "…You're waiting for that?" })],
-  [tr({ ko: '교수 또 주말에 부르겠지, 씨발.', en: 'The professor will call them in on the weekend again. Fuck.' }), tr({ ko: '그건 저도 좀 걱정이에요.', en: 'That worries me a little too.' })],
-  [tr({ ko: '야, 넌 화 안 나냐?', en: "Hey, don't you ever get angry?" }), tr({ ko: '나죠. 그래서 숨을 쉬어요.', en: 'I do. That is why I breathe.' })],
-  ...(dayPhase() !== 'day'
-    ? [[tr({ ko: '이 시간에 왜 아직 있냐, 저 병신은.', en: 'Why is that idiot still here at this hour?' }), tr({ ko: '집에 가라고 한마디 해 줄까요?', en: 'Shall I tell them to go home?' })] as [string, string]]
-    : []),
-];
 /** seconds between exchanges: 3–5 minutes, or `?banter=<seconds>` for trying it out */
 const banterGap = (): number => {
   const q = Number(new URLSearchParams(location.search).get('banter'));
   return (q > 0 ? q : 180 + Math.random() * 120) * 60;
 };
 
-/** Kang notices the plants */
-const plantJabs = (): string[] => {
-  const st = [plantStage('left'), plantStage('right')];
-  if (st.includes('wilt')) return [tr({ ko: '화분 꼴 좀 봐라, 니 연구 같다.', en: 'Look at that plant. Just like your research.' })];
-  if (st.every((x) => x === 'lush' || x === 'flower'))
-    return [tr({ ko: '화분은 존나 잘 키우네. 연구를 그렇게 좀 해 봐라.', en: 'You grow plants fucking well. Try doing research like that.' })];
-  return [];
-};
-
-/** after six the chat characters have evening lines instead */
-const nightGreetings = (v: EmployeeView): string[] | null =>
-  v.seat === 'podium'
-    ? [
-        tr({ ko: '아직 있었나? 마침 잘됐네.', en: 'Still here? Good timing.' }),
-        tr({ ko: '밤이 연구하기엔 제일 좋지.', en: 'Night is the best time for research.' }),
-        tr({ ko: '나 때는 연구실에서 잤네.', en: 'In my day we slept in the lab.' }),
-        tr({ ko: '내일 아침까지 볼 수 있지?', en: 'I can see it by tomorrow morning, right?' }),
-      ]
-    : v.id === 'thug'
-      ? [
-          tr({ ko: '이 시간까지 남아서 한 게 그거냐, 병신아?', en: "You stayed this late and that's all you did, you idiot?" }),
-          tr({ ko: '집에 안 가냐? 갈 데도 없냐, 새끼야.', en: 'Not going home? Nowhere to go, dumbass?' }),
-          tr({ ko: '야근한다고 일 잘하는 줄 아네, 씨발.', en: 'Thinks working late makes them good at it. Fuck.' }),
-          tr({ ko: '낮에 처놀다가 이제 와서 바쁜 척하냐?', en: 'Screwed around all day and now you act busy?' }),
-        ]
-      : v.id === 'counsel'
-        ? [
-            tr({ ko: '늦게까지 계시네요. 저녁은 드셨어요?', en: "You're here late. Have you had dinner?" }),
-            tr({ ko: '오늘은 여기까지만 해도 괜찮아요.', en: "It's all right to stop here for today." }),
-            tr({ ko: '이 시간엔 생각이 더 무겁게 느껴지죠.', en: 'Thoughts feel heavier at this hour, don\'t they.' }),
-            tr({ ko: '집에 가는 길에 숨 한번 크게 쉬세요.', en: 'Take one deep breath on your way home.' }),
-          ]
-        : null;
-
-/** what a chat character says when you walk up to them (selected); one is picked at random each time */
-const greetings = (v: EmployeeView, angry = false): string[] =>
-  v.seat === 'podium' && angry
-    ? angryLines()
-    : [
-        ...((dayPhase() !== 'day' && nightGreetings(v)) || dayGreetings(v)),
-        ...(v.id === 'thug' ? plantJabs() : []),
-        ...((v.id === 'thug' || v.id === 'counsel') && coffeeToday() >= 5 ? [coffeeLines(v.id)[0]] : []),
-      ];
-const dayGreetings = (v: EmployeeView): string[] =>
-  v.seat === 'podium'
-    ? [
-        tr({ ko: '음, 그래서 결과는 나왔나?', en: 'So, any results yet?' }),
-        tr({ ko: '마침 잘 왔네, 할 얘기가 있었는데.', en: 'Good timing, I had something to discuss.' }),
-        tr({ ko: '지난주에 얘기한 건 어떻게 됐나?', en: 'How is the thing we talked about last week going?' }),
-        tr({ ko: '오는 길에 재미있는 생각이 하나 났는데.', en: 'I had an interesting thought on the way in.' }),
-        tr({ ko: '요즘 얼굴 보기 힘드네.', en: "I don't see you around much these days." }),
-        tr({ ko: '그 실험, 금방 하지?', en: "That experiment won't take long, right?" }),
-        tr({ ko: '주말에 잠깐 볼까?', en: "Let's talk briefly this weekend." }),
-        tr({ ko: '논문은 언제쯤 볼 수 있나?', en: 'When can I see the paper?' }),
-      ]
-    : v.id === 'thug'
-      ? [
-          tr({ ko: '하… 한심한 새끼 또 왔네.', en: 'Ugh. The pathetic bastard is back.' }),
-          tr({ ko: '뭘 봐 새끼야, 할 일 없냐?', en: 'What are you looking at, dumbass? Nothing to do?' }),
-          tr({ ko: '또 징징대러 왔냐? 존나 지겹다 진짜.', en: "Here to whine again? I'm so fucking tired of you." }),
-          tr({ ko: '니가 그러니까 졸업을 못 하는 거야, 병신아.', en: "This is exactly why you can't graduate, you idiot." }),
-          tr({ ko: '논문 한 줄도 안 쓴 새끼가 여긴 왜 와.', en: 'Not one line of the paper written, and you show up here?' }),
-          tr({ ko: '에휴, 그 대가리로 대학원은 어떻게 왔냐.', en: 'How the hell did you get into grad school with that brain?' }),
-          tr({ ko: '변명 들어 줄 시간 없다, 꺼져.', en: 'No time for your excuses. Piss off.' }),
-          tr({ ko: '오늘은 또 뭘 말아먹었냐, 씨발.', en: 'So what did you fuck up today?' }),
-        ]
-      : v.id === 'counsel'
-        ? [
-            tr({ ko: '오늘 하루 어땠어요?', en: 'How was your day?' }),
-            tr({ ko: '어서 오세요. 오늘은 어떤 마음으로 오셨어요?', en: 'Welcome. What brings you here today?' }),
-            tr({ ko: '요즘 잠은 좀 주무세요?', en: 'Have you been sleeping lately?' }),
-            tr({ ko: '지난번 이후로 어떻게 지내셨어요?', en: 'How have you been since last time?' }),
-            tr({ ko: '천천히 말씀하셔도 돼요.', en: 'Take your time.' }),
-            tr({ ko: '오늘 가장 마음에 걸리는 게 뭐예요?', en: "What's weighing on you most today?" }),
-            tr({ ko: '여기 앉아서 숨 한번 고르고 가세요.', en: 'Sit down and catch your breath for a moment.' }),
-            tr({ ko: '밥은 챙겨 드셨어요?', en: 'Have you eaten?' }),
-          ]
-        : [tr({ ko: '무슨 일 있어?', en: "What's up?" })];
 // lounge spots along the top wall, spaced so bubbles don't collide; it wraps to a second line
 const coffeeSpot = (i: number): Spot => ({ x: 62 + (i % 7) * 46, y: 68 + Math.floor(i / 7) * 10 });
 
@@ -520,7 +228,7 @@ export class OfficeScene {
   private caption: { x: number; y: number; text: string; until: number } | null = null;
   private lastBook = '';
   private steamUntil = 0;
-  private cups = coffeeToday();
+  private cups = dayCount('office-coffee');
   /** Kang–On banter: when the next exchange may start, and On's pending answer */
   // venting
   /** a crumpled sheet in the manager's hand, ready to throw */
@@ -574,7 +282,7 @@ export class OfficeScene {
   private typingUntil = 0;
   private fakeTypingUntil = 0;
   private gesture: { kind: 'pointL' | 'pointR' | 'nod' | 'shake'; until: number } | null = null;
-  private worked = workedToday();
+  private worked = dayCount('office-worked');
   private workTick = Date.now();
   private coffeeBoostUntil = 0;
   private tiredSeen = -1;
@@ -742,9 +450,7 @@ export class OfficeScene {
     return true;
   }
   private pickNew(pool: string[], last: string): string {
-    const fresh = pool.filter((x) => x !== last);
-    const from = fresh.length ? fresh : pool;
-    return from[Math.floor(Math.random() * from.length)];
+    return pickNew(pool, last);
   }
 
   /** Five quick clicks and the professor loses his temper for twenty seconds. */
@@ -773,7 +479,7 @@ export class OfficeScene {
     }
     if (inside(6, 30, 46, 58)) {
       this.prank();
-      this.cups = drinkCoffee();
+      this.cups = bumpDayCount('office-coffee');
       if (this.cups < 5) this.coffeeBoostUntil = Date.now() + 20 * 60_000; // perks the manager up for a while
       this.steamUntil = this.t + 1800;
       this.caption = { x: 26, y: 31, text: tr({ ko: `☕ 오늘 ${this.cups}잔째`, en: `☕ Cup ${this.cups} today` }), until: this.t + 240 };
@@ -812,16 +518,14 @@ export class OfficeScene {
   /** how far the marker travels before turning back: a little past the pointer */
   private reach(): number {
     const h = this.hand;
-    return Math.max(40, Math.min(MAX_THROW, Math.hypot(this.aim.x - h.x, this.aim.y - h.y) * OVERSHOOT));
+    return reachOf(Math.hypot(this.aim.x - h.x, this.aim.y - h.y));
   }
   /** distance the ball would go if released now: out to `reach()` and back, at a steady speed */
   private throwDist(): number {
     if (this.charging == null) return 0;
     const fixed = fixedPower();
     if (fixed != null) return fixed * MAX_THROW;
-    const reach = this.reach();
-    const d = ((this.t - this.charging) * MARKER_SPEED) % (reach * 2);
-    return d < reach ? d : reach * 2 - d;
+    return throwDistAt(this.t - this.charging, this.reach());
   }
 
   /** Papers on the manager's desk (pick one up to throw), the punching bag and its name tag. */
@@ -833,11 +537,7 @@ export class OfficeScene {
       const name = prompt(tr({ ko: '샌드백에 붙일 이름 (비우면 "샌드백")', en: 'Name for the punching bag (empty = "Punching bag")' }), this.bagName);
       if (name !== null) {
         this.bagName = name.trim().slice(0, 20);
-        try {
-          localStorage.setItem('office-bag-label', this.bagName);
-        } catch {
-          /* storage unavailable */
-        }
+        store('office-bag-label', this.bagName);
       }
       return true;
     }
@@ -863,13 +563,7 @@ export class OfficeScene {
 
   /** where the ball would come down right now: towards the pointer, as far as the gauge says */
   private landing(): { x: number; y: number; dist: number } {
-    const h = this.hand;
-    let dx = this.aim.x - h.x, dy = this.aim.y - h.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1) (dx = 1), (dy = 0);
-    else (dx /= len), (dy /= len);
-    const dist = Math.max(8, this.throwDist());
-    return { x: Math.max(4, Math.min(W - 4, h.x + dx * dist)), y: Math.max(4, Math.min(H - 4, h.y + dy * dist)), dist };
+    return landingPoint(this.hand, this.aim, this.throwDist(), { w: W, h: H });
   }
 
   /** Release: the ball goes towards the pointer, as far as the gauge said. */
@@ -1224,8 +918,7 @@ export class OfficeScene {
   }
   /** 0 fresh, 1 yawning, 2 nodding off: from the time put in today, worse in the evening, a cup of coffee takes one off for a while */
   private get tired(): number {
-    const base = this.worked >= 360 || (this.phase !== 'day' && this.worked >= 180) ? 2 : this.worked >= 180 ? 1 : 0;
-    return Math.max(0, base - (Date.now() < this.coffeeBoostUntil ? 1 : 0));
+    return tiredStage(this.worked, this.phase !== 'day', Date.now() < this.coffeeBoostUntil);
   }
   /** A bit of mischief (throwing paper, the bag, the desk, poking things). Six in a minute and someone notices. */
   private prank() {
@@ -1323,7 +1016,7 @@ export class OfficeScene {
     this.nextBanterAt = this.t + banterGap();
     const idle = (a: Actor) => !a.speech && a.awaitingSince == null && a.view.status === 'idle';
     if (!idle(kang) || !idle(on)) return;
-    const pairs = banterPairs();
+    const pairs = banterPairs(dayPhase() !== 'day');
     const fresh = pairs.filter((p) => p[0] !== this.lastBanter);
     const [k, o] = (fresh.length ? fresh : pairs)[Math.floor(Math.random() * (fresh.length || pairs.length))];
     this.lastBanter = k;
@@ -1455,7 +1148,7 @@ export class OfficeScene {
       // not while a reply is on its way or still being typed out
       if (a && isChat(a.view) && a.awaitingSince == null && (!a.speech || a.speech.shown >= a.speech.chars.length)) {
         const mad = a.view.seat === 'podium' && this.angry;
-        a.lastGreet = this.pickNew(greetings(a.view, mad), a.lastGreet);
+        a.lastGreet = this.pickNew(greetingsFor(a.view, mad), a.lastGreet);
         // an angry line does not outlast the anger
         a.speech = { chars: Array.from(a.lastGreet), shown: 0, greet: true, ...(mad ? { until: this.angryUntil } : {}) };
       }
@@ -2374,36 +2067,25 @@ export class OfficeScene {
     if (layoutKey === this.speechLayoutKey) return;
     this.speechLayoutKey = layoutKey;
 
-    const width = W * s;
-    const GAP = 6;
-    const placed: { left: number; right: number; top: number; bottom: number }[] = [];
-    entries.sort((p, q) => q.headY - p.headY || q.since - p.since);
-    for (const e of entries) {
+    // measure each bubble as it is and as it would be once moved away from its speaker (it then shows a name)
+    const sized = entries.map((e) => {
       const b = e.el;
       b.classList.remove('stacked');
       if (e.who) b.dataset.who = e.who;
       else delete b.dataset.who;
-      // a bubble's `top` is its bottom edge (it is shifted up by its own height in CSS)
-      const fit = () => {
-        const w = b.offsetWidth;
-        const left = Math.max(4, Math.min(width - w - 4, e.headX - w * e.anchor));
-        return { left, right: left + w, h: b.offsetHeight };
-      };
-      let box = fit();
-      let bottom = e.headY;
-      const hits = () => placed.find((p) => box.left < p.right && box.right > p.left && bottom - box.h < p.bottom && bottom > p.top);
-      for (let guard = 0, p = hits(); p && guard < 8; guard++, p = hits()) {
-        if (!b.classList.contains('stacked')) {
-          b.classList.add('stacked'); // no tail, the speaker's name on top: its size changes, so measure again
-          box = fit();
-        }
-        bottom = p.top - GAP;
-      }
-      bottom = Math.max(bottom, box.h + 2); // not off the top of the canvas
-      b.style.left = `${box.left}px`;
-      b.style.top = `${bottom}px`;
-      b.style.setProperty('--tail-x', `${e.headX - box.left}px`);
-      placed.push({ left: box.left, right: box.right, top: bottom - box.h, bottom });
-    }
+      const size = { w: b.offsetWidth, h: b.offsetHeight };
+      b.classList.add('stacked');
+      const stackedSize = { w: b.offsetWidth, h: b.offsetHeight };
+      b.classList.remove('stacked');
+      return { headX: e.headX, headY: e.headY, anchor: e.anchor, since: e.since, size, stackedSize };
+    });
+    // a bubble's `top` is its bottom edge (it is shifted up by its own height in CSS)
+    stackBubbles(sized, W * s).forEach((o, i) => {
+      const e = entries[i];
+      e.el.classList.toggle('stacked', o.stacked);
+      e.el.style.left = `${o.left}px`;
+      e.el.style.top = `${o.bottom}px`;
+      e.el.style.setProperty('--tail-x', `${e.headX - o.left}px`);
+    });
   }
 }

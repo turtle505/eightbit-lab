@@ -20,7 +20,7 @@ Follow the existing TypeScript style: two-space indentation, single quotes, semi
 
 ## Testing Guidelines
 
-Tests use Vitest and `describe`/`it` blocks in `server/test/units.test.ts`. Add focused cases for changed behavior, especially parsers, persistence, permissions, and protocol handling. Name cases by observable result (for example, `it('rejects a stale edit', ...)`). Run a subset with `npx vitest run -t "parsers"`; run `npm test` before proposing a change. No coverage threshold is configured.
+Tests use Vitest and `describe`/`it` blocks in `server/test/units.test.ts` (and `server/test/game.test.ts` for the office game's rules and lines). Add focused cases for changed behavior, especially parsers, persistence, permissions, and protocol handling. Name cases by observable result (for example, `it('rejects a stale edit', ...)`). Run a subset with `npx vitest run -t "parsers"`; run `npm test` before proposing a change. No coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 
