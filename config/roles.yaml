@@ -4,7 +4,8 @@
 # - officeTools: true gives access to mcp__office__* (staff status, task board, delegation)
 # - cwd: fixed working folder (relative to the project root)
 # - useWorktree: true gives the employee a git worktree of the research repo as a personal desk
-# - sprite: character colours (hair / shirt / pants)
+# - sprite: character colours (hair / shirt / pants); optional look: scholar | analyst | rookie | runner | assistant | engineer
+#     (a hairstyle and a prop on the shared body; omit it for the plain figure)
 # - model: model for this employee only (overrides office.model)
 # - stayAtDesk: true keeps the character at its desk regardless of status
 # - seat: reception | lead seats the employee at a fixed spot next to the manager's desk instead of the grid (unused right now);
@@ -50,7 +51,7 @@ employees:
     name: Literature Researcher "Ada"
     title: Literature Researcher
     desk: 0
-    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d" }
+    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d", look: scholar }
     useWorktree: false
     # add literature MCP tools you have installed (e.g. a PubMed or arXiv server) here to use them without approval
     autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite]
@@ -68,7 +69,7 @@ employees:
     name: Evaluation Analyst "Gauss"
     title: Evaluation Analyst
     desk: 1
-    sprite: { hair: "#d9d9d9", shirt: "#8064a2", pants: "#2b2b2b", skin: "#c68642" }
+    sprite: { hair: "#d9d9d9", shirt: "#8064a2", pants: "#2b2b2b", skin: "#c68642", look: analyst }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
     systemPrompt: |
@@ -87,7 +88,7 @@ employees:
     name: Research Aide "Finn"
     title: Research Aide
     desk: 2
-    sprite: { hair: "#4a3520", shirt: "#5b9279", pants: "#36404a", skin: "#e8c39e" }
+    sprite: { hair: "#4a3520", shirt: "#5b9279", pants: "#36404a", skin: "#e8c39e", look: rookie }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -105,7 +106,7 @@ employees:
     name: Research Aide "Mira"
     title: Research Aide
     desk: 3
-    sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d" }
+    sprite: { hair: "#2e2a26", shirt: "#d98e5a", pants: "#2f3440", skin: "#f1c27d", look: runner }
     useWorktree: false
     autoAllow: [Read, Glob, Grep, Write, Edit, TodoWrite, WebSearch, WebFetch,
       mcp__lab__list_servers, mcp__lab__gpu_status, mcp__lab__job_status, mcp__lab__tail_log]
@@ -123,7 +124,7 @@ employees:
     name: Executive Assistant "Hana"
     title: Executive Assistant
     desk: 4
-    sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3" }
+    sprite: { hair: "#5b3a29", shirt: "#f2a65a", pants: "#3d3d5c", skin: "#f3d2b3", look: assistant }
     cwd: ./workspaces/secretary
     officeTools: true
     # create_task (delegation), save_skill (saving skills) and create/update/delete_routine (routine changes) are left out on purpose → manager approval every time
@@ -161,7 +162,7 @@ employees:
     title: Lead Engineer
     desk: 5
     deskStyle: lead    # drawn with the team-lead desk even inside the grid (the crown is on the character)
-    sprite: { hair: "#2b1d14", shirt: "#2e6f6a", pants: "#2a2a3a", skin: "#eac086" }
+    sprite: { hair: "#2b1d14", shirt: "#2e6f6a", pants: "#2a2a3a", skin: "#eac086", look: engineer }
     useWorktree: true
     # Hands-on engineer and team lead. To run on a server, list the machine under hosts in office.local.yaml and set host: <id>.
     autoAllow: [Read, Glob, Grep, Edit, Write, TodoWrite,
