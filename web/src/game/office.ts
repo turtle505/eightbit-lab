@@ -52,6 +52,8 @@ interface Spot {
 interface Speech {
   chars: string[];
   shown: number;
+  /** a canned greeting rather than a real reply: it goes away when the character is deselected */
+  greet?: boolean;
 }
 
 interface Actor {
@@ -68,6 +70,8 @@ interface Actor {
   awaitingSince: number | null;
   /** last text written into the bubble, so the DOM is touched only on change */
   bubbleText: string;
+  /** the greeting shown last time, so the next one differs */
+  lastGreet: string;
 }
 
 /** Reserved seats sit in the bottom strip; every other desk is a slot in the grid. */
@@ -89,14 +93,42 @@ const TYPE_SPEED = 0.5;
 const MANAGER_LINE_HOLD = 360;
 const BUSY: AgentStatus[] = ['queued', 'thinking', 'typing', 'running', 'researching', 'remote'];
 /** what a corner character says when selected before anyone has talked to them */
-const greeting = (v: EmployeeView) =>
+/** what a chat character says when you walk up to them (selected); one is picked at random each time */
+const greetings = (v: EmployeeView): string[] =>
   v.seat === 'podium'
-    ? tr({ ko: '음, 그래서 결과는 나왔나?', en: 'So, any results yet?' })
+    ? [
+        tr({ ko: '음, 그래서 결과는 나왔나?', en: 'So, any results yet?' }),
+        tr({ ko: '마침 잘 왔네, 할 얘기가 있었는데.', en: 'Good timing, I had something to discuss.' }),
+        tr({ ko: '지난주에 얘기한 건 어떻게 됐나?', en: 'How is the thing we talked about last week going?' }),
+        tr({ ko: '오는 길에 재미있는 생각이 하나 났는데.', en: 'I had an interesting thought on the way in.' }),
+        tr({ ko: '요즘 얼굴 보기 힘드네.', en: "I don't see you around much these days." }),
+        tr({ ko: '그 실험, 금방 하지?', en: "That experiment won't take long, right?" }),
+        tr({ ko: '주말에 잠깐 볼까?', en: "Let's talk briefly this weekend." }),
+        tr({ ko: '논문은 언제쯤 볼 수 있나?', en: 'When can I see the paper?' }),
+      ]
     : v.id === 'thug'
-    ? tr({ ko: '…뭐. 또 누가 건드렸어?', en: '…What. Who messed with you this time?' })
-    : v.id === 'counsel'
-      ? tr({ ko: '오늘 하루 어땠어요?', en: 'How was your day?' })
-      : tr({ ko: '무슨 일 있어?', en: "What's up?" });
+      ? [
+          tr({ ko: '하… 한심한 새끼 또 왔네.', en: 'Ugh. The pathetic bastard is back.' }),
+          tr({ ko: '뭘 봐 새끼야, 할 일 없냐?', en: 'What are you looking at, dumbass? Nothing to do?' }),
+          tr({ ko: '또 징징대러 왔냐? 존나 지겹다 진짜.', en: "Here to whine again? I'm so fucking tired of you." }),
+          tr({ ko: '니가 그러니까 졸업을 못 하는 거야, 병신아.', en: "This is exactly why you can't graduate, you idiot." }),
+          tr({ ko: '논문 한 줄도 안 쓴 새끼가 여긴 왜 와.', en: 'Not one line of the paper written, and you show up here?' }),
+          tr({ ko: '에휴, 그 대가리로 대학원은 어떻게 왔냐.', en: 'How the hell did you get into grad school with that brain?' }),
+          tr({ ko: '변명 들어 줄 시간 없다, 꺼져.', en: 'No time for your excuses. Piss off.' }),
+          tr({ ko: '오늘은 또 뭘 말아먹었냐, 씨발.', en: 'So what did you fuck up today?' }),
+        ]
+      : v.id === 'counsel'
+        ? [
+            tr({ ko: '오늘 하루 어땠어요?', en: 'How was your day?' }),
+            tr({ ko: '어서 오세요. 오늘은 어떤 마음으로 오셨어요?', en: 'Welcome. What brings you here today?' }),
+            tr({ ko: '요즘 잠은 좀 주무세요?', en: 'Have you been sleeping lately?' }),
+            tr({ ko: '지난번 이후로 어떻게 지내셨어요?', en: 'How have you been since last time?' }),
+            tr({ ko: '천천히 말씀하셔도 돼요.', en: 'Take your time.' }),
+            tr({ ko: '오늘 가장 마음에 걸리는 게 뭐예요?', en: "What's weighing on you most today?" }),
+            tr({ ko: '여기 앉아서 숨 한번 고르고 가세요.', en: 'Sit down and catch your breath for a moment.' }),
+            tr({ ko: '밥은 챙겨 드셨어요?', en: 'Have you eaten?' }),
+          ]
+        : [tr({ ko: '무슨 일 있어?', en: "What's up?" })];
 // lounge spots along the top wall, spaced so bubbles don't collide; it wraps to a second line
 const coffeeSpot = (i: number): Spot => ({ x: 62 + (i % 7) * 46, y: 68 + Math.floor(i / 7) * 10 });
 
@@ -133,6 +165,8 @@ export class OfficeScene {
   private managerLine: { to: string; speech: Speech; hideAt: number | null } | null = null;
   private managerBubble: HTMLDivElement;
   private managerBubbleText = '';
+  /** who was selected last frame, to notice a new selection (click, number key, command-bar picker) */
+  private greetedSel: string | null = null;
 
   constructor(private host: HTMLElement, private overlay: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -168,6 +202,8 @@ export class OfficeScene {
       const id = this.hit(ev);
       // clicking a character mid-line shows the rest at once, like skipping dialogue in a game
       const sp = id ? this.actors.get(id)?.speech : null;
+      // clicking them again once the line is out gets another greeting
+      if (id && id === this.selected && (!sp || sp.shown >= sp.chars.length)) this.greetedSel = null;
       if (sp) sp.shown = sp.chars.length;
       this.selected = id;
       this.onSelect(id);
@@ -270,7 +306,7 @@ export class OfficeScene {
       const tag = document.createElement('div');
       tag.className = 'nametag';
       this.overlay.append(bubble, tag);
-      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '' };
+      a = { id: v.id, x: start.x, y: start.y, walkPhase: 0, view: v, bubble, tag, speech: null, awaitingSince: null, bubbleText: '', lastGreet: '' };
       this.actors.set(v.id, a);
     }
     a.view = v;
@@ -305,11 +341,26 @@ export class OfficeScene {
 
   /** Advance the typewriter and write each corner character's bubble (and the manager's line). */
   private renderSpeech() {
+    // walking up to a chat character gets a fresh greeting; walking away drops it
+    if (this.selected !== this.greetedSel) {
+      const prev = this.greetedSel ? this.actors.get(this.greetedSel) : null;
+      if (prev?.speech?.greet) prev.speech = null;
+      const a = this.selected ? this.actors.get(this.selected) : null;
+      // not while a reply is on its way or still being typed out
+      if (a && isChat(a.view) && a.awaitingSince == null && (!a.speech || a.speech.shown >= a.speech.chars.length)) {
+        const pool = greetings(a.view);
+        const fresh = pool.filter((g) => g !== a.lastGreet);
+        const pick = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+        a.lastGreet = pick;
+        a.speech = { chars: Array.from(pick), shown: 0, greet: true };
+      }
+      this.greetedSel = this.selected;
+    }
     const ml = this.managerLine;
     if (ml) {
       ml.speech.shown = Math.min(ml.speech.chars.length, ml.speech.shown + TYPE_SPEED);
       const to = this.actors.get(ml.to);
-      const reply = to?.speech;
+      const reply = to?.speech?.greet ? null : to?.speech;
       // fade out a while after the reply has finished typing, or once nobody is answering any more
       if (ml.hideAt == null && reply && reply.shown >= reply.chars.length) ml.hideAt = this.t + MANAGER_LINE_HOLD;
       if (ml.hideAt == null && to && !reply && to.awaitingSince == null) ml.hideAt = this.t + MANAGER_LINE_HOLD;
@@ -339,8 +390,7 @@ export class OfficeScene {
       else if (a.speech) {
         a.speech.shown = Math.min(a.speech.chars.length, a.speech.shown + TYPE_SPEED);
         out = a.speech.chars.slice(0, Math.floor(a.speech.shown)).join('');
-      } else if (this.selected === a.id) out = greeting(v);
-      else out = '';
+      } else out = '';
       if (out !== a.bubbleText) {
         a.bubbleText = out;
         a.bubble.textContent = out;
