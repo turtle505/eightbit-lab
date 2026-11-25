@@ -5,7 +5,7 @@
 # - cwd: fixed working folder (relative to the project root)
 # - useWorktree: true gives the employee a git worktree of the research repo as a personal desk
 # - sprite: character colours (hair / shirt / pants); optional look, one hairstyle or hat that tells the character apart:
-#     spikes | bun | long | cap | beanie | ponytail | bob (omit it for the plain head)
+#     spikes | bun | long | bowl | cap | beanie | ponytail | bob (omit it for the plain head)
 # - model: model for this employee only (overrides office.model)
 # - stayAtDesk: true keeps the character at its desk regardless of status
 # - seat: reception | lead seats the employee at a fixed spot next to the manager's desk instead of the grid (unused right now);
@@ -48,10 +48,10 @@ servers: |
 
 employees:
   - id: lit
-    name: Literature Researcher "Ada"
+    name: Literature Researcher "Alan"
     title: Literature Researcher
     desk: 0
-    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d", look: long }
+    sprite: { hair: "#3b2a1a", shirt: "#c0504d", pants: "#2f3a4f", skin: "#f1c27d", look: bowl }
     useWorktree: false
     # add literature MCP tools you have installed (e.g. a PubMed or arXiv server) here to use them without approval
     autoAllow: [Read, Glob, Grep, WebSearch, WebFetch, Write, Edit, TodoWrite]

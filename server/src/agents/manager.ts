@@ -469,7 +469,7 @@ export class AgentManager {
       .finally(() => setTimeout(() => ended?.(), 3_000)); // if no `result` follows, release the turn anyway
   }
 
-  /** Rename from the UI: replaces the quoted nickname in the configured name (Researcher "Ada" → Researcher "Bo"). */
+  /** Rename from the UI: replaces the quoted nickname in the configured name (Researcher "Alan" → Researcher "Bo"). */
   rename(employeeId: string, nick: string) {
     const e = this.emp(employeeId);
     const n = nick.replace(/["“”]/g, '').trim().slice(0, 20);

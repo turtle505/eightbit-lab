@@ -80,6 +80,8 @@ const LOOKS: Record<string, { head: string[]; hat?: 'pants' | 'shirt'; extra?: [
     head: ['....HHHH....', '...HHHHHH...', '..HHHHHHHH..', '.HHSSSSSSHH.', '.HHSESSESHH.', '.HHSSSSSSHH.', '.HHHSSSSHHH.', '.HH.SSSS.HH.'],
     extra: [[1, 8, 'H'], [10, 8, 'H'], [1, 9, 'H'], [10, 9, 'H']],
   },
+  // a bowl cut: a thick fringe down to the eyes, wider than the face
+  bowl: { head: ['...HHHHHH...', '..HHHHHHHH..', '.HHHHHHHHHH.', '.HHHHHHHHHH.', '.HSSESSESSH.', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'] },
   // a flat cap with the brim out to one side
   cap: { head: ['....CCCC....', '...CCCCCC...', '..CCCCCCCCCC', '..HSSSSSSH..', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'], hat: 'pants' },
   // a beanie with a pom-pom

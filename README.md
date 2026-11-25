@@ -61,13 +61,13 @@ You are the **manager**, at the big desk at the bottom of the office. Your six e
 
 ### Stage 1: Your first instruction
 
-1. Click **Ada** (or press <kbd>1</kbd>).
+1. Click **Alan** (or press <kbd>1</kbd>).
 2. Type in the box under the office and press Enter: *"Find three recent papers on retrieval-augmented generation and summarise them."*
-3. Ada walks to her desk and starts working. The speech bubble over her head shows what she's doing right now.
+3. Alan walks to his desk and starts working. The speech bubble over his head shows what he's doing right now.
 
 > 💡 The first instruction to each employee takes a few seconds while their session starts. After that, replies start almost instantly.
 
-**Clear when:** Ada is typing at her desk.
+**Clear when:** Alan is typing at her desk.
 
 ### Stage 2: Approve something
 
@@ -79,7 +79,7 @@ When an employee **raises a hand with a `!`**, they need your OK. Read what they
 
 When the work is done, the employee sparkles ✨ and the answer lands in the **📨 Reports** feed (and as a desktop notification, if you turn those on).
 
-**Clear when:** you've read Ada's summary in the feed.
+**Clear when:** you've read Alan's summary in the feed.
 
 ### Stage 4: Task cards
 
@@ -114,7 +114,7 @@ Once the tutorial is cleared, this is the full list of controls.
 | Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |
-| Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Ada summarise the new papers"* |
+| Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Alan summarise the new papers"* |
 | Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
 | Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
 | Switch language | The **EN / 한국어** button at the top right |
@@ -166,7 +166,7 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 
 | id | Who | What they do |
 |---|---|---|
-| `lit` | Ada | Papers and web research |
+| `lit` | Alan | Papers and web research |
 | `eval` | Gauss | Metrics, figures, evaluation reports |
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
@@ -285,7 +285,7 @@ The browser can only notify you while an office tab is open. To hear about appro
    ```
 3. `npm run notify:test`: your phone should buzz.
 
-Nothing is sent while an office tab is in front somewhere (`whenAway: false` to always send). Notifications carry only who and what (for example "✅ Ada: 📋 #12 Summarise the paper"), not the reply, unless you set `preview: true`. **Anyone who knows an ntfy.sh topic can read it**, so treat its name like a password, or self-host ntfy.
+Nothing is sent while an office tab is in front somewhere (`whenAway: false` to always send). Notifications carry only who and what (for example "✅ Alan: 📋 #12 Summarise the paper"), not the reply, unless you set `preview: true`. **Anyone who knows an ntfy.sh topic can read it**, so treat its name like a password, or self-host ntfy.
 </details>
 
 <details>
