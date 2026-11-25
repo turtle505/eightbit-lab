@@ -96,7 +96,7 @@ Bigger jobs go on a card instead of a chat line.
 **Kang** (<kbd>7</kbd>) and **On** (<kbd>8</kbd>) stand on the rug in the bottom-left corner with no desk, and they don't do work. Talk to them on a rough day; the conversation plays out in speech bubbles like game dialogue.
 
 - **Kang** sighs at whatever you say and answers with sarcasm. Don't expect comfort.
-- **On** listens calmly and helps you sort things out.
+- **On** asks questions the way a counselor does and helps you sort things out.
 
 ---
 
@@ -171,9 +171,9 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
 | `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
 | `thug` | Kang | Street punk who sighs at your whining and roasts you with blunt facts, never sympathy |
-| `counsel` | On | A calm counselor who listens and helps you sort things out |
+| `counsel` | On | A counselor who works through things with you using real counseling techniques, and keeps session notes |
 
-Kang and On aren't there for work. They stand on a rug in the bottom-left corner with no desk, keep their replies to a sentence or two, and talk in speech bubbles: their reply over their head, what you said over yours. They answer in the office language (in Korean they go by 깡 and 온) and take keys <kbd>7</kbd>/<kbd>8</kbd>; the team lead never hands them tasks. Kang quietly keeps what you tell him in `workspaces/thug/notes.md` as roast material, so it survives a new session; delete the file to make him forget.
+Kang and On aren't there for work. They stand on a rug in the bottom-left corner with no desk, keep their replies to a sentence or two, and talk in speech bubbles: their reply over their head, what you said over yours. They answer in the office language (in Korean they go by 깡 and 온) and take keys <kbd>7</kbd>/<kbd>8</kbd>; the team lead never hands them tasks. Kang quietly keeps what you tell him in `workspaces/thug/notes.md` as roast material, so it survives a new session; On keeps session notes the same way in `workspaces/counsel/notes.md` and picks up where you left off. Delete a file to make its owner forget.
 
 **Fitting them to your field.** Setting `domain` is usually enough: every employee's prompt starts with `About this team: <domain>`. To go further — say, the evaluation analyst should know your field's metrics, or the researcher may use a paper-search MCP server you've installed — override that employee in `config/roles.local.yaml`. Entries are merged by `id`, field by field:
 
