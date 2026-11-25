@@ -90,7 +90,7 @@ export interface RoleConfig {
   name: string;
   title: string;
   desk: number;
-  sprite: { hair: string; shirt: string; pants: string; skin: string; look?: string };
+  sprite: { hair: string; shirt: string; pants: string; skin: string };
   useWorktree: boolean;
   autoAllow: string[];
   systemPrompt: string;

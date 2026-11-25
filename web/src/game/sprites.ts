@@ -6,8 +6,6 @@ export interface Palette {
   shirt: string;
   pants: string;
   skin: string;
-  /** a hairstyle and a prop on top of the shared body (see LOOKS); omitted = the plain figure */
-  look?: string;
 }
 
 const HEAD = [
@@ -61,49 +59,6 @@ const LEGS_STAND = ['..PPPPPPPP..', '..PPP..PPP..', '..PPP..PPP..', '..BBB..BBB.
 const LEGS_WALK_A = ['..PPPPPPPP..', '..PPP...PP..', '.PPP....PP..', '.BBB....BB..'];
 const LEGS_WALK_B = ['..PPPPPPPP..', '..PP...PPP..', '..PP....PPP.', '..BB....BBB.'];
 
-/**
- * Looks: a head (8 rows, same layout as HEAD) and a few pixels painted over the body in every pose.
- * Extra keys: G round glasses frame, K dark (square glasses, headset), C a look's accent colour, W white, Z zip.
- */
-const LOOKS: Record<string, { head: string[]; extra: [number, number, string][]; accent?: string }> = {
-  // long hair to the shoulders, round glasses, a book under the arm
-  scholar: {
-    head: ['....HHHH....', '...HHHHHH...', '..HHHHHHHH..', '..HHSSSSHH..', '..HGEGGEGH..', '..HSSSSSSH..', '..HHSSSSHH..', '..H.SSSS.H..'],
-    extra: [[2, 8, 'H'], [9, 8, 'H'], [0, 10, 'C'], [1, 10, 'C'], [0, 11, 'C'], [1, 11, 'W'], [0, 12, 'C'], [1, 12, 'C']],
-    accent: '#8e2430',
-  },
-  // neat side parting, square glasses, a pen in the shirt pocket
-  analyst: {
-    head: ['....HHHH....', '...HHHHHHH..', '..HHHHHHHH..', '..HHHSSSSH..', '..SKEKKEKS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'],
-    extra: [[7, 9, 'C'], [7, 10, 'W']],
-    accent: '#4f81bd',
-  },
-  // messy hair with a cowlick, a hoodie (hood at the neck, two strings)
-  rookie: {
-    head: ['.....H.H....', '...HHHHHH...', '..HHHHHHHHH.', '..HHSSSSSH..', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'],
-    extra: [[2, 8, 'C'], [9, 8, 'C'], [4, 9, 'W'], [4, 10, 'W'], [7, 9, 'W'], [7, 10, 'W']],
-    accent: 'rgba(0,0,0,0.25)',
-  },
-  // high ponytail, sleeves rolled up, a wristwatch
-  runner: {
-    head: ['....HHHH.HH.', '...HHHHHHHH.', '..HHHHHHHH.H', '..HSSSSSSH.H', '..SSESSESS..', '..SSSSSSSS..', '...SSSSSS...', '....SSSS....'],
-    extra: [[1, 9, 'S'], [10, 9, 'S'], [1, 11, 'K']],
-  },
-  // bob cut, a headset with a mic, a scarf
-  assistant: {
-    head: ['....HHHH....', '...HHHHHH...', '..HHHHHHHH..', '.HHSSSSSSHH.', '.KHSESSESHH.', '.KHSSSSSSHH.', '..KSSSSSSH..', '...KSSSS....'],
-    extra: [[4, 8, 'C'], [5, 8, 'C'], [6, 8, 'C'], [7, 8, 'C'], [7, 9, 'C'], [7, 10, 'C']],
-    accent: '#e05a6a',
-  },
-  // short hair, a beard, a zip-up hoodie
-  engineer: {
-    head: ['............', '...HHHHHH...', '..HHHHHHHH..', '..HSSSSSSH..', '..SSESSESS..', '..HSSSSSSH..', '...HHSSHH...', '....HHHH....'],
-    extra: [[2, 8, 'C'], [9, 8, 'C'], [6, 8, 'Z'], [6, 9, 'Z'], [6, 10, 'Z'], [6, 11, 'Z'], [6, 12, 'Z']],
-    accent: 'rgba(0,0,0,0.25)',
-  },
-};
-export const LOOK_NAMES = Object.keys(LOOKS);
-
 export type Pose = 'stand' | 'walkA' | 'walkB' | 'typeA' | 'typeB' | 'handUp' | 'cup';
 
 export const SPRITE_W = 12;
@@ -119,8 +74,7 @@ function rows(pose: Pose): string[] {
 const cache = new Map<string, HTMLCanvasElement>();
 
 export function characterSprite(p: Palette, pose: Pose, blink = false): HTMLCanvasElement {
-  const look = p.look ? LOOKS[p.look] : undefined;
-  const key = `${p.hair}${p.shirt}${p.pants}${p.skin}${p.look ?? ''}${pose}${blink}`;
+  const key = `${p.hair}${p.shirt}${p.pants}${p.skin}${pose}${blink}`;
   const hit = cache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
@@ -136,110 +90,13 @@ export function characterSprite(p: Palette, pose: Pose, blink = false): HTMLCanv
     B: '#2a2018',
     W: '#f4f4f4',
     K: '#1b1b1b',
-    G: '#8a6a45',
-    Z: '#d8dee9',
-    C: look?.accent ?? '#1b1b1b',
   };
-  const all = rows(pose);
-  (look ? [...look.head, ...all.slice(HEAD.length)] : all).forEach((row, y) =>
+  rows(pose).forEach((row, y) =>
     [...row].forEach((ch, x) => {
       if (ch === '.') return;
       g.fillStyle = color[ch];
       g.fillRect(x, y, 1, 1);
     }),
-  );
-  for (const [x, y, ch] of look?.extra ?? []) {
-    g.fillStyle = color[ch];
-    g.fillRect(x, y, 1, 1);
-  }
-  cache.set(key, c);
-  return c;
-}
-
-// ---- Kang, the street punk: bleached spikes, shades, a lollipop stick, a striped tracksuit, hands in pockets ----
-// Keys: H hair, h shaved sides, S skin, K shades, W white (glint, stripes, stick, trainers), Y gold chain, T jacket, P trousers
-const KANG_HEAD = [
-  '...H..H..H..',
-  '..HH.HH.HH..',
-  '..HHHHHHHH..',
-  '..HHHHHHHH..',
-  '..hHHHHHHh..',
-  '..hSSSSSSh..',
-  '..SKWKKKKS..',
-  '..SSSSSSSS..',
-];
-const KANG_JAW = { right: ['...SSSSSSW..', '....SSSS....'], left: ['..WSSSSSS...', '....SSSS....'] };
-const KANG_BODY = ['..TTYYTTTT..', '.WTTTTTTTTW.', '.WTTTTTTTTW.', '.TTTTTTTTTT.', '..TTTTTTTT..'];
-const KANG_BODY_UP = ['..TTYYTTTTW.', '.WTTTTTTTTW.', '.WTTTTTTTT..', '.TTTTTTTTT..', '..TTTTTTTT..'];
-const KANG_LEGS = ['..PPPPPPPP..', '..WPP..PPW..', '..WPP..PPW..', '..WWW..WWW..'];
-const KANG_LEGS_SHAKE = ['..PPPPPPPP..', '..WPP..PPW..', '..WPP...PPW.', '..WWW...WWW.'];
-const KANG_SQUAT = ['.WTTYYTTTTW.', 'PPTTTTTTTTPP', 'WWPPPPPPPPWW'];
-export type KangPose = 'stand' | 'shake' | 'handUp' | 'squat';
-export const KANG_H = KANG_HEAD.length + 2 + KANG_BODY.length + KANG_LEGS.length;
-
-export function kangSprite(p: Palette, pose: KangPose, stickLeft = false): HTMLCanvasElement {
-  const key = `kang${p.hair}${p.shirt}${p.pants}${p.skin}${pose}${stickLeft}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
-  const jaw = [...KANG_JAW[stickLeft ? 'left' : 'right']];
-  if (pose === 'handUp') jaw[1] = '....SSSS..S.'; // the raised hand, above the shoulder
-  const rows =
-    pose === 'squat'
-      ? [...KANG_HEAD, ...jaw, ...KANG_SQUAT]
-      : [...KANG_HEAD, ...jaw, ...(pose === 'handUp' ? KANG_BODY_UP : KANG_BODY), ...(pose === 'shake' ? KANG_LEGS_SHAKE : KANG_LEGS)];
-  const c = document.createElement('canvas');
-  c.width = SPRITE_W;
-  c.height = rows.length;
-  paintMap(c.getContext('2d')!, rows, { H: p.hair, h: '#5a4a2a', S: p.skin, K: '#141418', W: '#f4f4f4', Y: '#e8c55a', T: p.shirt, P: p.pants }, 0, 0);
-  cache.set(key, c);
-  return c;
-}
-
-// ---- On, the counselor: a bun, round glasses, a cardigan over a white blouse, a long skirt, a mug of tea ----
-// Keys: H hair, S skin, E eye, G glasses, T cardigan, W blouse, M mug, C clipboard, c paper, P skirt, B shoes
-const ON_HEAD = [
-  '.....HH.....',
-  '....HHHH....',
-  '...HHHHHH...',
-  '..HHHHHHHH..',
-  '..HHHSSSSH..',
-  '..SGEGGEGS..',
-  '..SSSSSSSS..',
-  '...SSSSSS...',
-  '....SSSS....',
-];
-const ON_BODY = ['..TTTWWTTT..', '.TTTTWWTTTT.', '.TTTSMMSTTT.', '.TTTTMMTTTT.', '..TTTWWTTT..'];
-const ON_SKIRT = ['..PPPPPPPP..', '..PPPPPPPP..', '.PPPPPPPPPP.', '...BB..BB...'];
-export type OnPose = 'stand' | 'sip' | 'nod' | 'writeA' | 'writeB' | 'handUp';
-export const ON_H = ON_HEAD.length + ON_BODY.length + ON_SKIRT.length;
-
-export function onSprite(p: Palette, pose: OnPose, blink = false): HTMLCanvasElement {
-  const key = `on${p.hair}${p.shirt}${p.pants}${p.skin}${pose}${blink}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
-  let head = [...ON_HEAD];
-  let body = ON_BODY;
-  if (pose === 'sip') {
-    // the mug at her lips, both hands under it
-    head[7] = '...SSMMSS...';
-    head[8] = '....SMMS....';
-    body = ['..TTTSSTTT..', '.TTTTWWTTTT.', '.TTTTWWTTTT.', '.TTTTWWTTTT.', '..TTTWWTTT..'];
-  } else if (pose === 'nod') head = ['............', ...ON_HEAD.slice(0, 8)]; // the head a pixel lower, the neck hidden
-  else if (pose === 'writeA' || pose === 'writeB')
-    body = ['..TTTWWTTT..', '.TTTTWWTTTT.', pose === 'writeA' ? '.TSCcccCSTT.' : '.TSCcccCTST.', '.TTCcccCTTT.', '..TTCCCTTT..'];
-  else if (pose === 'handUp') {
-    head[8] = '....SSSS..S.';
-    body = ['..TTTWWTTTT.', '.TTTTWWTTTT.', '.STTTWWTTT..', '.STTTWWTTT..', '..TTTWWTTT..'];
-  }
-  const c = document.createElement('canvas');
-  c.width = SPRITE_W;
-  c.height = ON_H;
-  paintMap(
-    c.getContext('2d')!,
-    [...head, ...body, ...ON_SKIRT],
-    { H: p.hair, S: p.skin, E: blink ? p.skin : '#1b1b1b', G: '#b98d5a', T: p.shirt, W: '#fbfbf7', M: '#fbfbf7', C: '#8a5a3b', c: '#fbfbf7', P: p.pants, B: '#3a2a22' },
-    0,
-    0,
   );
   cache.set(key, c);
   return c;
