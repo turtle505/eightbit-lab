@@ -105,6 +105,8 @@ export interface RoleConfig {
   /** a fixed seat instead of a slot in the desk grid */
   seat?: Seat;
   deskStyle?: 'lead';
+  /** one large thing on the desk (see drawDeskItem in web/src/game/office.ts); omitted = paper and a mug */
+  deskItem?: string;
   /** overrides office.permissionMode for this employee */
   permissionMode?: PermissionSetting;
   /** machine this employee's sessions run on (office.hosts id); omitted = local */

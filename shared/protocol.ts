@@ -46,6 +46,8 @@ export interface EmployeeView {
   /** a fixed seat instead of a slot in the desk grid */
   seat?: Seat;
   deskStyle?: 'lead';
+  /** one large thing on the desk that tells whose it is: books | chart | snacks | plant | phone | clutter (omitted = paper and a mug) */
+  deskItem?: string;
   /** 'auto': a classifier approves tool calls and only unclear ones become approval cards; 'ask': every non-autoAllow tool asks */
   permission: PermissionSetting;
   /** a session is open right now (the next instruction skips process start) */

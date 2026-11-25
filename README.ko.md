@@ -159,7 +159,7 @@ authToken: ""             # 선택: 사무실에 비밀번호 걸기 ("안전장
 | 파일 | 하는 일 |
 |---|---|
 | `config/office.yaml` | 우리 분야(`domain`), 동시 실행 수, 모델, 언어, 유휴 시간, 호스트, 로컬 모델 |
-| `config/roles.yaml` | 직원: 이름, 역할 프롬프트, 승인 없이 쓸 도구(`autoAllow`), 캐릭터 색과 `look`(머리 모양·모자) |
+| `config/roles.yaml` | 직원: 이름, 역할 프롬프트, 승인 없이 쓸 도구(`autoAllow`), 캐릭터 색, `look`(머리 모양·모자), `deskItem`(책상 위 물건) |
 | `config/routines.yaml` | 시작용 루틴: 평일 09:00 아침 브리핑, 평일 18:00 저녁 리포트, 금 17:00 주간 회고(꺼짐) |
 | `config/servers.local.yaml` | 내 GPU 서버 (`servers.example.yaml` 복사) |
 

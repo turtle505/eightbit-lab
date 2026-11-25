@@ -1389,7 +1389,7 @@ export class OfficeScene {
     return c;
   }
 
-  private drawDesk(i: number, status: AgentStatus | null, local = false, seat?: Seat) {
+  private drawDesk(i: number, status: AgentStatus | null, local = false, seat?: Seat, item?: string) {
     const g = this.g;
     const { x, y } = deskPos(i, seat);
     // desk top
@@ -1410,14 +1410,122 @@ export class OfficeScene {
       g.fillRect(x + 4, y - 12, 22, 2);
       g.globalAlpha = 1;
     }
-    // papers / mug
-    g.fillStyle = '#f2f2f2';
-    g.fillRect(x + 40, y + 3, 8, 6);
-    g.fillStyle = '#d0d0d0';
-    g.fillRect(x + 41, y + 5, 6, 1);
-    g.fillStyle = '#c0504d';
-    g.fillRect(x + 51, y + 3, 4, 4);
+    if (!item || !this.drawDeskItem(item, x, y, status)) {
+      // the plain desk: papers and a mug
+      g.fillStyle = '#f2f2f2';
+      g.fillRect(x + 40, y + 3, 8, 6);
+      g.fillStyle = '#d0d0d0';
+      g.fillRect(x + 41, y + 5, 6, 1);
+      g.fillStyle = '#c0504d';
+      g.fillRect(x + 51, y + 3, 4, 4);
+    }
     if (local) this.drawLocalBox(x, y, status);
+  }
+
+  /**
+   * One large thing on the right of the desk (x, y = the desk top's corner) that tells whose desk it is.
+   * Deliberately big, plain shapes standing up from the desk: small details do not read at this size.
+   * Returns false for a kind it does not know, and the plain desk is drawn instead.
+   */
+  private drawDeskItem(kind: string, x: number, y: number, status: AgentStatus | null): boolean {
+    const g = this.g;
+    const busy = status != null && status in MONITOR_GLOW;
+    const x0 = x + 39; // clear of the name tag under the employee
+    const box = (c: string, bx: number, by: number, w: number, h: number) => {
+      g.fillStyle = c;
+      g.fillRect(bx, by, w, h);
+    };
+    switch (kind) {
+      case 'books': {
+        // a tall, slightly crooked stack
+        const stack: [string, number, number][] = [['#c0504d', 0, 15], ['#4f81bd', 2, 12], ['#9bbb59', 0, 14], ['#e8c55a', 3, 11], ['#8064a2', 1, 13], ['#d98e5a', 2, 10]];
+        stack.forEach(([c, dx, w], k) => {
+          box(c, x0 + dx, y + 7 - k * 2, w, 2);
+          box('#f4f1ea', x0 + dx + w - 1, y + 7 - k * 2, 1, 2); // the pages
+        });
+        return true;
+      }
+      case 'chart': {
+        // a second screen turned this way, with a bar chart on it
+        box('#30343c', x0, y - 10, 20, 13);
+        box('#eef3f8', x0 + 1, y - 9, 18, 11);
+        box('#30343c', x0 + 8, y + 3, 4, 2);
+        [4, 7, 5, 9].forEach((h, k) => {
+          const hh = Math.max(2, h + (busy ? Math.round(Math.sin(this.t / 18 + k * 1.7) * 2) : 0));
+          box(k === 3 ? '#f08a5d' : '#4f81bd', x0 + 3 + k * 4, y + 1 - hh, 3, hh);
+        });
+        return true;
+      }
+      case 'snacks': {
+        // a cup of instant noodles and two cans
+        box('#fbfbf7', x0, y - 1, 9, 9);
+        box('#d6362f', x0, y + 2, 9, 3);
+        box('#e8c55a', x0 - 1, y - 2, 11, 2);
+        box('#5fae7d', x0 + 11, y + 1, 4, 7);
+        box('#c9d2da', x0 + 11, y, 4, 1);
+        box('#4f81bd', x0 + 16, y + 2, 4, 6);
+        box('#c9d2da', x0 + 16, y + 1, 4, 1);
+        return true;
+      }
+      case 'plant': {
+        // a big cactus in a pot
+        box('#b5653a', x0 + 3, y + 3, 11, 6);
+        box('#8a4a28', x0 + 2, y + 2, 13, 2);
+        box('#4f8a3b', x0 + 6, y - 10, 5, 13);
+        box('#6fae4f', x0 + 7, y - 10, 1, 13);
+        box('#4f8a3b', x0 + 2, y - 5, 4, 2);
+        box('#4f8a3b', x0 + 2, y - 8, 2, 4);
+        box('#4f8a3b', x0 + 11, y - 3, 4, 2);
+        box('#4f8a3b', x0 + 13, y - 7, 2, 5);
+        box('#ff8fb1', x0 + 7, y - 12, 3, 2);
+        return true;
+      }
+      case 'phone': {
+        // a red telephone and a flip calendar; a light blinks on the phone while the assistant waits for an answer
+        box('#c0283c', x0, y + 2, 12, 7);
+        box('#8e1a2e', x0 - 1, y, 14, 3);
+        box('#8e1a2e', x0 - 1, y + 2, 3, 2);
+        box('#8e1a2e', x0 + 10, y + 2, 3, 2);
+        box('#fbfbf7', x0 + 4, y + 5, 4, 3);
+        box('#fbfbf7', x0 + 13, y - 3, 8, 12);
+        box('#c0283c', x0 + 13, y - 3, 8, 3);
+        box('#2e3440', x0 + 15, y + 2, 4, 1);
+        box('#2e3440', x0 + 16, y + 4, 2, 3);
+        if (status === 'waiting_permission' && Math.floor(this.t / 12) % 2) box('#ffe066', x0 + 5, y - 3, 2, 2);
+        return true;
+      }
+      case 'clutter': {
+        // a lot of things, none of them rubbish: a second monitor, headphones, two mugs, a figure, books, notes, a cable
+        box('#30343c', x0, y - 10, 18, 12); // second monitor (back), with its own glow while working
+        box('#30343c', x0 + 7, y + 2, 4, 2);
+        const glow = status ? MONITOR_GLOW[status] : undefined;
+        if (glow) {
+          g.fillStyle = glow;
+          g.globalAlpha = 0.35 + 0.15 * Math.sin(this.t / 6 + 1);
+          g.fillRect(x0 - 2, y - 12, 22, 2);
+          g.globalAlpha = 1;
+        }
+        box('#e8c55a', x + 23, y - 9, 3, 3); // notes stuck on the first monitor
+        box('#ff8fb1', x + 23, y - 5, 3, 3);
+        box('#9fd3f5', x + 4, y - 13, 3, 3);
+        box('#4f81bd', x + 1, y + 4, 4, 5); // a mug by the keyboard
+        box('#fbfbf7', x + 2, y + 4, 2, 1);
+        box('#23262d', x + 26, y + 3, 7, 1); // headphones
+        box('#23262d', x + 26, y + 3, 2, 4);
+        box('#23262d', x + 31, y + 3, 2, 4);
+        box('#f08a5d', x + 34, y + 2, 3, 5); // a little figure
+        box('#f1c27d', x + 34, y, 3, 2);
+        box('#8064a2', x + 38, y + 5, 10, 2); // books lying flat
+        box('#9bbb59', x + 39, y + 7, 9, 2);
+        box('#fbfbf7', x + 54, y + 4, 4, 5); // another mug
+        box('#5a3a22', x + 55, y + 4, 2, 1);
+        box('#23262d', x + 59, y + 6, 1, 13); // a cable off the edge
+        box('#23262d', x + 57, y + 6, 3, 1);
+        return true;
+      }
+      default:
+        return false;
+    }
   }
 
   /** desk of an employee on a local model: a small GPU tower under the desk, LED blinks while working */
@@ -1445,8 +1553,8 @@ export class OfficeScene {
     g.fillRect(s.x - 5, s.y - 14, 10, 2);
   }
 
-  private drawLeadDesk(i: number, status: AgentStatus | null, seat?: Seat) {
-    this.drawDesk(i, status, false, seat);
+  private drawLeadDesk(i: number, status: AgentStatus | null, seat?: Seat, item?: string) {
+    this.drawDesk(i, status, false, seat, item);
     const g = this.g;
     const { x, y } = deskPos(i, seat);
     g.fillStyle = '#b8892e';
@@ -1539,7 +1647,7 @@ export class OfficeScene {
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
     // one desk per (seat, slot): a reserved seat and a grid slot can share a number
-    type Desk = { i: number; seat?: Seat; lead: boolean; local: boolean; status: AgentStatus | null };
+    type Desk = { i: number; seat?: Seat; lead: boolean; local: boolean; status: AgentStatus | null; item?: string };
     const desks = new Map<string, Desk>();
     const key = (i: number, seat?: string) => `${seat ?? ''}#${i}`;
     // only occupied desks are drawn — an office of empty furniture looks abandoned
@@ -1555,6 +1663,7 @@ export class OfficeScene {
         seat: v.seat,
         lead: v.deskStyle === 'lead',
         local: !!v.provider,
+        item: v.deskItem,
         status: seated ? v.status : null,
       });
     }
@@ -1562,8 +1671,8 @@ export class OfficeScene {
       const p = deskPos(d.i, d.seat);
       if (d.lead) {
         items.push({ y: seatSpot(d.i, d.seat).y - 1, draw: () => this.drawLeadChair(d.i, d.seat) }); // behind the seated actor
-        items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(d.i, d.status, d.seat) });
-      } else items.push({ y: p.y + 2, draw: () => this.drawDesk(d.i, d.status, d.local, d.seat) });
+        items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(d.i, d.status, d.seat, d.item) });
+      } else items.push({ y: p.y + 2, draw: () => this.drawDesk(d.i, d.status, d.local, d.seat, d.item) });
     }
     // the corner characters' rug, under everything
     if ([...this.actors.values()].some((a) => a.view.seat === 'corner')) items.push({ y: -1e9, draw: () => this.drawCornerRug() });
