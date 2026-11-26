@@ -156,3 +156,28 @@ export const stackBubbles = (entries: BubbleIn[], canvasWidth: number, gap = 6):
   }
   return out;
 };
+
+// ---- where the desks go ----
+// The room starts as three columns by two rows. More desks widen it first (a fourth, then a fifth column),
+// and only past ten does it gain rows. A desk never moves when the room grows: slot → cell is fixed.
+export const BASE_COLS = 3;
+export const MAX_COLS = 5;
+export const BASE_ROWS = 2;
+/** canvas width of the three-column room, and what each extra column adds */
+export const BASE_W = 400;
+export const COL_W = 110;
+
+/** The grid cell of a desk slot. 0–5 fill the 3×2 room, 6–9 the two extra columns top to bottom, 10+ further rows of five. */
+export const deskCell = (slot: number): { col: number; row: number } => {
+  const s = Math.max(0, Math.floor(slot));
+  const base = BASE_COLS * BASE_ROWS;
+  if (s < base) return { col: s % BASE_COLS, row: Math.floor(s / BASE_COLS) };
+  const wide = MAX_COLS * BASE_ROWS;
+  if (s < wide) return { col: BASE_COLS + Math.floor((s - base) / BASE_ROWS), row: (s - base) % BASE_ROWS };
+  return { col: (s - wide) % MAX_COLS, row: BASE_ROWS + Math.floor((s - wide) / MAX_COLS) };
+};
+/** columns the room needs for the highest slot in use (-1 = no desks) */
+export const colsFor = (maxSlot: number): number => (maxSlot < 0 ? BASE_COLS : Math.max(BASE_COLS, ...Array.from({ length: Math.floor(maxSlot) + 1 }, (_, i) => deskCell(i).col + 1)));
+/** rows the room needs for the highest slot in use */
+export const rowsFor = (maxSlot: number): number => (maxSlot < 0 ? BASE_ROWS : Math.max(BASE_ROWS, deskCell(maxSlot).row + 1));
+export const widthFor = (cols: number): number => BASE_W + (Math.max(BASE_COLS, cols) - BASE_COLS) * COL_W;

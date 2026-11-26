@@ -277,3 +277,35 @@ describe('game lines', () => {
     expect([1, 9, 11, 49, 99, 101].map((n) => lines.bagMilestone(n))).toEqual([null, null, null, null, null, null]);
   });
 });
+
+describe('where the desks go', async () => {
+  const { deskCell, colsFor, rowsFor, widthFor, BASE_W, COL_W } = await import('../../web/src/game/rules.ts');
+
+  it('leaves the first six desks exactly where they were', () => {
+    // the three-column room: slot i sat at column i % 3, row floor(i / 3)
+    for (let i = 0; i < 6; i++) expect(deskCell(i)).toEqual({ col: i % 3, row: Math.floor(i / 3) });
+  });
+
+  it('widens the room before it lengthens it, one column of two desks at a time', () => {
+    expect([6, 7, 8, 9].map(deskCell)).toEqual([{ col: 3, row: 0 }, { col: 3, row: 1 }, { col: 4, row: 0 }, { col: 4, row: 1 }]);
+    expect([-1, 0, 5, 6, 7, 8, 9, 10, 14, 15].map(colsFor)).toEqual([3, 3, 3, 4, 4, 5, 5, 5, 5, 5]);
+    expect([-1, 5, 6, 9, 10, 14, 15].map(rowsFor)).toEqual([2, 2, 2, 2, 3, 3, 4]);
+    expect([10, 11, 14, 15].map(deskCell)).toEqual([{ col: 0, row: 2 }, { col: 1, row: 2 }, { col: 4, row: 2 }, { col: 0, row: 3 }]);
+  });
+
+  it('never puts two desks in one place, and never moves a desk when another is added', () => {
+    const cells = Array.from({ length: 30 }, (_, i) => deskCell(i));
+    expect(new Set(cells.map((c) => `${c.col},${c.row}`)).size).toBe(30);
+    // every cell fits in the room sized for the highest slot in use
+    for (let max = 0; max < 30; max++) for (let i = 0; i <= max; i++) {
+      expect(cells[i].col).toBeLessThan(colsFor(max));
+      expect(cells[i].row).toBeLessThan(rowsFor(max));
+    }
+  });
+
+  it('is 400 wide with three columns and one column wider each time', () => {
+    expect([3, 4, 5].map(widthFor)).toEqual([BASE_W, BASE_W + COL_W, BASE_W + 2 * COL_W]);
+    expect(widthFor(colsFor(5))).toBe(400);
+    expect(widthFor(1)).toBe(400); // never narrower than the starting room
+  });
+});

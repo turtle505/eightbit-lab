@@ -1415,8 +1415,10 @@ describe('office seating', async () => {
   it('the room keeps its original size until the grid needs a third row', () => {
     expect(rowsFor(-1)).toBe(2); // nobody in the grid
     expect(rowsFor(5)).toBe(2); // 3 columns × 2 rows = slots 0..5
-    expect(rowsFor(6)).toBe(3);
-    expect(rowsFor(11)).toBe(4);
+    expect(rowsFor(6)).toBe(2); // the seventh desk widens the room instead (see game.test.ts)
+    expect(rowsFor(9)).toBe(2); // five columns × two rows
+    expect(rowsFor(10)).toBe(3); // only then does it grow downward
+    expect(rowsFor(15)).toBe(4);
     // the bottom strip (manager, reception, lead) needs its own band below the last row,
     // or the reception desk clips the row above it
     expect(heightFor(2)).toBe(256);

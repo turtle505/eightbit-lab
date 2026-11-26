@@ -9,26 +9,29 @@ import {
   reachOf, stackBubbles, throwDistAt, tiredStage, wateredPlant, MAX_THROW,
 } from './rules.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
+import { BASE_COLS, BASE_ROWS, BASE_W, COL_W, colsFor, deskCell, rowsFor, widthFor } from './rules.ts';
 import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, MANAGER_HEAD, managerSprite, type ManagerPose, paintMap, professorSprite, type Pose } from './sprites.ts';
 
-export const W = 400;
+/** current canvas width; grows by a column at a time as desks are added (see OfficeScene.layout) */
+export let W = BASE_W;
 const WALL_H = 36;
 
-// The office is a grid of desks that grows downward, with a fixed strip at the bottom for the
-// manager and the two reserved seats. Height follows the number of grid rows in use.
-const COLS = 3;
-const COL_X = [24, 134, 244];
+// The office is a grid of desks: three columns by two rows to start with, widening to four and five
+// columns as desks are added and only then gaining rows (rules.ts deskCell). A fixed strip at the bottom
+// holds the manager and the two reserved seats. Things on the right wall follow it out (rx).
+const colX = (col: number) => 24 + col * COL_W;
+/** x of something that hugs the right wall, given where it sits in the three-column room */
+const rx = (x: number) => x + (W - BASE_W);
 const GRID_TOP = 92;
 const ROW_H = 72;
-const MIN_ROWS = 2;
+const MIN_ROWS = BASE_ROWS;
 /**
  * Canvas height for a given number of grid rows. The bottom strip (manager desk, reception, lead)
  * needs room of its own below the last row, or the reception desk lands on top of it.
  */
 const BOTTOM_H = 20;
 export const heightFor = (rows: number) => GRID_TOP + Math.max(MIN_ROWS, rows) * ROW_H + BOTTOM_H;
-/** rows needed to seat the highest grid slot in use */
-export const rowsFor = (maxSlot: number) => Math.max(MIN_ROWS, Math.floor(Math.max(0, maxSlot) / COLS) + 1);
+export { rowsFor };
 /** current canvas height; grows as desks are added (see OfficeScene.layout) */
 export let H = heightFor(MIN_ROWS);
 /**
@@ -101,7 +104,7 @@ const tallOf = (v: { seat?: Seat; sprite?: { look?: string } }): number => (v.se
 const isChat = (v: { seat?: Seat }) => v.seat === 'corner' || v.seat === 'podium';
 const standSpot = (i: number, seat: Seat): Spot => (seat === 'podium' ? { x: PROF.x, y: PROF.y } : cornerSpot(i));
 const deskPos = (i: number, seat?: Seat) =>
-  seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : seat ? seatPos(seat) : { x: COL_X[i % COLS], y: GRID_TOP + Math.floor(i / COLS) * ROW_H };
+  seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : seat ? seatPos(seat) : { x: colX(deskCell(i).col), y: GRID_TOP + deskCell(i).row * ROW_H };
 const seatSpot = (i: number, seat?: Seat): Spot =>
   seat === 'corner' || seat === 'podium' ? standSpot(i, seat) : { x: deskPos(i, seat).x + 30, y: deskPos(i, seat).y + 2 };
 const besideSpot = (i: number, seat?: Seat): Spot =>
@@ -145,7 +148,8 @@ const bumpDayCount = (key: string): number => {
   return next.n;
 };
 type PlantSide = 'left' | 'right';
-const PLANT_X: Record<PlantSide, number> = { left: 6, right: 372 };
+/** the right plant stands by the right wall, wherever that is */
+const plantX = (side: PlantSide): number => (side === 'left' ? 6 : rx(372));
 const plantStage = (side: PlantSide): PlantStage => plantStageOf(parsePlant(stored(`office-plant-${side}`)), dayNumber());
 const waterPlant = (side: PlantSide) => {
   const next = wateredPlant(parsePlant(stored(`office-plant-${side}`)), dayNumber());
@@ -177,7 +181,11 @@ const banterGap = (): number => {
 };
 
 // lounge spots along the top wall, spaced so bubbles don't collide; it wraps to a second line
-const coffeeSpot = (i: number): Spot => ({ x: 62 + (i % 7) * 46, y: 68 + Math.floor(i / 7) * 10 });
+/** where an idle employee stands by the coffee corner: seven to a row in the starting room, more as it widens */
+const coffeeSpot = (i: number): Spot => {
+  const perRow = Math.max(7, Math.floor((W - 78) / 46));
+  return { x: 62 + (i % perRow) * 46, y: 68 + Math.floor(i / perRow) * 10 };
+};
 
 const MONITOR_GLOW: Partial<Record<AgentStatus, string>> = {
   typing: '#7fb2ff',
@@ -206,6 +214,7 @@ export class OfficeScene {
   private floor: HTMLCanvasElement;
   /** grid rows currently drawn; grows as desks are handed out */
   private rows = MIN_ROWS;
+  private cols = BASE_COLS;
   private figureTags = new Map<SceneFigure, HTMLDivElement>();
   private boardText = '';
   /** the manager's line to a corner character, shown over the manager's head */
@@ -428,12 +437,16 @@ export class OfficeScene {
 
   private resize() {
     const r = this.host.getBoundingClientRect();
-    const s = Math.min(r.width / W, (window.innerHeight * 0.62) / H);
+    // the scale is that of the starting room (three columns, two rows) and never changes with the number of
+    // desks: a wider room scrolls sideways inside its frame, a taller one pushes the page down
+    const s = Math.min(r.width / BASE_W, (window.innerHeight * 0.62) / heightFor(MIN_ROWS));
     this.scale = s >= 1 ? Math.floor(s * 4) / 4 : s;
     this.canvas.style.width = `${W * this.scale}px`;
     this.canvas.style.height = `${H * this.scale}px`;
     this.overlay.style.width = this.canvas.style.width;
     this.overlay.style.height = this.canvas.style.height;
+    // the bubble layer sits exactly over the canvas, also when the room is wider than its frame and scrolled
+    this.overlay.style.left = `${this.canvas.offsetLeft}px`;
   }
 
   private get angry() {
@@ -493,10 +506,10 @@ export class OfficeScene {
       }
       return true;
     }
-    if (inside(366, 44, 394, 98)) {
+    if (inside(rx(366), 44, rx(394), 98)) {
       this.prank();
       this.lastBook = this.pickNew(bookTitles(), this.lastBook);
-      this.caption = { x: 380, y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
+      this.caption = { x: rx(380), y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
       return true;
     }
     return false;
@@ -515,7 +528,7 @@ export class OfficeScene {
     return { x: 236, y: H - 14 };
   }
   private get bag(): Spot {
-    return { x: 306, y: H - 12 };
+    return { x: rx(306), y: H - 12 }; // bottom-right corner
   }
   /** how far the marker travels before turning back: a little past the pointer */
   private reach(): number {
@@ -660,21 +673,21 @@ export class OfficeScene {
     // things
     const b = this.bag;
     // the clock is small and far away: anything within 8 px of it counts
-    if (inside(344, 2, 376, 34)) this.clockSpinFrom = this.t;
+    if (inside(rx(344), 2, rx(376), 34)) this.clockSpinFrom = this.t;
     else if (inside(236, 6, 276, 30)) this.pokePoster();
-    else if (inside(366, 44, 394, 98)) {
+    else if (inside(rx(366), 44, rx(394), 98)) {
       this.lastBook = this.pickNew(bookTitles(), this.lastBook);
-      this.caption = { x: 380, y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
+      this.caption = { x: rx(380), y: 43, text: `📖 ${this.lastBook}`, until: this.t + 300 };
       const colors = ['#c0504d', '#4f81bd', '#9bbb59', '#e8c55a', '#8064a2'];
-      this.fallenBooks.push({ x: 368 + Math.round(Math.random() * 18), y: 104 + Math.round(Math.random() * 4), color: colors[Math.floor(Math.random() * colors.length)], until: this.t + 1800 });
+      this.fallenBooks.push({ x: rx(368) + Math.round(Math.random() * 18), y: 104 + Math.round(Math.random() * 4), color: colors[Math.floor(Math.random() * colors.length)], until: this.t + 1800 });
     } else if (inside(6, 30, 46, 58)) this.spills.push({ x: 14 + Math.round(Math.random() * 16), y: 63, until: this.t + 1800 });
     else if (inside(b.x - 9, b.y - 30, b.x + 4, b.y - 8)) {
       this.bagHitAt = this.t;
       this.bagDir = f.x1 >= f.x0 ? 1 : -1; // pushed the way the ball was going
     } else
       for (const side of ['left', 'right'] as PlantSide[])
-        if (inside(PLANT_X[side] - 2, H - 26, PLANT_X[side] + 10, H - 10))
-          for (let k = 0; k < 5; k++) this.leaves.push({ x: PLANT_X[side] + 1 + k * 1.5, y: H - 20, from: this.t + k * 3, drift: Math.random() * 2 - 1 });
+        if (inside(plantX(side) - 2, H - 26, plantX(side) + 10, H - 10))
+          for (let k = 0; k < 5; k++) this.leaves.push({ x: plantX(side) + 1 + k * 1.5, y: H - 20, from: this.t + k * 3, drift: Math.random() * 2 - 1 });
     drop(x, y);
   }
 
@@ -1030,7 +1043,7 @@ export class OfficeScene {
     const r = this.canvas.getBoundingClientRect();
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
-    for (const side of ['left', 'right'] as PlantSide[]) if (x >= PLANT_X[side] - 2 && x <= PLANT_X[side] + 10 && y >= H - 26 && y <= H - 10) return side;
+    for (const side of ['left', 'right'] as PlantSide[]) if (x >= plantX(side) - 2 && x <= plantX(side) + 10 && y >= H - 26 && y <= H - 10) return side;
     return null;
   }
 
@@ -1078,13 +1091,28 @@ export class OfficeScene {
   private layout() {
     const maxSlot = Math.max(-1, ...[...this.actors.values()].filter((a) => !a.view.seat).map((a) => a.view.desk));
     const rows = rowsFor(maxSlot);
-    if (rows === this.rows) return;
+    const cols = colsFor(maxSlot);
+    if (rows === this.rows && cols === this.cols) return;
     this.rows = rows;
+    this.cols = cols;
     H = heightFor(rows);
-    PROF = { x: 346, y: H - 86 };
+    W = widthFor(cols);
+    PROF = { x: rx(346), y: H - 86 };
+    this.canvas.width = W;
     this.canvas.height = H;
     this.floor = this.paintStatic();
     this.resize();
+  }
+
+  /** Scroll the room sideways so a character who was just picked is in view (only matters once the room is wider than its frame). */
+  private reveal(a: Actor | undefined) {
+    if (!a || this.host.scrollWidth <= this.host.clientWidth) return;
+    // a chat character may still be walking to its spot by the (just moved) right wall: aim for where it will stand
+    const ax = isChat(a.view) ? Math.max(a.x, standSpot(a.view.desk, a.view.seat!).x) : a.x;
+    const x = this.canvas.offsetLeft + ax * this.scale;
+    const pad = 60 * this.scale;
+    if (x - pad < this.host.scrollLeft) this.host.scrollLeft = Math.max(0, x - pad);
+    else if (x + pad > this.host.scrollLeft + this.host.clientWidth) this.host.scrollLeft = x + pad - this.host.clientWidth;
   }
 
   /** Take an actor out of the office (a project session closing, or a role removed). */
@@ -1098,7 +1126,11 @@ export class OfficeScene {
   }
 
   upsert(v: EmployeeView) {
-    if (v.desk < 0) return; // a session that has not been given a desk lives in the projects tab only
+    if (v.desk < 0) {
+      // a session without a desk lives in the projects tab only; one that just gave its desk back leaves the room
+      this.remove(v.id);
+      return;
+    }
     let a = this.actors.get(v.id);
     if (!a) {
       const start = isChat(v) || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
@@ -1118,7 +1150,10 @@ export class OfficeScene {
     if (!isChat(v) && !this.quips.has(v.id)) a.bubble.textContent = v.status === 'idle' ? '☕' : v.activity;
     a.bubble.title = v.activity;
     a.bubble.dataset.status = v.status;
-    a.tag.textContent = v.name.replace(/^.*"(.*)".*$/, '$1');
+    // a project session is "<project> · <session>": the tag shows the session (its shirt colour says which project),
+    // the full name is in the tooltip, so a row of sessions does not bury each other's tags
+    a.tag.textContent = v.kind === 'project' ? (v.name.split('·').pop() ?? v.name).trim() : v.name.replace(/^.*"(.*)".*$/, '$1');
+    a.tag.title = v.kind === 'project' ? v.name : '';
   }
 
   /** A corner character's reply (an assistant log line): shown over their head, typed out. */
@@ -1144,6 +1179,7 @@ export class OfficeScene {
   /** Advance the typewriter and write each corner character's bubble (and the manager's line). */
   private renderSpeech() {
     // walking up to a chat character gets a fresh greeting; walking away drops it
+    if (this.selected !== this.greetedSel) this.reveal(this.selected ? this.actors.get(this.selected) : undefined);
     if (this.selected !== this.greetedSel) {
       const prev = this.greetedSel ? this.actors.get(this.greetedSel) : null;
       if (prev?.speech?.greet) prev.speech = null;
@@ -1259,37 +1295,41 @@ export class OfficeScene {
     g.fillRect(0, WALL_H - 4, W, 4);
     g.fillStyle = 'rgba(0,0,0,0.10)'; // shadow the wall casts on the floor
     g.fillRect(0, WALL_H, W, 3);
-    // window
-    g.fillStyle = '#6b5a45';
-    g.fillRect(14, 5, 44, 24);
-    if (this.phase === 'day') {
-      g.fillStyle = '#9fd3f5';
-      g.fillRect(16, 7, 40, 20);
-      g.fillStyle = '#ffffff';
-      g.fillRect(22, 11, 8, 3);
-      g.fillRect(36, 16, 10, 3);
-    } else if (this.phase === 'dusk') {
-      // sunset: orange at the horizon up to purple, a low sun
-      ['#5b4a8a', '#8a5a9a', '#c9668a', '#f08a5d', '#f7b267'].forEach((c, i) => {
-        g.fillStyle = c;
-        g.fillRect(16, 7 + i * 4, 40, 4);
-      });
-      g.fillStyle = '#ffe9a8';
-      g.fillRect(24, 20, 6, 4);
-      g.fillRect(25, 19, 4, 1);
-    } else {
-      // night: dark sky, a moon and a few stars
-      g.fillStyle = '#1b2440';
-      g.fillRect(16, 7, 40, 20);
-      g.fillStyle = '#f4f1d0';
-      g.fillRect(43, 10, 5, 5);
-      g.fillStyle = '#1b2440';
-      g.fillRect(45, 10, 3, 3); // bite out of the moon → a crescent
-      g.fillStyle = '#e8ecff';
-      for (const [sx, sy] of [[20, 10], [27, 16], [31, 9], [38, 21], [50, 22], [22, 22]]) g.fillRect(sx, sy, 1, 1);
-    }
-    g.fillStyle = '#6b5a45';
-    g.fillRect(35, 7, 2, 20);
+    // windows: the one by the coffee corner, and one more on the wall of each added column
+    const window = (wx: number) => {
+      g.fillStyle = '#6b5a45';
+      g.fillRect(wx, 5, 44, 24);
+      if (this.phase === 'day') {
+        g.fillStyle = '#9fd3f5';
+        g.fillRect(wx + 2, 7, 40, 20);
+        g.fillStyle = '#ffffff';
+        g.fillRect(wx + 8, 11, 8, 3);
+        g.fillRect(wx + 22, 16, 10, 3);
+      } else if (this.phase === 'dusk') {
+        // sunset: orange at the horizon up to purple, a low sun
+        ['#5b4a8a', '#8a5a9a', '#c9668a', '#f08a5d', '#f7b267'].forEach((c, i) => {
+          g.fillStyle = c;
+          g.fillRect(wx + 2, 7 + i * 4, 40, 4);
+        });
+        g.fillStyle = '#ffe9a8';
+        g.fillRect(wx + 10, 20, 6, 4);
+        g.fillRect(wx + 11, 19, 4, 1);
+      } else {
+        // night: dark sky, a moon and a few stars
+        g.fillStyle = '#1b2440';
+        g.fillRect(wx + 2, 7, 40, 20);
+        g.fillStyle = '#f4f1d0';
+        g.fillRect(wx + 29, 10, 5, 5);
+        g.fillStyle = '#1b2440';
+        g.fillRect(wx + 31, 10, 3, 3); // bite out of the moon → a crescent
+        g.fillStyle = '#e8ecff';
+        for (const [sx, sy] of [[20, 10], [27, 16], [31, 9], [38, 21], [50, 22], [22, 22]]) g.fillRect(wx + sx - 14, sy, 1, 1);
+      }
+      g.fillStyle = '#6b5a45';
+      g.fillRect(wx + 21, 7, 2, 20);
+    };
+    window(14);
+    for (let c = BASE_COLS; c < this.cols; c++) window(colX(c) + 8);
     // whiteboard frame (task counts drawn dynamically)
     g.fillStyle = '#8c8c8c';
     g.fillRect(104, 4, 112, 28);
@@ -1306,7 +1346,7 @@ export class OfficeScene {
     g.fillStyle = '#d8dee9';
     g.fillRect(239, 27, 34, 1);
     // ceiling lights: a pool of warm light under each one
-    for (const lx of COL_X.map((x) => x + 30)) {
+    for (const lx of Array.from({ length: this.cols }, (_, c) => colX(c) + 30)) {
       g.fillStyle = '#6e6456';
       g.fillRect(lx - 1, 0, 2, 5);
       g.fillStyle = '#d9cfa8';
@@ -1321,25 +1361,25 @@ export class OfficeScene {
     }
     // bookshelf against the right wall, where the server room used to be
     g.fillStyle = '#6b4a2f';
-    g.fillRect(366, 44, 28, 54);
+    g.fillRect(rx(366), 44, 28, 54);
     g.fillStyle = '#50371f';
-    g.fillRect(366, 44, 28, 2);
+    g.fillRect(rx(366), 44, 28, 2);
     for (let r = 0; r < 3; r++) {
       const sy = 48 + r * 17;
       g.fillStyle = '#3f2c19';
-      g.fillRect(367, sy + 14, 26, 2);
+      g.fillRect(rx(367), sy + 14, 26, 2);
       const books = ['#c0504d', '#4f81bd', '#9bbb59', '#e8c55a', '#8064a2'];
       for (let b = 0; b < 6; b++) {
         g.fillStyle = books[(r * 6 + b) % books.length];
         const bh = 10 + ((r + b) % 3);
-        g.fillRect(368 + b * 4, sy + 14 - bh, 3, bh);
+        g.fillRect(rx(368) + b * 4, sy + 14 - bh, 3, bh);
       }
     }
     // clock on the far right of the wall
     g.fillStyle = '#6e6456';
-    g.fillRect(352, 10, 16, 16);
+    g.fillRect(rx(352), 10, 16, 16);
     g.fillStyle = '#fbfbf7';
-    g.fillRect(353, 11, 14, 14);
+    g.fillRect(rx(353), 11, 14, 14);
     // (the hands are drawn per frame in drawClock, at the real time)
     // counter + coffee machine
     g.fillStyle = '#7a5537';
@@ -1366,8 +1406,8 @@ export class OfficeScene {
     // rug under the desk grid, with a border — follows the row count
     const rugY = GRID_TOP - 14;
     const rugH = this.rows * ROW_H - 10;
-    const rugX = COL_X[0] - 14;
-    const rugW = COL_X[2] + 60 + 14 - rugX;
+    const rugX = colX(0) - 14;
+    const rugW = colX(this.cols - 1) + 60 + 14 - rugX;
     g.fillStyle = 'rgba(70,100,130,0.16)';
     g.fillRect(rugX, rugY, rugW, rugH);
     g.fillStyle = 'rgba(70,100,130,0.22)';
@@ -1381,7 +1421,7 @@ export class OfficeScene {
       g.fillRect(0, WALL_H, W, H - WALL_H);
       g.fillStyle = this.phase === 'dusk' ? 'rgba(60,30,60,0.08)' : 'rgba(14,18,48,0.18)';
       g.fillRect(0, 0, W, WALL_H);
-      for (const lx of COL_X.map((x) => x + 30)) {
+      for (const lx of Array.from({ length: this.cols }, (_, c) => colX(c) + 30)) {
         const grad = g.createRadialGradient(lx, WALL_H, 4, lx, WALL_H, 80);
         grad.addColorStop(0, this.phase === 'dusk' ? 'rgba(255,236,190,0.16)' : 'rgba(255,236,190,0.30)');
         grad.addColorStop(1, 'rgba(255,236,190,0)');
@@ -1662,7 +1702,7 @@ export class OfficeScene {
     const { h, m } = clockNow();
     const hand = (turn: number, len: number) => {
       const a = turn * Math.PI * 2;
-      for (let k = 0; k <= len; k++) g.fillRect(Math.round(359.5 + Math.sin(a) * k - 0.5), Math.round(17.5 - Math.cos(a) * k - 0.5), 1, 1);
+      for (let k = 0; k <= len; k++) g.fillRect(Math.round(rx(359.5) + Math.sin(a) * k - 0.5), Math.round(17.5 - Math.cos(a) * k - 0.5), 1, 1);
     };
     g.fillStyle = '#2e3440';
     // hit by a ball of paper, the hands whirl round once before settling back on the time
@@ -1675,7 +1715,7 @@ export class OfficeScene {
   private drawPlant(side: PlantSide) {
     const g = this.g;
     const rows = PLANT_STAGES[this.plants[side]];
-    const x = PLANT_X[side];
+    const x = plantX(side);
     paintMap(g, rows, PLANT_COLORS, x, H - 12 - rows.length);
     if (this.drip?.side === side && this.drip.until > this.t) {
       const k = 45 - (this.drip.until - this.t);
