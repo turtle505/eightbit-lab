@@ -1,5 +1,5 @@
 import { tr } from '../../shared/i18n.ts';
-import type { ProjectView } from '../../shared/protocol.ts';
+import type { EmployeeView, ProjectView } from '../../shared/protocol.ts';
 import type { AgentManager } from './agents/manager.ts';
 import { bus } from './bus.ts';
 import type { RoleConfig } from './config.ts';
@@ -93,12 +93,28 @@ export class ProjectRegistry {
     };
   }
 
-  /** Re-create the workers for every open session (called once at startup). */
-  restore() {
+  /** sessions whose host is not in the config any more: warned about once, not on every pass */
+  private warned = new Set<string>();
+
+  /**
+   * Bring back the workers of the open sessions whose host is ready (its home folder is known), and
+   * tell the browsers when any came back. Safe to call again: sessions that already have a worker are
+   * skipped. It runs at startup and each time a host turns reachable, so a session on a server that
+   * answers late shows up when it does instead of staying lost until the next restart.
+   */
+  restore(): number {
+    let added = 0;
     for (const s of this.store.listProjectSessions()) {
+      if (this.agents.has(s.id)) continue;
+      const p = this.store.getProject(s.projectId);
+      const host = p ? this.hosts.get(p.hostId) : undefined;
+      if (host && !host.view.ok) continue; // its turn comes when the host answers
       try {
         this.agents.addWorker(this.roleFor(s.projectId, s.id, s.label, s.desk));
+        added++;
       } catch (e) {
+        if (this.warned.has(s.id)) continue;
+        this.warned.add(s.id);
         console.warn(
           tr({
             ko: `⚠️ 프로젝트 세션 ${s.id} 복구 실패: ${(e as Error).message}`,
@@ -107,6 +123,36 @@ export class ProjectRegistry {
         );
       }
     }
+    if (added) this.send();
+    return added;
+  }
+
+  /** Is this an open session that has no worker yet (its host has not answered)? */
+  isWaiting(id: string): boolean {
+    return !this.agents.has(id) && this.store.listProjectSessions().some((s) => s.id === id);
+  }
+
+  /** What a session looks like before its host has answered: there, but not startable yet. */
+  private waitingView(p: { id: string; hostId: string; name: string; dir: string }, s: { id: string; label: string }): EmployeeView {
+    return {
+      id: s.id,
+      engine: 'claude',
+      turnEngine: null,
+      name: `${p.name} · ${s.label}`,
+      title: p.dir,
+      desk: -1, // not drawn in the office until it is really there
+      sprite: sessionSprite(p.id, s.id),
+      status: 'idle',
+      activity: tr({ ko: '⏳ 서버 연결을 기다리는 중', en: '⏳ Waiting for the server' }),
+      taskId: null,
+      sessionId: null,
+      cwd: '',
+      costUsd: 0,
+      permission: 'auto',
+      live: false,
+      hostId: p.hostId,
+      kind: 'project',
+    };
   }
 
   views(): ProjectView[] {
@@ -116,10 +162,8 @@ export class ProjectRegistry {
       hostId: p.hostId,
       name: p.name,
       dir: p.dir,
-      sessions: this.store
-        .listProjectSessions(p.id)
-        .map((s) => byId.get(s.id))
-        .filter((v): v is NonNullable<typeof v> => !!v),
+      // a session whose worker is not back yet is still listed, so it never looks as if it had vanished
+      sessions: this.store.listProjectSessions(p.id).map((s) => byId.get(s.id) ?? this.waitingView(p, s)),
     }));
   }
 

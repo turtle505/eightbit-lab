@@ -1335,6 +1335,70 @@ describe('project sessions', async () => {
     expect(s.getProject(p.id)?.archivedAt).toBeTruthy(); // but the row is kept
   });
 
+  it('brings sessions back as their hosts answer, tells the browsers, and lists the waiting ones meanwhile', async () => {
+    const { ProjectRegistry } = await import('../src/projects.ts');
+    const { HostRegistry } = await import('../src/hosts.ts');
+    const { AgentManager } = await import('../src/agents/manager.ts');
+    const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+    const { bus } = await import('../src/bus.ts');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const store = new Store(':memory:');
+    const here = store.createProject('here', 'alpha', 'alpha');
+    const far = store.createProject('far', 'beta', 'beta');
+    const gone = store.createProject('removed-host', 'gamma', 'gamma');
+    const a1 = store.addProjectSession(here.id, 'one');
+    const b1 = store.addProjectSession(far.id, 'two');
+    const g1 = store.addProjectSession(gone.id);
+    const cfg: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: mkdtempSync(`${tmpdir()}/office-restore-`), reportDirs: [], obsidian: null, providers: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787 };
+    const agents = new AgentManager(cfg, [], store, new Broker(), { list: () => [] } as any);
+    const hosts = new HostRegistry([{ id: 'here', name: 'here', ssh: 'local', projectRoot: '/work' }, { id: 'far', name: 'far', ssh: 'far-alias', projectRoot: '~/project' }] as any);
+    const reg = new ProjectRegistry(store, agents, hosts);
+    const sent: number[] = [];
+    const onMsg = (m: any) => m.t === 'projects' && sent.push(m.data.flatMap((p: any) => p.sessions).filter((x: any) => x.live !== undefined && x.cwd).length);
+    bus.on('msg', onMsg);
+    const warn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (t: string) => void warnings.push(t);
+    try {
+      // right after start: no host has answered yet. A browser connecting now must still see the sessions
+      expect(reg.restore()).toBe(0);
+      expect(sent).toEqual([]);
+      const early = reg.views();
+      expect(early.find((p) => p.id === here.id)!.sessions).toMatchObject([{ id: a1.id, name: 'alpha · one', desk: -1, live: false, kind: 'project', hostId: 'here' }]);
+      expect(early.find((p) => p.id === here.id)!.sessions[0].activity).toMatch(/Waiting for the server|서버 연결을 기다리는 중/);
+      expect(reg.isWaiting(a1.id)).toBe(true);
+      expect(agents.has(a1.id)).toBe(false);
+      expect(warnings.filter((w) => w.includes(g1.id))).toHaveLength(1); // its host is not in the config: said once
+
+      // the local machine answers first
+      hosts.get('here')!.view.ok = true;
+      expect(reg.restore()).toBe(1);
+      expect(sent).toHaveLength(1); // the browsers are told, without anyone pressing anything
+      expect(agents.has(a1.id)).toBe(true);
+      expect(reg.isWaiting(a1.id)).toBe(false);
+      expect(agents.has(b1.id)).toBe(false); // the remote one is still waiting
+      expect(reg.views().find((p) => p.id === far.id)!.sessions[0]).toMatchObject({ id: b1.id, live: false });
+
+      // nothing new: nothing is sent, nothing is doubled
+      expect(reg.restore()).toBe(0);
+      expect(sent).toHaveLength(1);
+
+      // the server answers late (after any fixed wait would have given up)
+      (hosts.get('far') as any).home = '/home/me';
+      hosts.get('far')!.view.ok = true;
+      expect(reg.restore()).toBe(1);
+      expect(sent).toHaveLength(2);
+      expect(agents.views().find((v) => v.id === b1.id)).toMatchObject({ name: 'beta · two', hostId: 'far', kind: 'project' });
+      expect(agents.views().filter((v) => v.kind === 'project')).toHaveLength(2);
+      expect(warnings.filter((w) => w.includes(g1.id))).toHaveLength(1); // still said only once
+      expect(reg.isWaiting('p:nope:9')).toBe(false); // not a session at all
+    } finally {
+      bus.off('msg', onMsg);
+      console.warn = warn;
+    }
+  });
+
   it('keeps projects on different hosts apart', () => {
     const s = new Store(':memory:');
     const a = s.createProject('desktop', 'same-name', 'proj');

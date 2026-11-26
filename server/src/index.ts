@@ -391,6 +391,10 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       bus.send({ t: 'taskDeleted', id: msg.taskId });
       break;
     case 'instruct': {
+      if (projects.isWaiting(msg.employeeId)) {
+        reply({ t: 'notice', level: 'warn', text: tr({ ko: '이 세션의 서버에 아직 연결되지 않았습니다. 서버 줄의 ↻로 확인한 뒤 다시 보내세요.', en: 'This session\'s server is not connected yet. Check it with ↻ on the server line, then send again.' }) });
+        break;
+      }
       const rows = attachments.rows(msg.attachmentIds ?? []);
       if (!msg.text.trim() && !rows.length) break;
       store.markAttachmentsUsed(rows.map((r) => r.id));
@@ -727,8 +731,11 @@ http.listen(office.port, '127.0.0.1', () => {
   codexUsage.start();
   providers.start();
   hosts.start();
-  // sessions are restored once the hosts have answered, so their home dirs are known
-  setTimeout(() => projects.restore(), 4_000);
+  // project sessions come back as their hosts answer (a host's home folder is needed to place them)
+  projects.restore();
+  bus.on('msg', (m: ServerMsg) => {
+    if (m.t === 'host' && m.data.ok) projects.restore();
+  });
   setInterval(pollReports, 5_000);
   setInterval(pollTodos, 3_000);
   attachments.cleanup();
