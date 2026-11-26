@@ -116,6 +116,7 @@ Once the tutorial is cleared, this is the full list of controls.
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |
 | Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Alan summarise the new papers"* |
+| Start a task when another finishes | In the task form, pick the earlier task under **⛓ Start right away** (and an assignee). The card waits, then starts by itself with the earlier task's result in its instructions. **▶ Start now** on the card skips the wait. The team lead can do the same when handing out work |
 | Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
 | Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
 | Switch language | The **EN / 한국어** button at the top right |

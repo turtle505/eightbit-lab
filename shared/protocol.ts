@@ -128,6 +128,11 @@ export interface Task {
   startAt: number | null;
   /** run this task on this engine instead of the assignee's default (set by the lead/secretary); null = default */
   engine: Engine | null;
+  /**
+   * id of the task this one follows: it waits in 'todo' with its assignee until that task reaches review or done,
+   * then starts with that task's result in its instructions; null = does not follow anything
+   */
+  afterTask: number | null;
   attachments: AttachmentView[];
   createdAt: number;
   updatedAt: number;
@@ -384,7 +389,7 @@ export type ServerMsg =
 
 // client -> server
 export type ClientMsg =
-  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[]; startAt?: number | null }
+  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[]; startAt?: number | null; afterTask?: number | null }
   /** whether this tab is in front (phone notifications are held back while someone is watching) */
   | { t: 'presence'; visible: boolean }
   | { t: 'assignTask'; taskId: number; employeeId: string }

@@ -51,6 +51,7 @@
               <label class="lock-opt" data-i18n-title="lock.title" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="task-lock" /> <span data-i18n="lock.short">🔒 승인</span></label>
               <button class="primary" type="submit" data-i18n="add">추가</button>
             </div>
+            <select id="task-after" class="after-select"></select>
             <div id="task-when-box" class="when-box" hidden></div>
             <div id="task-chips" class="att-chips" hidden></div>
           </form>
@@ -77,6 +78,7 @@
               <input id="c-task-title" data-i18n-placeholder="task.title" placeholder="새 작업 제목" autocomplete="off" />
               <input id="c-task-detail" data-i18n-placeholder="task.detail" placeholder="세부 지시 (선택)" autocomplete="off" />
               <select id="c-task-assignee"></select>
+              <select id="c-task-after" class="after-select"></select>
               <button type="button" id="c-task-attach" class="attach-btn" data-i18n="attach" data-i18n-title="attach.line" title="파일 첨부 (입력줄에 끌어다 놓아도 됨)">첨부</button>
               <button type="button" id="c-task-when" class="when-btn" data-i18n="when.short" data-i18n-title="when.title" title="예약: 정한 시각에 담당 직원이 시작">예약</button>
               <label class="lock-opt" data-i18n-title="lock.title" title="🔒 승인 받기: 담당 직원이 자동 모드여도 이 작업에서는 화이트리스트 밖 도구마다 매니저 승인을 받음"><input type="checkbox" id="c-task-lock" /> <span data-i18n="lock.long">승인 받기</span></label>

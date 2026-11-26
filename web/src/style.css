@@ -1711,3 +1711,13 @@ body .md-body h4 {
   max-height: 40vh;
   overflow: auto;
 }
+
+/* "start after another task" picker in the new-task forms */
+.after-select {
+  max-width: 100%;
+  font-size: 12px;
+}
+.task-form .after-select {
+  width: 100%;
+  margin-top: 6px;
+}

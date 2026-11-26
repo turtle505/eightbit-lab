@@ -39,6 +39,39 @@ export function scheduledBadge(t: Task): string {
   return `<span class="when-badge" title="${tr({ ko: '예약 작업: 이 시각에 담당 직원이 시작합니다', en: 'Scheduled: the assignee starts it at this time' })}">⏰ ${whenLabel(t.startAt)}</span>`;
 }
 
+// ---- a card that follows another one (`afterTask`): it starts when that one reaches review or done ----
+/** The task this card is still waiting for, if any (a card started by hand, or whose predecessor finished, waits for nothing). */
+export function waitingFor(t: Task, tasks: Task[]): Task | null {
+  if (t.state !== 'todo' || t.afterTask == null) return null;
+  const prev = tasks.find((o) => o.id === t.afterTask);
+  return prev && prev.state !== 'review' && prev.state !== 'done' ? prev : null;
+}
+
+export function chainBadge(t: Task, tasks: Task[]): string {
+  const prev = waitingFor(t, tasks);
+  if (!prev) return '';
+  const tip = tr({ ko: `#${prev.id} "${prev.title}"이(가) 끝나면 담당 직원이 시작합니다`, en: `The assignee starts this when #${prev.id} "${prev.title}" finishes` });
+  return `<span class="when-badge" title="${tip.replace(/"/g, '&quot;')}">⛓ ${tr({ ko: `#${prev.id} 다음`, en: `after #${prev.id}` })}</span>`;
+}
+
+/** Options for the "start after" picker of a new-task form: start now, or any task that has not finished yet. */
+export function afterOptions(tasks: Task[]): string {
+  const open = tasks.filter((t) => t.state === 'todo' || t.state === 'doing').sort((a, b) => b.id - a.id);
+  const cut = (s: string) => (s.length > 28 ? `${s.slice(0, 28)}…` : s);
+  const safe = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return (
+    `<option value="">${tr({ ko: '⛓ 바로 시작', en: '⛓ Start right away' })}</option>` +
+    open.map((t) => `<option value="${t.id}">${tr({ ko: `#${t.id} 끝난 뒤: ${safe(cut(t.title))}`, en: `After #${t.id}: ${safe(cut(t.title))}` })}</option>`).join('')
+  );
+}
+
+/** The picker's value as a task id; alerts and returns undefined when following a task but nobody is chosen to start it. */
+export function checkAfter(value: string, assignee: string | null): number | null | undefined {
+  if (!value) return null;
+  if (!assignee) return void alert(tr({ ko: '다른 작업 뒤에 시작하려면 담당 직원을 골라 주세요.', en: 'Pick an assignee for a task that starts after another one.' }));
+  return Number(value);
+}
+
 /**
  * Wire the ⏰ button of a new-task form: it opens a row with a date-time field and quick picks.
  * `take()` gives the chosen time (null = start now) or 'past' when it's already gone.

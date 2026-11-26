@@ -20,7 +20,7 @@ import type { Engine, FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
 import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
-import { dueTasks, SCHEDULE_SLACK_MS } from './schedule.ts';
+import { dueTasks, followBlock, isFinished, orphanedFollowers, readyFollowers, SCHEDULE_SLACK_MS } from './schedule.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
@@ -163,16 +163,42 @@ function createTask(
   attachmentIds: number[] = [],
   startAt: number | null = null,
   engine: Engine | null = null,
+  afterTask: number | null = null,
 ) {
-  // a start time only means something with someone to start it; one that's (nearly) now just starts now
-  const later = assignee && agents.has(assignee) && startAt != null && startAt > Date.now() + SCHEDULE_SLACK_MS ? startAt : null;
-  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later ? assignee : null, createdBy, requireApproval, later, engine);
+  const known = !!assignee && agents.has(assignee);
+  // following another task: wait for it if it is still going; if it already finished, start now with its result
+  const prev = afterTask != null ? store.getTask(afterTask) : undefined;
+  const waits = known && !!prev && !isFinished(prev);
+  // a start time only means something with someone to start it; one that's (nearly) now just starts now.
+  // A card that follows another has no start time of its own: the other task finishing is its start.
+  const later = known && !waits && startAt != null && startAt > Date.now() + SCHEDULE_SLACK_MS ? startAt : null;
+  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later || waits ? assignee : null, createdBy, requireApproval, later, engine, prev ? prev.id : null);
   if (attachmentIds.length) store.bindAttachments(created.id, attachmentIds);
   const t = store.getTask(created.id)!;
   bus.send({ t: 'task', data: t });
-  if (assignee && !later) assignTask(t.id, assignee);
+  if (assignee && !later && !waits) assignTask(t.id, assignee);
   return store.getTask(t.id)!;
 }
+
+/** Start cards whose predecessor has finished, and free the ones whose predecessor was deleted. */
+function startFollowers() {
+  const tasks = store.listTasks();
+  for (const t of orphanedFollowers(tasks)) {
+    const freed = store.updateTask(t.id, { afterTask: null });
+    if (!freed) continue;
+    bus.send({ t: 'task', data: freed });
+    bus.send({ t: 'notice', level: 'warn', text: tr({ ko: `⛓ #${t.id} ${t.title}: 앞 작업이 삭제되어 대기를 풀었습니다. 직접 시작해 주세요.`, en: `⛓ #${t.id} ${t.title}: the task it followed was deleted, so it no longer waits. Start it by hand.` }) });
+  }
+  for (const t of readyFollowers(tasks, (id) => agents.has(id))) {
+    const who = empName(t.assignee!);
+    bus.send({ t: 'notice', level: 'info', text: tr({ ko: `⛓ #${t.afterTask} 완료 → #${t.id} 시작: ${t.title} → ${who}`, en: `⛓ #${t.afterTask} finished → #${t.id} started: ${t.title} → ${who}` }) });
+    assignTask(t.id, t.assignee!);
+  }
+}
+// a task reaching review/done, or being deleted, may release what follows it (deferred: this runs inside bus.send)
+bus.on('msg', (m: ServerMsg) => {
+  if ((m.t === 'task' && isFinished(m.data)) || m.t === 'taskDeleted') setImmediate(startFollowers);
+});
 
 /** Start scheduled cards whose time has come (checked every 20 s; at boot, ones missed while the backend was down). */
 function startDueTasks(now = Date.now()) {
@@ -267,7 +293,10 @@ function snapshot(): Snapshot {
 
 function taskPrompt(id: number): string {
   const t = store.getTask(id)!;
-  return `The manager assigned you task #${t.id}.\n\nTitle: ${t.title}\n\n${t.detail || '(no details)'}${attachmentBlock(store.attachmentsForTask(t.id))}\n\nWhen you finish, report where the outputs are and a summary.`;
+  // a follow-up gets the result of the task before it
+  const prev = t.afterTask != null ? store.getTask(t.afterTask) : undefined;
+  const follows = prev ? followBlock(prev, prev.assignee ? empName(prev.assignee) : 'someone') : '';
+  return `The manager assigned you task #${t.id}.\n\nTitle: ${t.title}\n\n${t.detail || '(no details)'}${attachmentBlock(store.attachmentsForTask(t.id))}${follows}\n\nWhen you finish, report where the outputs are and a summary.`;
 }
 
 // When a delegated task ends, hand the result back to the employee who delegated it (team lead / secretary).
@@ -309,7 +338,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
   const reply = (m: ServerMsg) => ws.send(JSON.stringify(m));
   switch (msg.t) {
     case 'createTask':
-      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? [], msg.startAt ?? null);
+      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? [], msg.startAt ?? null, null, msg.afterTask ?? null);
       break;
     case 'presence':
       if (msg.visible) watching.add(ws);
@@ -628,6 +657,7 @@ http.listen(office.port, '127.0.0.1', () => {
   attachments.cleanup();
   setInterval(() => attachments.cleanup(), 3600_000);
   startDueTasks();
+  startFollowers(); // ones whose predecessor finished while the backend was down
   setInterval(startDueTasks, 20_000);
   if (notifier.channels.length) console.log(`📱 notifications → ${notifier.channels.join(' + ')} (${office.notify!.events.join(', ')})`);
   if (office.authToken) console.log(

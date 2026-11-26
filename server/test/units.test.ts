@@ -2011,3 +2011,80 @@ describe('search', async () => {
     expect(searchAll('designability', s, lib, (id) => id).filter((h) => h.kind === 'log')).toHaveLength(PER_KIND);
   });
 });
+
+describe('task chains', async () => {
+  type Task = import('../../shared/protocol.ts').Task;
+  const { isFinished, waitsOn, readyFollowers, orphanedFollowers, followBlock } = await import('../src/schedule.ts');
+  const task = (id: number, state: Task['state'], afterTask: number | null = null, assignee: string | null = 'eval'): Task =>
+    ({ id, title: `t${id}`, detail: '', assignee, state, result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask, attachments: [], createdAt: 0, updatedAt: 0 }) as Task;
+  const known = (id: string) => id === 'eval' || id === 'lit';
+
+  it('a task counts as finished once it reaches review or done', () => {
+    expect((['todo', 'doing', 'review', 'done'] as const).map((s) => isFinished({ state: s }))).toEqual([false, false, true, true]);
+  });
+
+  it('a follow-up waits while the task before it is unfinished, and is ready once that one is in review or done', () => {
+    for (const [prevState, ready] of [['todo', false], ['doing', false], ['review', true], ['done', true]] as const) {
+      const tasks = [task(1, prevState, null, 'lit'), task(2, 'todo', 1)];
+      expect(readyFollowers(tasks, known).map((t) => t.id), prevState).toEqual(ready ? [2] : []);
+      expect(waitsOn(tasks[1], tasks)?.id ?? null, prevState).toBe(ready ? null : 1);
+    }
+  });
+
+  it('only a waiting card is started: not one already going, not one without a known assignee', () => {
+    const done = task(1, 'review', null, 'lit');
+    expect(readyFollowers([done, task(2, 'doing', 1)], known)).toEqual([]); // started by hand meanwhile
+    expect(readyFollowers([done, task(2, 'review', 1)], known)).toEqual([]);
+    expect(readyFollowers([done, task(2, 'todo', 1, null)], known)).toEqual([]);
+    expect(readyFollowers([done, task(2, 'todo', 1, 'gone')], known)).toEqual([]); // role removed
+    expect(readyFollowers([done, task(2, 'todo', null)], known)).toEqual([]); // follows nothing
+    expect(waitsOn(task(2, 'doing', 1), [task(1, 'doing'), task(2, 'doing', 1)])).toBeNull(); // not waiting any more
+  });
+
+  it('a chain releases one link at a time', () => {
+    const chain = (a: Task['state'], b: Task['state']) => [task(1, a, null, 'lit'), task(2, b, 1), task(3, 'todo', 2, 'lit')];
+    expect(readyFollowers(chain('doing', 'todo'), known)).toEqual([]);
+    expect(readyFollowers(chain('review', 'todo'), known).map((t) => t.id)).toEqual([2]);
+    expect(readyFollowers(chain('done', 'doing'), known)).toEqual([]);
+    expect(readyFollowers(chain('done', 'review'), known).map((t) => t.id)).toEqual([3]);
+  });
+
+  it('a card whose predecessor was deleted is orphaned, not started', () => {
+    const tasks = [task(2, 'todo', 1), task(3, 'doing', 1), task(4, 'todo', null)];
+    expect(orphanedFollowers(tasks).map((t) => t.id)).toEqual([2]); // #3 is already running, #4 follows nothing
+    expect(readyFollowers(tasks, known)).toEqual([]);
+    expect(waitsOn(tasks[0], tasks)).toBeNull();
+  });
+
+  it('tells the follow-up what the task before it produced', () => {
+    const prev = { ...task(7, 'review', null, 'lit'), title: 'Survey diffusion papers', result: 'Three papers: A, B, C. Notes in notes/lit/diffusion.md' };
+    const b = followBlock(prev, 'Alan');
+    expect(b).toContain('follows task #7 "Survey diffusion papers", done by Alan');
+    expect(b).toContain('Three papers: A, B, C. Notes in notes/lit/diffusion.md');
+    expect(followBlock({ ...prev, result: null }, 'Alan')).toContain('left no written result');
+    const long = followBlock({ ...prev, result: 'x'.repeat(20_000) }, 'Alan');
+    expect(long.length).toBeLessThan(7000);
+    expect(long).toContain('truncated; the full text is in task #7');
+  });
+
+  it('stores what a task follows, and opens a database from before the column existed', () => {
+    const s = new Store(':memory:');
+    const a = s.createTask('조사', '', 'lit');
+    const b = s.createTask('비교표', '', 'eval', null, false, null, null, a.id);
+    expect(s.getTask(a.id)!.afterTask).toBeNull();
+    expect(s.getTask(b.id)!.afterTask).toBe(a.id);
+    expect(s.listTasks().find((t) => t.id === b.id)!.afterTask).toBe(a.id);
+    expect(s.updateTask(b.id, { state: 'doing' })!.afterTask).toBe(a.id); // other updates leave it alone
+    expect(s.updateTask(b.id, { afterTask: null })!.afterTask).toBeNull();
+    expect(s.getTask(b.id)!.afterTask).toBeNull();
+
+    const f = join(mkdtempSync(join(tmpdir(), 'office-db-')), 'office.db');
+    const old = new DatabaseSync(f);
+    old.exec(`CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', assignee TEXT, state TEXT NOT NULL DEFAULT 'todo', result TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+      INSERT INTO tasks (title, createdAt, updatedAt) VALUES ('예전 작업', 1, 1);`);
+    old.close();
+    const migrated = new Store(f);
+    expect(migrated.listTasks()[0]).toMatchObject({ title: '예전 작업', afterTask: null });
+    expect(migrated.createTask('새 작업', '', 'eval', null, false, null, null, 1).afterTask).toBe(1);
+  });
+});

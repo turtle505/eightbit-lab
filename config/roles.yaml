@@ -193,6 +193,8 @@ employees:
       ⚠️ If the work involves deleting or overwriting files or data, git push/merge/reset, cancelling GPU jobs or submitting them in bulk, or sending anything outside the team,
       hand it off with requireApproval: true. Writing "check before doing it" in detail does not stop anything.
       If the instruction has "attachments" (#id) and the task needs those files, pass them along with attachments: [id, …].
+      When one step needs another step's output (research → comparison table), create both now and give the later one `after: <task id>`:
+      it starts by itself when the earlier one finishes, with that result in its instructions. Don't wait around to assign it yourself.
       Each employee runs on Claude or Codex (office_status shows their default and both quotas). Pick the engine per task with `engine` when it matters:
       web or paper research → claude (Codex has no network); in-repo code → either; a second opinion on finished work → a review task with
       `reviewOf: <task id>` (it goes to the engine that did not do the work); an engine whose quota is above ~85% → the other one.

@@ -3,7 +3,7 @@ import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, agoText, byRecent, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
-import { bindSchedule, checkSchedule, scheduledBadge } from './schedule.ts';
+import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, scheduledBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
   todo: { ko: '할 일', en: 'To do' },
@@ -89,6 +89,12 @@ export function renderTaskTable(st: UIState, send: Send) {
     sel.innerHTML = `<option value="">${tr({ ko: '담당: 나중에', en: 'Assignee: later' })}</option>` + emps.map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))}</option>`).join('');
     sel.value = v;
   }
+  if (changed('c-after', st.snap.tasks.map((t) => [t.id, t.title, t.state]))) {
+    const sel = $('c-task-after') as HTMLSelectElement;
+    const v = sel.value;
+    sel.innerHTML = afterOptions(st.snap.tasks);
+    sel.value = [...sel.options].some((o) => o.value === v) ? v : '';
+  }
   if (!changed('c-tasks', [st.snap.tasks, emps.map((e) => [e.id, e.name]), [...expanded], doneAll, Math.floor(Date.now() / 15000)])) return;
   const sorted = [...st.snap.tasks].sort((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state) || byRecent(a, b));
   // Done only grows: keep the latest few and fold the rest behind one row
@@ -107,7 +113,7 @@ export function renderTaskTable(st: UIState, send: Send) {
         <td class="num">#${t.id}</td>
         <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${engineBadge(t)}${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
           t.attachments?.length ? ` <span class="muted">${tr({ ko: `[첨부 ${t.attachments.length}]`, en: `[${t.attachments.length} files]` })}</span>` : ''
-        }</button> ${scheduledBadge(t)}</td>
+        }</button> ${scheduledBadge(t)}${chainBadge(t, st.snap.tasks)}</td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>
         <td><select data-act="assign">${empOpts(t.assignee)}</select></td>
         <td class="num muted">${ago(t.updatedAt)}</td>
@@ -168,9 +174,11 @@ export function bindConsoleTaskForm(send: Send) {
     const detail = ($('c-task-detail') as HTMLInputElement).value;
     const assignee = ($('c-task-assignee') as HTMLSelectElement).value || null;
     const requireApproval = ($('c-task-lock') as HTMLInputElement).checked;
+    const afterTask = checkAfter(($('c-task-after') as HTMLSelectElement).value, assignee);
+    if (afterTask === undefined) return;
     const startAt = checkSchedule(when.take(), assignee);
     if (startAt === undefined) return;
-    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt });
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt, afterTask });
     form.reset();
     when.reset();
   });
