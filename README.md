@@ -276,7 +276,7 @@ Host office-tunnel
 
 **Updating it later:** `npm run update` on that machine. It checks that no employee is mid-work (a restart would cut them off), then pulls, rebuilds and restarts the systemd service. `npm run update -- --force` skips the check.
 
-You can also do it from the screen. The office looks at the git remote every 30 minutes (one `git fetch`; `updateCheck: false` in `office.local.yaml` turns that off), and when there are new commits the top bar shows **⬆ New version n**. Click it to see what changed, then **Update**: it runs the same script, refuses while anyone is working, shows the script's output, and reloads the page once the backend is back. The button appears only where the backend runs as the systemd service; anywhere else the dialog tells you to run `npm run update` yourself. There is no force option on the screen.
+You can also do it from the screen. The office looks at the git remote every 30 minutes (one `git fetch`; `updateCheck: false` in `office.local.yaml` turns that off), and when there are new commits the top bar shows **⬆ New version n**; otherwise it shows the running version, and clicking that checks right away. Click it to see what changed, then **Update**: it runs the same script, refuses while anyone is working, shows the script's output, and reloads the page once the backend is back. The button appears only where the backend runs as the systemd service; anywhere else the dialog tells you to run `npm run update` yourself. There is no force option on the screen.
 </details>
 
 <details>

@@ -22,13 +22,14 @@ export function versionChanged(u: UpdateView | undefined): boolean {
   return v !== loadedVersion;
 }
 
-/** The pill for the top bar: shown only when there is something to say. */
+/** The pill for the top bar: loud when the remote is ahead, otherwise just the version, which opens the dialog and checks now. */
 export function updatePill(u: UpdateView | undefined): string {
   if (!u) return '';
   if (u.running) return `<button type="button" class="pill warn" data-update>⬆ ${tr({ ko: '업데이트 중…', en: 'Updating…' })}</button>`;
   if (u.behind > 0)
     return `<button type="button" class="pill update-pill" data-update title="${esc(tr({ ko: '눌러서 바뀐 내용 보기', en: 'Click to see what changed' }))}">⬆ ${tr({ ko: '새 버전', en: 'New version' })} <b>${u.behind}</b></button>`;
-  return '';
+  if (!u.version) return ''; // not a git checkout: nothing to update from
+  return `<button type="button" class="pill muted version-pill" data-update title="${esc(tr({ ko: '지금 버전. 눌러서 새 버전이 있는지 확인', en: 'The running version. Click to check for a newer one' }))}">${esc(u.version)}</button>`;
 }
 
 export function openUpdate(st: UIState, send: Send) {
@@ -43,6 +44,8 @@ export function openUpdate(st: UIState, send: Send) {
   lastKey = '';
   renderUpdate(st, send);
   if (!dlg.open) dlg.showModal();
+  // opening it is asking: look at the remote now instead of waiting for the half-hourly check
+  if (!st.snap.update?.running) send({ t: 'checkUpdate' });
 }
 
 export function renderUpdate(st: UIState, send: Send) {

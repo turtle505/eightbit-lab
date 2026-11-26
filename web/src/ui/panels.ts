@@ -132,7 +132,7 @@ export function renderHeader(st: UIState, send?: Send) {
   const busy = s.employees.filter((e) => !e.provider && !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
   const u = s.usage;
   const cu = s.codexUsage;
-  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, cu, s.update?.behind, s.update?.running, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
+  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, cu, s.update?.behind, s.update?.running, s.update?.version, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
   if (!changed('header', data)) return;
   // headline meters: session + overall weekly; model-scoped weekly rows go in the tooltip
   const main = u?.rows.filter((r) => r.kind === 'session' || r.kind === 'weekly_all') ?? [];
