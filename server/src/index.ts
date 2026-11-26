@@ -22,7 +22,7 @@ import type { Engine, FeedItem } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
 import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
-import { dueTasks, followBlock, isFinished, orphanedFollowers, readyFollowers, SCHEDULE_SLACK_MS } from './schedule.ts';
+import { dueTasks, followBlock, isFinished, orphanedFollowers, readyFollowers, retryBlock, SCHEDULE_SLACK_MS, strandedTasks } from './schedule.ts';
 import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
@@ -114,7 +114,7 @@ const reports = new ReportLibrary(() =>
 const notebook = new Notebook(resolve(office.workspaceRoot, NOTEBOOK_ROOT), office.notebook, (text) => bus.send({ t: 'notice', level: 'warn', text }));
 bus.on('runFinished', (r: RunFinished) => {
   const t = r.taskId != null ? store.getTask(r.taskId) : undefined;
-  if (t) notebook.add({ kind: 'task', ts: Date.now(), taskId: t.id, title: t.title, who: empName(r.employeeId).replace(/^.*"(.*)".*$/, '$1'), ok: r.ok, topic: t.topic, text: r.text });
+  if (t) notebook.add({ kind: 'task', ts: Date.now(), taskId: t.id, title: t.title, who: empName(r.employeeId).replace(/^.*"(.*)".*$/, '$1'), ok: r.ok, topic: t.topic, text: r.text, error: r.error });
 });
 reports.scan(); // baseline: files that already exist are not announced
 const today = new TodayNote(office.obsidian);
@@ -157,10 +157,12 @@ bus.on('msg', (m: ServerMsg) => {
 
 function assignTask(taskId: number, employeeId: string) {
   if (!agents.has(employeeId)) return;
-  const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing', startAt: null }); // assigning by hand starts a scheduled card now
-  if (!t) return;
+  const before = store.getTask(taskId);
+  // assigning by hand starts a scheduled card now; starting again clears the mark of the attempt before
+  const t = store.updateTask(taskId, { assignee: employeeId, state: 'doing', startAt: null, halt: null, error: null });
+  if (!t || !before) return;
   bus.send({ t: 'task', data: t });
-  agents.instruct(employeeId, taskPrompt(t.id), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval, engine: t.engine, attachmentPaths: store.attachmentsForTask(t.id).flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
+  agents.instruct(employeeId, taskPrompt(t.id) + retryBlock(before), t.id, { label: `${t.requireApproval ? '🔒' : '📋'} #${t.id} ${t.title}`, requireApproval: t.requireApproval, engine: t.engine, attachmentPaths: store.attachmentsForTask(t.id).flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
 }
 
 function createTask(
@@ -361,6 +363,13 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'assignTask':
       assignTask(msg.taskId, msg.employeeId);
       break;
+    case 'retryTask': {
+      const t = store.getTask(msg.taskId);
+      if (!t || t.state !== 'doing' || !t.halt || !t.assignee) break;
+      if (!agents.has(t.assignee)) reply({ t: 'notice', level: 'warn', text: tr({ ko: '담당 직원이 없습니다. 다른 직원에게 배정하세요.', en: 'The assignee no longer exists. Assign it to someone else.' }) });
+      else assignTask(t.id, t.assignee);
+      break;
+    }
     case 'moveTask': {
       const t = store.updateTask(msg.taskId, { state: msg.state });
       if (t) bus.send({ t: 'task', data: t });
@@ -677,6 +686,8 @@ http.listen(office.port, '127.0.0.1', () => {
   setInterval(pollTodos, 3_000);
   attachments.cleanup();
   setInterval(() => attachments.cleanup(), 3600_000);
+  // cards a restart cut off would look in progress forever: mark them so they can be started again
+  for (const t of strandedTasks(store.listTasks(), () => false)) store.updateTask(t.id, { halt: 'restart' });
   startDueTasks();
   startFollowers(); // ones whose predecessor finished while the backend was down
   setInterval(startDueTasks, 20_000);

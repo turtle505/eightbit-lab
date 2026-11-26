@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // No model is called. Entries are only ever appended.
 
 export type NoteItem =
-  | { kind: 'task'; ts: number; taskId: number; title: string; who: string; ok: boolean; topic: string | null; text: string }
+  | { kind: 'task'; ts: number; taskId: number; title: string; who: string; ok: boolean; topic: string | null; text: string; error?: string }
   | { kind: 'job'; ts: number; jobId: number; name: string; server: string; state: string; topic?: string | null; metrics?: Record<string, number> | null; note?: string }
   | { kind: 'memo'; ts: number; text: string };
 
@@ -72,6 +72,7 @@ export function noteEntry(item: NoteItem): string {
   }
   const lines = [`## ${at} · #${item.taskId} ${oneLine(item.title)} · ${item.who} · ${item.ok ? '✅' : '⚠ failed'}`];
   if (item.topic) lines.push(`- Topic: ${item.topic}`);
+  if (!item.ok && item.error) lines.push(`- Error: ${oneLine(item.error)}`);
   const q = quote(item.text);
   if (q) lines.push(`- ${item.ok ? 'Result' : 'Last words'}:\n${q}`);
   const paths = extractPaths(item.text);

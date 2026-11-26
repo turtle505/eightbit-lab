@@ -52,8 +52,33 @@ export function chainBadge(t: Task, tasks: Task[]): string {
   const prev = waitingFor(t, tasks);
   if (!prev) return '';
   const tip = tr({ ko: `#${prev.id} "${prev.title}"이(가) 끝나면 담당 직원이 시작합니다`, en: `The assignee starts this when #${prev.id} "${prev.title}" finishes` });
-  return `<span class="when-badge" title="${tip.replace(/"/g, '&quot;')}">⛓ ${tr({ ko: `#${prev.id} 다음`, en: `after #${prev.id}` })}</span>`;
+  // the task it waits for is not moving: say so, since this card will not start until that one is started again
+  const label = !prev.halt
+    ? tr({ ko: `#${prev.id} 다음`, en: `after #${prev.id}` })
+    : prev.halt === 'failed'
+      ? tr({ ko: `#${prev.id} 실패로 대기`, en: `waiting: #${prev.id} failed` })
+      : tr({ ko: `#${prev.id} 중단으로 대기`, en: `waiting: #${prev.id} stopped` });
+  return `<span class="when-badge${prev.halt ? ' stuck' : ''}" title="${tip.replace(/"/g, '&quot;')}">⛓ ${label}</span>`;
 }
+
+// ---- a card in 'doing' that nobody is working on (`halt`): failed, stopped by the manager, or cut off by a restart ----
+/** Short mark for a halted task, '' when it is fine. */
+export function haltLabel(t: Pick<Task, 'halt'>): string {
+  if (t.halt === 'failed') return tr({ ko: '⚠ 실패', en: '⚠ Failed' });
+  if (t.halt === 'stopped') return tr({ ko: '⏹ 멈춤', en: '⏹ Stopped' });
+  if (t.halt === 'restart') return tr({ ko: '⚠ 중단됨', en: '⚠ Cut off' });
+  return '';
+}
+
+/** One line saying why a halted task is not moving, '' when it is fine. */
+export function haltReason(t: Pick<Task, 'halt' | 'error'>): string {
+  if (t.halt === 'failed') return t.error || tr({ ko: '오류로 끝났습니다 (직원 로그 확인)', en: 'Ended with an error (see the employee log)' });
+  if (t.halt === 'stopped') return tr({ ko: '매니저가 멈췄습니다', en: 'Stopped by the manager' });
+  if (t.halt === 'restart') return tr({ ko: '서버가 다시 시작되면서 끊겼습니다', en: 'Cut off when the server restarted' });
+  return '';
+}
+
+export const retryLabel = (): string => tr({ ko: '↻ 다시 시도', en: '↻ Try again' });
 
 /** Options for the "start after" picker of a new-task form: start now, or any task that has not finished yet. */
 export function afterOptions(tasks: Task[]): string {

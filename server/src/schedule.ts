@@ -42,6 +42,33 @@ export function followBlock(prev: Task, who: string): string {
   );
 }
 
+export const ERROR_MAX = 200;
+/** A failure reason short enough for a card: one line, at most ERROR_MAX characters. */
+export const clipError = (text: string): string => {
+  const one = text.replace(/\s+/g, ' ').trim();
+  return one.length > ERROR_MAX ? `${one.slice(0, ERROR_MAX - 1)}…` : one;
+};
+
+/**
+ * Cards left in 'doing' that nobody is working on: assigned, not marked yet, and their assignee is not busy.
+ * At boot nobody is busy, so this is every card a restart cut off.
+ */
+export function strandedTasks(tasks: Task[], busy: (employeeId: string) => boolean): Task[] {
+  return tasks.filter((t) => t.state === 'doing' && t.assignee != null && t.halt == null && !busy(t.assignee));
+}
+
+/** What the instructions of a restarted task say about the attempt before (agent-facing, English). */
+export function retryBlock(prev: Pick<Task, 'halt' | 'error'>): string {
+  if (!prev.halt) return '';
+  const why =
+    prev.halt === 'failed'
+      ? `An earlier attempt at this task failed${prev.error ? `: ${prev.error}` : ' (no reason was recorded)'}.`
+      : prev.halt === 'stopped'
+        ? 'An earlier attempt at this task was stopped by the manager before it finished.'
+        : 'An earlier attempt at this task was cut off when the office restarted.';
+  return `\n\n${why} Check what that attempt already produced and continue from there instead of starting over; if the same problem comes up again, say so plainly.`;
+}
+
 /** "Tue, Nov 25, 9:00 AM" — for the model and logs (agent-facing text stays English). */
 export const fmtWhen = (ms: number) => new Date(ms).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 

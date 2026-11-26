@@ -1,6 +1,6 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
-import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, renderTopicInputs, scheduledBadge, topicBadge, waitingFor } from './schedule.ts';
+import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, haltLabel, haltReason, renderTopicInputs, retryLabel, scheduledBadge, topicBadge, waitingFor } from './schedule.ts';
 import { approvalRisk } from './approvalRisk.ts';
 import { lineDiff, type DiffLine } from './diff.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, Task, TaskState, UsageRow } from '../../../shared/protocol.ts';
@@ -299,9 +299,10 @@ export function renderBoard(st: UIState, send: Send) {
            <button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">✕</button>
          </div>`
       : '';
-    return `<div class="card${open ? ' open' : ''}" draggable="true" data-id="${t.id}">
+    return `<div class="card${open ? ' open' : ''}${t.halt && state === 'doing' ? ' halted' : ''}" draggable="true" data-id="${t.id}">
       <button type="button" class="card-title link" data-act="toggle" aria-expanded="${open}" title="${esc(t.title)}">${marks}${esc(t.title)}</button>
       <div class="card-meta"><span>${meta}</span>${state === 'review' ? `<button data-act="done">${tr({ ko: '완료', en: 'Done' })}</button>` : ''}</div>
+      ${t.halt && state === 'doing' ? `<div class="card-halt halt-${t.halt}"><span title="${esc(haltReason(t))}"><b>${haltLabel(t)}</b> ${esc(haltReason(t))}</span>${who ? `<button data-act="retry">${retryLabel()}</button>` : ''}</div>` : ''}
       ${body}
     </div>`;
   };
@@ -342,6 +343,7 @@ export function renderBoard(st: UIState, send: Send) {
       const t = st.snap.tasks.find((x) => x.id === id);
       if (t?.assignee) send({ t: 'assignTask', taskId: id, employeeId: t.assignee });
     });
+    el.querySelector('button[data-act="retry"]')?.addEventListener('click', () => send({ t: 'retryTask', taskId: id }));
     el.querySelector('button[data-act="del"]')?.addEventListener('click', () => {
       if (confirm(tr({ ko: `작업 #${id}을 삭제할까요?`, en: `Delete task #${id}?` }))) send({ t: 'deleteTask', taskId: id });
     });

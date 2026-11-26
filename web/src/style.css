@@ -1761,3 +1761,15 @@ body .md-body h4 {
   display: block;
   margin: 6px 0;
 }
+
+/* a task in 'doing' that nobody is working on: failed, stopped or cut off by a restart */
+#board .col .card.halted { border-left-color: var(--bad); }
+#board .col .card.halted:has(.halt-stopped) { border-left-color: var(--muted); }
+.card-halt { display: flex; align-items: flex-end; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--bad); }
+/* the reason wraps to two lines at most; the full text is in the tooltip */
+.card-halt span { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.card-halt.halt-stopped, .halt-badge.halt-stopped, .halt-line.halt-stopped { color: var(--muted); }
+.card-halt button { flex: none; font-size: 12px; padding: 1px 6px; white-space: nowrap; }
+.halt-badge { font-size: 12px; color: var(--bad); white-space: nowrap; }
+.halt-line { color: var(--bad); margin-bottom: 4px; }
+.when-badge.stuck { color: var(--bad); }

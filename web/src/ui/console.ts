@@ -3,7 +3,7 @@ import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, agoText, byRecent, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
-import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, scheduledBadge, topicBadge } from './schedule.ts';
+import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, haltLabel, haltReason, retryLabel, scheduledBadge, topicBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
   todo: { ko: '할 일', en: 'To do' },
@@ -113,14 +113,15 @@ export function renderTaskTable(st: UIState, send: Send) {
         <td class="num">#${t.id}</td>
         <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${engineBadge(t)}${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
           t.attachments?.length ? ` <span class="muted">${tr({ ko: `[첨부 ${t.attachments.length}]`, en: `[${t.attachments.length} files]` })}</span>` : ''
-        }</button> ${scheduledBadge(t)}${chainBadge(t, st.snap.tasks)}${topicBadge(t)}</td>
+        }</button> ${scheduledBadge(t)}${chainBadge(t, st.snap.tasks)}${topicBadge(t)}${t.halt && t.state === 'doing' ? ` <span class="halt-badge halt-${t.halt}" title="${esc(haltReason(t))}">${haltLabel(t)}</span>` : ''}</td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>
         <td><select data-act="assign">${empOpts(t.assignee)}</select></td>
         <td class="num muted">${ago(t.updatedAt)}</td>
-        <td class="actions"><button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">${tr({ ko: '삭제', en: 'Delete' })}</button></td>
+        <td class="actions">${t.halt && t.state === 'doing' && t.assignee ? `<button data-act="retry">${retryLabel()}</button> ` : ''}<button data-act="del" title="${tr({ ko: '삭제', en: 'Delete' })}">${tr({ ko: '삭제', en: 'Delete' })}</button></td>
       </tr>`;
       const detail = open
         ? `<tr class="detail"><td></td><td colspan="5">
+            ${t.halt && t.state === 'doing' ? `<div class="small halt-line halt-${t.halt}"><b>${haltLabel(t)}</b> ${esc(haltReason(t))}</div>` : ''}
             ${t.detail ? `<div class="small"><b>${tr({ ko: '지시', en: 'Instruction' })}</b><pre>${esc(t.detail)}</pre></div>` : ''}
             ${t.attachments?.length ? `<div class="small"><b>${tr({ ko: '첨부', en: 'Attachments' })}</b> ${attachmentLinks(t.attachments)}</div>` : ''}
             ${t.result ? `<div class="small"><b>${tr({ ko: '보고', en: 'Report' })}</b><pre>${esc(t.result)}</pre></div>` : `<div class="muted small">${tr({ ko: '아직 보고 없음', en: 'No report yet' })}</div>`}
@@ -156,6 +157,7 @@ export function renderTaskTable(st: UIState, send: Send) {
       const v = (ev.target as HTMLSelectElement).value;
       if (v) send({ t: 'assignTask', taskId: id, employeeId: v });
     });
+    row.querySelector('button[data-act="retry"]')?.addEventListener('click', () => send({ t: 'retryTask', taskId: id }));
     row.querySelector('button[data-act="del"]')!.addEventListener('click', () => {
       if (confirm(tr({ ko: `작업 #${id}을 삭제할까요?`, en: `Delete task #${id}?` }))) send({ t: 'deleteTask', taskId: id });
     });

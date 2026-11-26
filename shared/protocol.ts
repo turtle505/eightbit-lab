@@ -113,6 +113,8 @@ export interface AttachmentView {
 }
 export type PermissionSetting = 'auto' | 'ask';
 
+export type TaskHalt = 'failed' | 'stopped' | 'restart';
+
 export interface Task {
   id: number;
   title: string;
@@ -135,6 +137,13 @@ export interface Task {
   afterTask: number | null;
   /** the research subject this task belongs to (see shared/topics.ts): its reports go in reports/<topic>/; null = none */
   topic: string | null;
+  /**
+   * why a card in 'doing' is not actually being worked on: the run failed, the manager stopped it, or the backend
+   * restarted under it. Cleared when the task is started again or moved out of 'doing'; null = fine
+   */
+  halt: TaskHalt | null;
+  /** the reason of a failed run (the last error line, cut short); null when there is none */
+  error: string | null;
   attachments: AttachmentView[];
   createdAt: number;
   updatedAt: number;
@@ -401,6 +410,8 @@ export type ClientMsg =
   | { t: 'assignTask'; taskId: number; employeeId: string }
   | { t: 'moveTask'; taskId: number; state: TaskState }
   | { t: 'deleteTask'; taskId: number }
+  /** start a halted task again with the same assignee */
+  | { t: 'retryTask'; taskId: number }
   | { t: 'instruct'; employeeId: string; text: string; attachmentIds?: number[] }
   /** "/note …" from the command bar: a line for the lab notebook, not for an employee */
   | { t: 'addNote'; text: string }

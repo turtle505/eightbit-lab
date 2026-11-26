@@ -2016,7 +2016,7 @@ describe('task chains', async () => {
   type Task = import('../../shared/protocol.ts').Task;
   const { isFinished, waitsOn, readyFollowers, orphanedFollowers, followBlock } = await import('../src/schedule.ts');
   const task = (id: number, state: Task['state'], afterTask: number | null = null, assignee: string | null = 'eval'): Task =>
-    ({ id, title: `t${id}`, detail: '', assignee, state, result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask, topic: null, attachments: [], createdAt: 0, updatedAt: 0 }) as Task;
+    ({ id, title: `t${id}`, detail: '', assignee, state, result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask, topic: null, halt: null, error: null, attachments: [], createdAt: 0, updatedAt: 0 }) as Task;
   const known = (id: string) => id === 'eval' || id === 'lit';
 
   it('a task counts as finished once it reaches review or done', () => {
@@ -2268,5 +2268,163 @@ describe('lab notebook', async () => {
     mkdir(j(ws, 'shared', 'reports'), { recursive: true });
     expect(roots(ws, [], () => null, true).map((r) => r.label)).toEqual([NOTEBOOK_ROOT, 'shared/reports']);
     expect(roots(ws, [], () => null, false).map((r) => r.label)).toEqual(['shared/reports']);
+  });
+});
+
+describe('failed and stopped tasks', async () => {
+  type Task = import('../../shared/protocol.ts').Task;
+  const { AgentManager } = await import('../src/agents/manager.ts');
+  const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+  const { strandedTasks, retryBlock, clipError, waitsOn } = await import('../src/schedule.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const task = (id: number, over: Partial<Task> = {}): Task =>
+    ({ id, title: `t${id}`, detail: '', assignee: 'lit', state: 'doing', result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask: null, topic: null, halt: null, error: null, attachments: [], createdAt: 0, updatedAt: 0, ...over }) as Task;
+
+  /** one fake session: every turn ends the way `mode.next` says ('ok', 'fail', or 'hang' until interrupted) */
+  function fakeSdk() {
+    const mode = { next: 'ok' as 'ok' | 'fail' | 'hang' | 'api' };
+    const queryFn: any = ({ prompt }: any) => {
+      const out: any[] = [];
+      let wake: any = null;
+      let closed = false;
+      const emit = (m: any) => {
+        out.push(m);
+        wake?.();
+      };
+      void (async () => {
+        for await (const _m of prompt as AsyncIterable<any>) {
+          emit({ type: 'system', subtype: 'init', session_id: 's', model: 'claude', permissionMode: 'auto' });
+          if (mode.next === 'ok') emit({ type: 'result', subtype: 'success', result: 'fine', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+          else if (mode.next === 'fail') emit({ type: 'result', subtype: 'error_max_turns', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+          else if (mode.next === 'api') {
+            emit({ type: 'assistant', error: 'model_not_found', message: { content: [{ type: 'text', text: "There's an issue with the selected model." }] } });
+            emit({ type: 'result', subtype: 'success', result: "There's an issue with the selected model.", num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+          }
+        }
+        closed = true;
+        wake?.();
+      })();
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (;;) {
+            while (out.length) yield out.shift();
+            if (closed) return;
+            await new Promise<void>((r) => (wake = r));
+            wake = null;
+          }
+        },
+        setPermissionMode: async () => {},
+        setModel: async () => {},
+        interrupt: async () => emit({ type: 'result', subtype: 'error_during_execution', num_turns: 1, duration_ms: 1, total_cost_usd: 0 }),
+        close: () => {
+          closed = true;
+          wake?.();
+        },
+      };
+    };
+    return { queryFn, mode };
+  }
+  function office() {
+    const sdk = fakeSdk();
+    const root = mkdtempSync(join(tmpdir(), 'office-halt-'));
+    const cfg: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: root, reportDirs: [], obsidian: null, providers: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787 };
+    const role: any = { id: 'lit', name: 'Ada', title: 'R', desk: 0, sprite: {}, useWorktree: false, autoAllow: [], systemPrompt: '' };
+    const store = new Store(':memory:');
+    const m = new AgentManager(cfg, [role], store, new Broker(), { list: () => [] } as any);
+    m.queryFn = sdk.queryFn;
+    const start = (title: string) => {
+      const t = store.createTask(title, '', 'lit');
+      store.updateTask(t.id, { state: 'doing' });
+      m.instruct('lit', title, t.id);
+      return t.id;
+    };
+    return { m, store, mode: sdk.mode, start };
+  }
+  const settle = async (ms = 40) => await new Promise((r) => setTimeout(r, ms));
+
+  it('keeps a failed task in doing, marked with the reason', async () => {
+    const o = office();
+    o.mode.next = 'fail';
+    const id = o.start('train');
+    await settle();
+    const t = o.store.getTask(id)!;
+    expect([t.state, t.halt]).toEqual(['doing', 'failed']);
+    expect(t.error).toContain('error_max_turns');
+  });
+
+  it('counts a turn whose reply was an API error as failed, even though the CLI calls it a success', async () => {
+    const o = office();
+    o.mode.next = 'api';
+    const id = o.start('wrong model');
+    await settle();
+    expect(o.store.getTask(id)).toMatchObject({ state: 'doing', halt: 'failed', error: 'API: model_not_found' });
+  });
+
+  it('leaves no mark on a task that finished', async () => {
+    const o = office();
+    const id = o.start('fine');
+    await settle();
+    const t = o.store.getTask(id)!;
+    expect([t.state, t.halt, t.error, t.result]).toEqual(['review', null, null, 'fine']);
+  });
+
+  it('marks a task the manager stopped as stopped, not failed, and the queued ones too', async () => {
+    const o = office();
+    o.mode.next = 'hang';
+    const running = o.start('long');
+    const queued = o.start('next');
+    await settle();
+    o.m.stop('lit');
+    await settle();
+    expect(o.store.getTask(running)!.halt).toBe('stopped');
+    expect(o.store.getTask(queued)!.halt).toBe('stopped');
+    expect(o.store.getTask(running)!.state).toBe('doing');
+  });
+
+  it('clears the mark when the card leaves doing', () => {
+    const s = new Store(':memory:');
+    const t = s.createTask('x', '', 'lit');
+    s.updateTask(t.id, { state: 'doing', halt: 'failed', error: 'boom' });
+    expect(s.getTask(t.id)).toMatchObject({ halt: 'failed', error: 'boom' });
+    expect(s.updateTask(t.id, { state: 'done' })).toMatchObject({ halt: null, error: null });
+    expect(s.getTask(t.id)).toMatchObject({ halt: null, error: null });
+  });
+
+  it('finds the cards a restart cut off', () => {
+    const tasks = [task(1), task(2, { halt: 'failed' }), task(3, { assignee: null }), task(4, { state: 'todo' }), task(5, { assignee: 'eval' })];
+    expect(strandedTasks(tasks, () => false).map((t) => t.id)).toEqual([1, 5]);
+    expect(strandedTasks(tasks, (id) => id === 'lit').map((t) => t.id)).toEqual([5]);
+  });
+
+  it('tells the next attempt what happened to the one before', () => {
+    expect(retryBlock(task(1))).toBe('');
+    expect(retryBlock(task(1, { halt: 'failed', error: 'CUDA out of memory' }))).toContain('failed: CUDA out of memory.');
+    expect(retryBlock(task(1, { halt: 'stopped' }))).toContain('stopped by the manager');
+    expect(retryBlock(task(1, { halt: 'restart' }))).toContain('office restarted');
+    expect(retryBlock(task(1, { halt: 'failed', error: 'x' }))).toContain('continue from there');
+  });
+
+  it('cuts a long reason to one short line', () => {
+    expect(clipError('a\n  b')).toBe('a b');
+    expect(clipError('x'.repeat(500))).toHaveLength(200);
+  });
+
+  it('keeps a follower waiting behind a failed task', () => {
+    const prev = task(1, { halt: 'failed' });
+    const next = task(2, { state: 'todo', afterTask: 1 });
+    expect(waitsOn(next, [prev, next])?.id).toBe(1);
+  });
+
+  it('opens a database from before the columns existed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'office-olddb-'));
+    const file = join(dir, 'o.db');
+    const old = new DatabaseSync(file);
+    old.exec("CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', assignee TEXT, state TEXT NOT NULL DEFAULT 'todo', result TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)");
+    old.exec("INSERT INTO tasks (title, state, createdAt, updatedAt) VALUES ('old', 'doing', 1, 1)");
+    old.close();
+    const s = new Store(file);
+    expect(s.listTasks()[0]).toMatchObject({ title: 'old', halt: null, error: null });
   });
 });

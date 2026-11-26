@@ -1,5 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentStatus, EmployeeView, Engine, LogLine, PermissionSetting } from '../../../shared/protocol.ts';
+import type { AgentStatus, EmployeeView, Engine, LogLine, PermissionSetting, TaskHalt } from '../../../shared/protocol.ts';
+import { clipError } from '../schedule.ts';
 import { bus } from '../bus.ts';
 import { getLang, hhmm, LANG_NAME_EN, tr, type Lang } from '../../../shared/i18n.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
@@ -95,6 +96,8 @@ export interface RunFinished {
   text: string;
   ok: boolean;
   taskId: number | null;
+  /** the last error line of a failed run, if one was logged */
+  error?: string;
 }
 
 class Employee {
@@ -108,6 +111,12 @@ class Employee {
   idleTimer: NodeJS.Timeout | null = null;
   current: Work | null = null;
   lastText = '';
+  /** last error line logged during the current run: the reason shown on a failed task card */
+  lastError = '';
+  /** the last reply of the current run was an API error (the CLI still ends such a turn with `success`) */
+  apiFailed = false;
+  /** the manager stopped the current run (so its task is marked stopped, not failed) */
+  stopRequested = false;
   /** mode requested for the current run (to report a fallback from auto) */
   wantedPermission: PermissionSetting = 'ask';
   /** the stored session id is not on this machine (resume failed) — retry once without it */
@@ -384,6 +393,7 @@ export class AgentManager {
   private log(e: Employee, kind: LogLine['kind'], text: string, engine?: Engine) {
     if (kind === 'error' && AgentManager.NO_SESSION.test(text)) e.resumeMissing = true;
     if (kind === 'error' && AgentManager.RATE_LIMIT.test(text)) e.rateLimitedUntil ??= Date.now() + LIMIT_FALLBACK_MS;
+    if (kind === 'error') e.lastError = text;
     const line: LogLine = { employeeId: e.role.id, ts: Date.now(), kind, text, engine: engine ?? e.view.turnEngine ?? e.view.engine };
     this.store.addLog(line);
     bus.send({ t: 'log', data: line });
@@ -415,6 +425,27 @@ export class AgentManager {
     this.pump();
   }
 
+  /** Mark a task card that is in 'doing' with nobody working on it, and tell the browsers. */
+  private haltTask(taskId: number, halt: TaskHalt, error: string | null = null) {
+    const t = this.store.getTask(taskId);
+    if (!t || t.state !== 'doing') return;
+    const n = this.store.updateTask(taskId, { halt, error });
+    if (n) bus.send({ t: 'task', data: n });
+  }
+
+  /**
+   * After a run, whichever way it ended: a task that is still 'doing' did not finish. Say why on the card
+   * (failed with the last error line, or stopped by the manager) so it can be started again. Work parked on
+   * the usage limit resumes by itself, and a card already queued again is left alone.
+   */
+  private settleTask(e: Employee, work: Work) {
+    if (work.taskId == null || e.parked?.work === work || e.inbox.some((w) => w.taskId === work.taskId)) return;
+    const t = this.store.getTask(work.taskId);
+    if (!t || t.state !== 'doing' || t.assignee !== e.role.id) return;
+    if (e.stopRequested) this.haltTask(t.id, 'stopped');
+    else this.haltTask(t.id, 'failed', clipError(e.lastError) || null);
+  }
+
   private pump() {
     for (;;) {
       const i = nextRunnable(this.waiting.map((w) => ({ provider: w.role.provider })), this.running, this.office.maxConcurrent, this.busyProviders);
@@ -431,6 +462,7 @@ export class AgentManager {
       }).finally(() => {
         if (provider) this.busyProviders.delete(provider);
         else this.running--;
+        this.settleTask(e, work);
         e.current = null;
         if (e.inbox.length) this.waiting.push(e);
         this.pump();
@@ -441,8 +473,13 @@ export class AgentManager {
   /** Stop the current turn but keep the session open, so the next instruction is still warm. */
   stop(employeeId: string) {
     const e = this.emp(employeeId);
+    // task cards that were queued or parked never ran to an end of their own: mark them, or they look in progress forever
+    const dropped = e.inbox;
     e.inbox = [];
-    if (this.unpark(e)) this.log(e, 'system', tr({ ko: '⏹ 예약된 재개를 취소했습니다', en: '⏹ Cancelled the scheduled resume' }));
+    const parked = this.unpark(e);
+    for (const w of parked ? [...dropped, parked] : dropped) if (w.taskId != null && w !== e.current) this.haltTask(w.taskId, 'stopped');
+    if (e.current) e.stopRequested = true;
+    if (parked) this.log(e, 'system', tr({ ko: '⏹ 예약된 재개를 취소했습니다', en: '⏹ Cancelled the scheduled resume' }));
     this.waiting = this.waiting.filter((w) => w !== e);
     this.broker.cancelFor(employeeId);
     if (e.codexTurn) {
@@ -855,7 +892,7 @@ export class AgentManager {
       const failure = result.error || result.status;
       this.log(e, ok ? 'result' : 'error', ok ? tr({ ko: 'Codex 작업 완료', en: 'Codex turn completed' }) : `Codex: ${failure}`);
       this.set(e, ok ? 'done' : 'error', ok ? tr({ ko: '✅ 완료', en: '✅ Done' }) : `⚠️ ${clip(failure, 55)}`);
-      bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId } satisfies RunFinished);
+      bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId, error: ok ? undefined : clipError(e.lastError) || undefined } satisfies RunFinished);
       if (work.taskId != null) {
         const task = this.store.updateTask(work.taskId, ok ? { state: 'review', result: e.lastText || null } : { result: e.lastText || null });
         if (task) bus.send({ t: 'task', data: task });
@@ -878,6 +915,9 @@ export class AgentManager {
     e.current = work;
     e.view.taskId = work.taskId;
     e.lastText = '';
+    e.lastError = '';
+    e.apiFailed = false;
+    e.stopRequested = false;
     this.set(e, 'thinking', tr({ ko: '💭 업무 파악 중', en: '💭 Getting up to speed' }));
     if (e.idleTimer) clearTimeout(e.idleTimer);
     const engine = this.turnEngine(e, work);
@@ -978,7 +1018,8 @@ export class AgentManager {
       live.input.push(userMessage(work.text));
     });
 
-    if (live.abort.signal.aborted) {
+    // stopped by the manager: not a result and not a failure (its task card is marked in settleTask)
+    if (live.abort.signal.aborted || e.stopRequested) {
       this.set(e, 'idle', this.idleActivity(e));
       return;
     }
@@ -1012,7 +1053,7 @@ export class AgentManager {
       const gist = clip(e.lastText.replace(/\s+/g, ' '), 50);
       this.set(e, 'done', tr({ ko: `✅ 완료: ${gist}`, en: `✅ Done: ${gist}` }));
     }
-    bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null } satisfies RunFinished);
+    bus.emit('runFinished', { employeeId: e.role.id, label: work.label, text: e.lastText, ok, taskId: work.taskId ?? null, error: ok ? undefined : clipError(e.lastError) || undefined } satisfies RunFinished);
     if (work.taskId != null) {
       // a failed attempt stays on the board as 'doing' so it can be picked up again
       const t = this.store.updateTask(work.taskId, ok ? { state: 'review', result: e.lastText || null } : { result: e.lastText || null });
@@ -1055,6 +1096,8 @@ export class AgentManager {
             this.set(e, s.status, s.activity);
           }
         }
+        // only the last reply counts: an error the model recovered from is followed by a normal one
+        e.apiFailed = !!m.error;
         if (m.error) this.log(e, 'error', `API: ${m.error}`);
         break;
       }
@@ -1072,7 +1115,10 @@ export class AgentManager {
           live.lastCost = total;
         }
         this.store.saveSession(e.role.id, e.view.sessionId, e.view.costUsd, e.view.cwd, e.sessionHost);
-        if (m.subtype === 'success') {
+        if (m.subtype === 'success' && e.apiFailed) {
+          // the reply was the API's error text, not an answer: this turn did not do its work
+          this.set(e, 'error', `⚠️ ${clip(e.lastError, 55)}`);
+        } else if (m.subtype === 'success') {
           if (m.result) e.lastText = m.result;
           this.log(e, 'result', tr({
               ko: `완료 (${m.num_turns} turns, ${(m.duration_ms / 1000).toFixed(0)}s)`,
