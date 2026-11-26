@@ -14,6 +14,7 @@ import { RoutineScheduler } from './routines.ts';
 import { SkillLibrary } from './skills.ts';
 import { NOTEBOOK_ROOT, ReportLibrary, reportRoots } from './reports.ts';
 import { Notebook } from './notebook.ts';
+import { realDeps, Updater } from './update.ts';
 import { searchAll } from './search.ts';
 import { normalizeTopic, topicLine } from '../../shared/topics.ts';
 import { TodayNote } from './todos.ts';
@@ -146,6 +147,9 @@ function pollReports() {
     else pushFeed(store.addFeed({ ts: now, kind: 'report', employeeId: f.employeeId, title: f.title, body, path: f.path, ok: true }));
   }
 }
+// ---- the office's own version: is the remote ahead, and the update button
+const updater = new Updater(realDeps(ROOT), (v) => bus.send({ t: 'update', data: { ...v } }));
+const UPDATE_CHECK_MS = 30 * 60_000;
 const usage = new UsageMonitor(ROOT);
 const codexUsage = new CodexUsageMonitor();
 // refresh subscription usage shortly after an employee finishes a run
@@ -305,6 +309,7 @@ function snapshot(): Snapshot {
     hosts: hosts.views(),
     projects: projects.views(),
     language: getLang(),
+    update: updater.view,
   };
 }
 
@@ -487,6 +492,19 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       });
       break;
     }
+    case 'checkUpdate':
+      void updater.check();
+      break;
+    case 'applyUpdate': {
+      const working = agents.busy().working.map((w) => shortName(w.id));
+      const r = updater.apply(working);
+      if (r === 'busy')
+        reply({ t: 'notice', level: 'warn', text: tr({ ko: `지금 일하는 직원이 있어 업데이트하지 않았습니다: ${working.join(', ')}. 다시 시작하면 하던 일이 끊깁니다.`, en: `Not updating: ${working.join(', ')} ${working.length > 1 ? 'are' : 'is'} working, and a restart would cut that off.` }) });
+      else if (r === 'no-restart')
+        reply({ t: 'notice', level: 'warn', text: tr({ ko: '이 환경에서는 화면에서 다시 시작할 수 없습니다. 터미널에서 npm run update 를 실행한 뒤 직접 다시 시작하세요.', en: 'This setup cannot be restarted from the screen. Run npm run update in a terminal, then restart the backend yourself.' }) });
+      else if (r === 'running') reply({ t: 'notice', level: 'info', text: tr({ ko: '업데이트가 이미 진행 중입니다.', en: 'An update is already running.' }) });
+      break;
+    }
     case 'refreshUsage':
       void usage.refresh();
       void codexUsage.refresh();
@@ -664,6 +682,8 @@ notifier.isWatched = () => watching.size > 0;
 wss.on('connection', (ws) => {
   ws.on('close', () => watching.delete(ws));
   ws.send(JSON.stringify({ t: 'snapshot', data: snapshot() } satisfies ServerMsg));
+  // someone opened the office: if the last look at the remote is old, look again now rather than at the next half hour
+  if (office.updateCheck && updater.view.checkedAt && Date.now() - updater.view.checkedAt > 10 * 60_000) void updater.check();
   ws.on('message', (raw) => {
     try {
       handle(JSON.parse(String(raw)) as ClientMsg, ws);
@@ -679,6 +699,12 @@ bus.on('msg', (m: ServerMsg) => {
 
 http.listen(office.port, '127.0.0.1', () => {
   console.log(`👾 8-bit Lab backend: http://127.0.0.1:${office.port}  (employees: ${roles.length}, servers: ${registry.list().length}, providers: ${office.providers.map((p) => p.id).join(',') || '-'}, maxConcurrent: ${office.maxConcurrent})`);
+  void updater.init().then(() => {
+    bus.send({ t: 'update', data: { ...updater.view } });
+    if (!office.updateCheck) return;
+    void updater.check();
+    setInterval(() => void updater.check(), UPDATE_CHECK_MS);
+  });
   registry.start();
   routines.start();
   usage.start();

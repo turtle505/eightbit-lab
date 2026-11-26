@@ -122,6 +122,7 @@ Once the tutorial is cleared, this is the full list of controls.
 | Do something later, once | ⏰ in the task form (pick an assignee and a time), or ask the assistant: *"tomorrow at 9, have Alan summarise the new papers"* |
 | Start a task when another finishes | In the task form, pick the earlier task under **⛓ Start right away** (and an assignee). The card waits, then starts by itself with the earlier task's result in its instructions. **▶ Start now** on the card skips the wait. The team lead can do the same when handing out work |
 | Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
+| Update the office | **⬆ New version n** in the top bar, when the remote has new commits → see what changed → **Update** (see *Updating it later*) |
 | Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
 | Switch language | The **EN / 한국어** button at the top right |
 | Rename the office | Click the title in the top bar. It also shows in the browser tab, desktop notifications and the login page; empty brings back "8-bit Lab" |
@@ -259,6 +260,8 @@ hosts:
 **Moving the backend to a server:** `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`. Copy `data/office.db` and `workspaces/` across to keep tasks, routines and attachments. Don't run two backends at once, or routines will fire twice.
 
 **Updating it later:** `npm run update` on that machine. It checks that no employee is mid-work (a restart would cut them off), then pulls, rebuilds and restarts the systemd service. `npm run update -- --force` skips the check.
+
+You can also do it from the screen. The office looks at the git remote every 30 minutes (one `git fetch`; `updateCheck: false` in `office.local.yaml` turns that off), and when there are new commits the top bar shows **⬆ New version n**. Click it to see what changed, then **Update**: it runs the same script, refuses while anyone is working, shows the script's output, and reloads the page once the backend is back. The button appears only where the backend runs as the systemd service; anywhere else the dialog tells you to run `npm run update` yourself. There is no force option on the screen.
 </details>
 
 <details>

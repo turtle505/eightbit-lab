@@ -1789,3 +1789,9 @@ body .md-body h4 {
 .exp-table .exp-dir { margin-left: 3px; padding: 0 3px; font-size: 11px; border: 1px solid var(--line, #cfc8b8); border-radius: 3px; background: none; cursor: pointer; color: var(--muted); }
 .exp-table tr.exp-detail td { white-space: normal; background: rgba(0, 0, 0, 0.03); font-size: 12px; }
 .exp-table tr.exp-detail pre { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* the "new version" pill and its dialog */
+.pill.update-pill { border-color: var(--accent); color: var(--accent); cursor: pointer; }
+.update-dialog { width: min(620px, 94vw); }
+.update-commits { margin: 6px 0 10px; padding-left: 20px; max-height: 40vh; overflow: auto; font-size: 13px; }
+.update-log { max-height: 30vh; overflow: auto; margin-top: 10px; padding: 8px; background: var(--code-bg); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

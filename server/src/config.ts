@@ -35,6 +35,8 @@ export interface OfficeConfig {
   language: Lang;
   /** what the team works on, one line; put in front of every prompt as "About this team: …" (empty = left out) */
   domain: string;
+  /** look at the git remote for a newer version every 30 minutes (a `git fetch`); on unless set to false */
+  updateCheck: boolean;
   /** keep the lab notebook (workspaces/notebook/<date>.md); on unless set to false */
   notebook: boolean;
   /** phone / chat notifications; null = off */
@@ -200,6 +202,7 @@ export function loadOffice(): OfficeConfig {
     language: c.language === 'ko' ? 'ko' : 'en',
     domain: String(c.domain ?? '').trim(),
     notebook: c.notebook !== false,
+    updateCheck: c.updateCheck !== false,
     notify: normalizeNotify(c.notify),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),

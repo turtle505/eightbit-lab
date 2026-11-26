@@ -371,6 +371,28 @@ export interface Snapshot {
   projects: ProjectView[];
   /** language people read the office in (see shared/i18n.ts) */
   language: Lang;
+  /** the running version and whether the remote has a newer one */
+  update: UpdateView;
+}
+
+/** What the office knows about its own version (see server/src/update.ts). */
+export interface UpdateView {
+  /** short hash of the commit the backend started on; null when it is not a git checkout */
+  version: string | null;
+  /** commits on the upstream branch that this checkout lacks */
+  behind: number;
+  /** their subjects, newest first (at most 20) */
+  commits: string[];
+  /** when the remote was last looked at (epoch ms); 0 = never */
+  checkedAt: number;
+  /** did that last look work? false = unknown (offline, no upstream), not "up to date" */
+  ok: boolean;
+  /** the update button can restart the backend (it runs as the systemd user unit) */
+  canRestart: boolean;
+  /** the update script is running now */
+  running: boolean;
+  /** its last output lines */
+  log: string[];
 }
 
 /** editable labels that are not employees: the manager's name tag, the whiteboard text, and the office's title in the top bar */
@@ -402,6 +424,7 @@ export type ServerMsg =
   | { t: 'todos'; data: TodayTodos }
   | { t: 'usage'; data: UsageView }
   | { t: 'codexUsage'; data: UsageView }
+  | { t: 'update'; data: UpdateView }
   | { t: 'provider'; data: ProviderView }
   | { t: 'host'; data: HostView }
   | { t: 'projects'; data: ProjectView[] }
@@ -419,6 +442,10 @@ export type ClientMsg =
   | { t: 'assignTask'; taskId: number; employeeId: string }
   | { t: 'moveTask'; taskId: number; state: TaskState }
   | { t: 'deleteTask'; taskId: number }
+  /** look at the remote for a newer version now */
+  | { t: 'checkUpdate' }
+  /** run the update script (pull, build, restart); takes no arguments on purpose */
+  | { t: 'applyUpdate' }
   /** start a halted task again with the same assignee */
   | { t: 'retryTask'; taskId: number }
   | { t: 'instruct'; employeeId: string; text: string; attachmentIds?: number[] }

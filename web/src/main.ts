@@ -20,6 +20,7 @@ import { applyView, initialView, setOfficeTitle, viewTitle } from './ui/view.ts'
 import { renderReportFeed } from './ui/feed.ts';
 import { renderCommandBar } from './ui/command.ts';
 import { renderExperiments } from './ui/experiments.ts';
+import { renderUpdate, versionChanged } from './ui/update.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
 import { initReports, onReportContent, openReport, renderReports, unreadReports } from './ui/reports.ts';
 import { renderProjects, setHostDirs } from './ui/projects.ts';
@@ -107,6 +108,7 @@ function renderAll() {
   renderRoutines(state, send);
   renderJobs(state, send);
   renderExperiments(state);
+  renderUpdate(state, send);
   if (state.view === 'game') {
     renderBoard(state, send);
   } else {
@@ -137,6 +139,8 @@ function onMsg(m: ServerMsg) {
   const s = state.snap;
   switch (m.t) {
     case 'snapshot':
+      // reconnected to a backend on another version (it was updated): the page's own files are old, load the new ones
+      if (versionChanged(m.data.update)) return location.reload();
       applyLang(m.data.language);
       state.snap = m.data;
       applyTitle();
@@ -223,6 +227,10 @@ function onMsg(m: ServerMsg) {
       break;
     case 'codexUsage':
       s.codexUsage = m.data;
+      break;
+    case 'update':
+      s.update = m.data;
+      versionChanged(m.data); // remembers the version if the first snapshot came before it was known
       break;
     case 'figureName':
       s.figureNames = { ...s.figureNames, [m.key]: m.name };

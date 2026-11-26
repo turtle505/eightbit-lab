@@ -31,6 +31,9 @@ researchRepo: ""
 workspaceRoot: ./workspaces
 # Extra folders the reports tab collects .md files from (default: workspaces/<employee folder>/reports). Personal paths go in office.local.yaml.
 # reportDirs: [../research/reports]
+# Look for a newer version of 8-bit Lab every 30 minutes (one `git fetch` of this checkout) and show it in the top bar.
+# false = never contact the remote by itself; `npm run update` in a terminal still works.
+updateCheck: true
 # Lab notebook: the office appends a line to workspaces/notebook/<date>.md whenever a task or a GPU job ends, and for every
 # "/note …" you type in the command bar. No model is called. It shows in the reports tab and in search. false = keep none.
 notebook: true

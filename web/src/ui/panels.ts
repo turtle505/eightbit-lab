@@ -1,6 +1,7 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
 import { experimentCount, openExperiments } from './experiments.ts';
+import { openUpdate, updatePill } from './update.ts';
 import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, haltLabel, haltReason, renderTopicInputs, retryLabel, scheduledBadge, topicBadge, waitingFor } from './schedule.ts';
 import { approvalRisk } from './approvalRisk.ts';
 import { lineDiff, type DiffLine } from './diff.ts';
@@ -131,7 +132,7 @@ export function renderHeader(st: UIState, send?: Send) {
   const busy = s.employees.filter((e) => !e.provider && !['idle', 'done', 'error', 'queued'].includes(e.status)).length;
   const u = s.usage;
   const cu = s.codexUsage;
-  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, cu, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
+  const data = [st.connected, busy, s.maxConcurrent, s.approvals.length, u, cu, s.update?.behind, s.update?.running, Math.floor(Date.now() / 60000), typeof Notification !== 'undefined' ? Notification.permission : 'na'];
   if (!changed('header', data)) return;
   // headline meters: session + overall weekly; model-scoped weekly rows go in the tooltip
   const main = u?.rows.filter((r) => r.kind === 'session' || r.kind === 'weekly_all') ?? [];
@@ -153,8 +154,9 @@ export function renderHeader(st: UIState, send?: Send) {
     <span class="pill ${st.connected ? 'ok' : 'bad'}">${st.connected ? tr({ ko: '● 연결됨', en: '● Online' }) : tr({ ko: '○ 연결 끊김', en: '○ Offline' })}</span>
     <span class="pill">${tr({ ko: '근무 중', en: 'Working' })} <b>${busy}</b>/${s.maxConcurrent}</span>
     <span class="pill ${s.approvals.length ? 'warn' : ''}">${tr({ ko: '승인 대기', en: 'Approvals' })} <b>${s.approvals.length}</b></span>
-    ${meters}${codexMeters}`;
+    ${meters}${codexMeters}${updatePill(s.update)}`;
   if (send) $('stats').querySelectorAll('[data-usage]').forEach((b) => b.addEventListener('click', () => send({ t: 'refreshUsage' })));
+  if (send) $('stats').querySelector('[data-update]')?.addEventListener('click', () => openUpdate(st, send));
   const nb = document.getElementById('notify-btn');
   if (nb) nb.hidden = !('Notification' in window) || Notification.permission !== 'default';
 }

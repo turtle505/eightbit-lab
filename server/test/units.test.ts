@@ -2556,3 +2556,105 @@ describe('experiments', async () => {
     expect(searchAll('plain job', store, reports, (id) => id).filter((h) => h.kind === 'experiment')).toEqual([]); // nothing recorded on it
   });
 });
+
+describe('updating from the screen', async () => {
+  const { Updater, parseBehind } = await import('../src/update.ts');
+  type Deps = import('../src/update.ts').UpdateDeps;
+
+  /** git answers from a table; the script is a promise the test finishes by hand */
+  function fake(over: Partial<{ head: string; count: string; log: string; fetchFails: boolean; canRestart: boolean }> = {}) {
+    const o = { head: 'abc1234', count: '0', log: '', fetchFails: false, canRestart: true, ...over };
+    const calls: string[] = [];
+    let finish: (code: number) => void = () => {};
+    let emit: (line: string) => void = () => {};
+    let runs = 0;
+    const deps: Deps = {
+      git: async (args) => {
+        calls.push(args.join(' '));
+        if (args[0] === 'rev-parse') {
+          if (!o.head) throw new Error('not a git repository');
+          return o.head;
+        }
+        if (args[0] === 'fetch') {
+          if (o.fetchFails) throw new Error('could not resolve host');
+          return '';
+        }
+        if (args[0] === 'rev-list') return o.count;
+        return o.log;
+      },
+      canRestart: () => o.canRestart,
+      runScript: (onLine) => {
+        runs++;
+        emit = onLine;
+        return new Promise((res) => (finish = res));
+      },
+    };
+    return { deps, o, calls, runs: () => runs, finish: (c: number) => finish(c), emit: (l: string) => emit(l) };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it('reads how many commits the remote is ahead and their subjects', () => {
+    expect(parseBehind('0\n', '')).toEqual({ behind: 0, commits: [] });
+    expect(parseBehind('3', 'Add a\nFix b\n\nTidy c\n')).toEqual({ behind: 3, commits: ['Add a', 'Fix b', 'Tidy c'] });
+    expect(parseBehind('fatal: no upstream configured', 'x')).toEqual({ behind: 0, commits: [] });
+    expect(parseBehind('25', Array.from({ length: 25 }, (_, i) => `c${i}`).join('\n')).commits).toHaveLength(20);
+  });
+
+  it('reports the running version and what the remote has', async () => {
+    const f = fake({ count: '2', log: 'Add a\nFix b' });
+    const seen: number[] = [];
+    const u = new Updater(f.deps, (v) => seen.push(v.behind));
+    await u.init();
+    expect(u.view).toMatchObject({ version: 'abc1234', canRestart: true, checkedAt: 0 });
+    const v = await u.check();
+    expect(v).toMatchObject({ behind: 2, commits: ['Add a', 'Fix b'], ok: true });
+    expect(v.checkedAt).toBeGreaterThan(0);
+    expect(seen).toEqual([2]);
+    expect(f.calls).toContain('fetch --quiet');
+  });
+
+  it('says it could not tell when the remote cannot be reached, instead of "up to date"', async () => {
+    const f = fake({ fetchFails: true, count: '4' });
+    const u = new Updater(f.deps);
+    await u.init();
+    expect(await u.check()).toMatchObject({ behind: 0, ok: false });
+  });
+
+  it('does nothing outside a git checkout', async () => {
+    const f = fake({ head: '' });
+    const u = new Updater(f.deps);
+    await u.init();
+    expect(u.view.version).toBeNull();
+    expect(await u.check()).toMatchObject({ ok: false, behind: 0 });
+    expect(f.calls).toEqual(['rev-parse --short HEAD']); // never fetched
+  });
+
+  it('runs the script once at a time and keeps its output', async () => {
+    const f = fake({ count: '1', log: 'Add a' });
+    const u = new Updater(f.deps);
+    await u.init();
+    expect(u.apply([])).toBe('started');
+    expect(u.apply([])).toBe('running');
+    expect(f.runs()).toBe(1);
+    f.emit('$ git pull --ff-only');
+    f.emit('✖ git failed — stopping here; the running backend was not touched.');
+    expect(u.view).toMatchObject({ running: true, log: ['$ git pull --ff-only', '✖ git failed — stopping here; the running backend was not touched.'] });
+    f.finish(1);
+    await tick();
+    expect(u.view.running).toBe(false);
+    expect(u.view.log.at(-1)).toBe('✖ exit 1');
+    expect(u.apply([])).toBe('started'); // free again
+  });
+
+  it('refuses while someone is working, and where it cannot restart itself', async () => {
+    const f = fake();
+    const u = new Updater(f.deps);
+    await u.init();
+    expect(u.apply(['Gauss'])).toBe('busy');
+    const g = fake({ canRestart: false });
+    const v = new Updater(g.deps);
+    await v.init();
+    expect(v.apply([])).toBe('no-restart');
+    expect(f.runs() + g.runs()).toBe(0);
+  });
+});
