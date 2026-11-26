@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { tr } from '../../shared/i18n.ts';
 import type { ReportFile } from '../../shared/protocol.ts';
+import { topicOfReport } from '../../shared/topics.ts';
 
 export interface ReportRoot {
   /** display prefix, e.g. "secretary/reports" */
@@ -77,7 +78,7 @@ export class ReportLibrary {
             const cached = this.titles.get(abs);
             const title = cached && cached.mtime === st.mtimeMs ? cached.title : titleOf(abs);
             this.titles.set(abs, { mtime: st.mtimeMs, title });
-            next.set(path, { path, root: root.label, employeeId: root.employeeId, title, size: st.size, mtime: Math.round(st.mtimeMs), abs });
+            next.set(path, { path, root: root.label, employeeId: root.employeeId, title, size: st.size, mtime: Math.round(st.mtimeMs), topic: topicOfReport(path), abs });
           }
         }
       };

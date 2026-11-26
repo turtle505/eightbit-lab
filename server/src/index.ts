@@ -14,6 +14,7 @@ import { RoutineScheduler } from './routines.ts';
 import { SkillLibrary } from './skills.ts';
 import { ReportLibrary, reportRoots } from './reports.ts';
 import { searchAll } from './search.ts';
+import { normalizeTopic, topicLine } from '../../shared/topics.ts';
 import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
 import type { Engine, FeedItem } from '../../shared/protocol.ts';
@@ -164,6 +165,7 @@ function createTask(
   startAt: number | null = null,
   engine: Engine | null = null,
   afterTask: number | null = null,
+  topic: string | null = null,
 ) {
   const known = !!assignee && agents.has(assignee);
   // following another task: wait for it if it is still going; if it already finished, start now with its result
@@ -172,7 +174,10 @@ function createTask(
   // a start time only means something with someone to start it; one that's (nearly) now just starts now.
   // A card that follows another has no start time of its own: the other task finishing is its start.
   const later = known && !waits && startAt != null && startAt > Date.now() + SCHEDULE_SLACK_MS ? startAt : null;
-  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later || waits ? assignee : null, createdBy, requireApproval, later, engine, prev ? prev.id : null);
+  // a follow-up with no topic of its own belongs to the topic of the task it follows
+  const norm = normalizeTopic(topic);
+  const subject = ('topic' in norm ? norm.topic : null) ?? prev?.topic ?? null;
+  const created = store.createTask(title.trim() || tr({ ko: '(제목 없음)', en: '(untitled)' }), detail ?? '', later || waits ? assignee : null, createdBy, requireApproval, later, engine, prev ? prev.id : null, subject);
   if (attachmentIds.length) store.bindAttachments(created.id, attachmentIds);
   const t = store.getTask(created.id)!;
   bus.send({ t: 'task', data: t });
@@ -296,7 +301,7 @@ function taskPrompt(id: number): string {
   // a follow-up gets the result of the task before it
   const prev = t.afterTask != null ? store.getTask(t.afterTask) : undefined;
   const follows = prev ? followBlock(prev, prev.assignee ? empName(prev.assignee) : 'someone') : '';
-  return `The manager assigned you task #${t.id}.\n\nTitle: ${t.title}\n\n${t.detail || '(no details)'}${attachmentBlock(store.attachmentsForTask(t.id))}${follows}\n\nWhen you finish, report where the outputs are and a summary.`;
+  return `The manager assigned you task #${t.id}.\n\nTitle: ${t.title}${topicLine(t.topic)}\n\n${t.detail || '(no details)'}${attachmentBlock(store.attachmentsForTask(t.id))}${follows}\n\nWhen you finish, report where the outputs are and a summary.`;
 }
 
 // When a delegated task ends, hand the result back to the employee who delegated it (team lead / secretary).
@@ -338,7 +343,7 @@ function handle(msg: ClientMsg, ws: WebSocket) {
   const reply = (m: ServerMsg) => ws.send(JSON.stringify(m));
   switch (msg.t) {
     case 'createTask':
-      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? [], msg.startAt ?? null, null, msg.afterTask ?? null);
+      createTask(msg.title, msg.detail, msg.assignee ?? null, null, !!msg.requireApproval, msg.attachmentIds ?? [], msg.startAt ?? null, null, msg.afterTask ?? null, msg.topic ?? null);
       break;
     case 'presence':
       if (msg.visible) watching.add(ws);

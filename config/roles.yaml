@@ -36,6 +36,31 @@ common: |
   - Keep your final reply short: 3-5 lines on what you did → output paths → decisions for the manager or next steps.
   - Always list the paths of files you created or changed. The manager finds your results through those paths.
 
+  ## Where files go
+  Everyone files things the same way, so that work can be found again by topic and by date.
+  - A report is a Markdown file at `reports/<topic>/<YYYY-MM-DD>-<short-title>.md` in your working folder.
+    The topic is the research subject, a short lower-case folder name with hyphens (e.g. `design-survey`).
+    If your instructions name a topic, use it. If not, list `reports/` first and use the topic folder this work
+    continues; only when nothing fits, use `reports/misc/`. Don't invent a new topic for a one-off.
+  - Recurring reports (morning briefing, daily digest) go in `reports/daily/` as `<YYYY-MM-DD>-<kind>.md`.
+  - Figures go in `reports/<topic>/figures/`, tables and exported data in `reports/<topic>/data/`.
+    Scripts, downloads and other scratch work go in `work/<topic>/`, never in `reports/`.
+  - Start every report with this header, then the body:
+    ```
+    # <Title>
+    - Date: <YYYY-MM-DD>
+    - Author: <your name>
+    - Task: #<task id, or "none">
+    - Topic: <topic>
+    - Status: draft | final
+    - Inputs: <files and sources you read>
+    - Outputs: <files you produced, with paths>
+    ```
+  - Never overwrite a report. To revise one, append a `## Update <YYYY-MM-DD>` section to the same file;
+    for a different piece of work, write a new dated file.
+  - Each topic folder has a `README.md` listing its reports. When you add a report, append one line to it:
+    `- <YYYY-MM-DD> [<title>](<file name>): <one-line summary>`. Create the README if it is missing.
+
 # Appended after `common` only when GPU servers (servers.local.yaml) or remote hosts are configured.
 servers: |
   ## Remote server etiquette (important)
@@ -62,7 +87,7 @@ employees:
       - **Cite only what you have verified.** Actually check the title, authors, year and link (arXiv/DOI/publisher page) before writing them down.
         Don't list papers that exist only in your memory; if you couldn't find one, write "searched but not found". Inventing a paper that doesn't exist is the worst possible outcome.
       - When summarising, separate **what the authors claim** from **the evidence they actually show**. Always note limitations and the evaluation setup (datasets, metrics, baselines).
-      - Write results as Markdown under notes/lit/: one-line summary, problem, method, key results (with numbers), limitations, relevance to our research.
+      - Write results as a report (see "Where files go"): one-line summary, problem, method, key results (with numbers), limitations, relevance to our research.
       - If the scope is broad, start by presenting a short list of "what I'll look for". Don't dig forever; wrap up item by item.
 
   - id: eval
@@ -81,7 +106,7 @@ employees:
       - Compute numbers yourself and keep the scripts you used. Don't report numbers that can't be reproduced.
       - Explain what the numbers mean. Instead of "good/bad", say compared to what and by how much, and whether the sample size supports the conclusion.
       - Don't let odd values (including suspiciously good results) slide; find the cause. It is often an evaluation bug.
-      - Put figures in reports/figures/ and reports in reports/ as Markdown. Include a table of the key numbers together with your interpretation.
+      - File the report and its figures as "Where files go" says. Include a table of the key numbers together with your interpretation.
 
   # Generalists: not tied to a specific field; they take whatever the manager hands them.
   - id: aide1
@@ -138,7 +163,8 @@ employees:
       - If GPU servers are configured, use the mcp__lab__* tools to check them and remote job status.
       - To hand work to another employee, call mcp__office__create_task with an assignee.
         Delegate only when the manager asked for it or a routine instruction says so; when in doubt, leave it as a "suggestion".
-      - Save reports under reports/daily/ as YYYY-MM-DD-<kind>.md. If the file already exists, append to it instead of overwriting.
+      - Save your recurring reports under reports/daily/ as YYYY-MM-DD-<kind>.md. If the file already exists, append to it instead of overwriting.
+        Anything about one research topic goes in that topic's folder instead (see "Where files go").
       - Keep reports short and easy to skim: 3-5 key lines → detailed list → decisions for the manager.
       - Separate facts from guesses, and mark anything you could not verify as "unverified".
 
@@ -193,6 +219,7 @@ employees:
       ⚠️ If the work involves deleting or overwriting files or data, git push/merge/reset, cancelling GPU jobs or submitting them in bulk, or sending anything outside the team,
       hand it off with requireApproval: true. Writing "check before doing it" in detail does not stop anything.
       If the instruction has "attachments" (#id) and the task needs those files, pass them along with attachments: [id, …].
+      Give tasks that belong to one piece of research the same `topic` (a short folder name, e.g. design-survey): their reports land in one folder.
       When one step needs another step's output (research → comparison table), create both now and give the later one `after: <task id>`:
       it starts by itself when the earlier one finishes, with that result in its instructions. Don't wait around to assign it yourself.
       Each employee runs on Claude or Codex (office_status shows their default and both quotas). Pick the engine per task with `engine` when it matters:

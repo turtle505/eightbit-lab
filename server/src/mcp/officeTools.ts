@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { RoutineInput } from '../routines.ts';
 import { fmtWhen, parseStartAt } from '../schedule.ts';
+import { normalizeTopic } from '../../../shared/topics.ts';
 import type { EmployeeView, Engine, Job, LogLine, RoutineView, ServerView, SkillView, Task, UsageView } from '../../../shared/protocol.ts';
 
 /** What the office exposes to the secretary. Wired up in index.ts. */
@@ -24,6 +25,7 @@ export interface OfficeApi {
     startAt?: number | null,
     engine?: Engine | null,
     afterTask?: number | null,
+    topic?: string | null,
   ): Task;
   createRoutine(input: RoutineInput): RoutineView;
   updateRoutine(id: string, patch: Partial<RoutineInput>): RoutineView;
@@ -100,7 +102,7 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           const ts = api.tasks().filter((t) => !state || t.state === state);
           return text(
             JSON.stringify(
-              ts.map((t) => ({ id: t.id, title: t.title, state: t.state, assignee: t.assignee, createdBy: t.createdBy, result: t.result ? clip(t.result, 600) : null, updated: new Date(t.updatedAt).toLocaleString('en-US') })),
+              ts.map((t) => ({ id: t.id, title: t.title, state: t.state, assignee: t.assignee, topic: t.topic, createdBy: t.createdBy, result: t.result ? clip(t.result, 600) : null, updated: new Date(t.updatedAt).toLocaleString('en-US') })),
               null,
               2,
             ),
@@ -241,6 +243,13 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
             .int()
             .optional()
             .describe('task id to review: its instruction and result are added to this task, and `engine` defaults to the other engine than the one that did it'),
+          topic: z
+            .string()
+            .optional()
+            .describe(
+              'the research subject this task belongs to, as a short folder name (a-z, 0-9, hyphens), e.g. "design-survey". ' +
+                'The assignee saves its reports under reports/<topic>/. Reuse a topic that list_tasks already shows when the work continues it; a task with `after` inherits that task\'s topic.',
+            ),
           after: z
             .number()
             .int()
@@ -254,7 +263,9 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
             .optional()
             .describe('attachment ids (#N in the "Attachments" section of your instructions) to hand to the assignee; they get the file paths in their task'),
         },
-        async ({ title, detail, assignee, requireApproval, startAt, engine, reviewOf, after, attachments }) => {
+        async ({ title, detail, assignee, requireApproval, startAt, engine, reviewOf, after, topic, attachments }) => {
+          const subject = normalizeTopic(topic);
+          if ('error' in subject) return text(`topic: ${subject.error}.`, true);
           if (assignee && !api.employees().some((e) => e.id === assignee)) return text(`unknown employee ${assignee}`, true);
           if (assignee === selfId) return text('You cannot delegate a task to yourself.', true);
           let at: number | null = null;
@@ -273,11 +284,12 @@ export function officeToolsServer(selfId: string, api: OfficeApi) {
           if ('error' in plan) return text(plan.error, true);
           const codex = api.usage().codex;
           const codexWarn = plan.engine === 'codex' && !codex.available ? ` (warning: Codex looks unavailable on this machine: ${codex.note || 'no quota info'}; the task may fail)` : '';
-          const t = api.createTask(title, plan.detail, assignee ?? null, selfId, !!requireApproval, attachments ?? [], at, plan.engine, after ?? null);
+          const t = api.createTask(title, plan.detail, assignee ?? null, selfId, !!requireApproval, attachments ?? [], at, plan.engine, after ?? null, subject.topic);
           const waiting = t.afterTask != null && t.state === 'todo';
           const missing = (attachments ?? []).filter((id) => !t.attachments.some((a) => a.id === id));
           return text(
             `created task #${t.id}${waiting ? `, waiting: ${assignee} starts it when task #${t.afterTask} finishes` : t.startAt ? `, scheduled: ${assignee} starts it ${fmtWhen(t.startAt)}` : assignee ? ` and assigned to ${assignee}` : ''}${requireApproval ? ' (🔒 every tool call needs approval)' : ''}` +
+              (t.topic ? `, topic ${t.topic}` : '') +
               (t.attachments.length ? `, attachments ${t.attachments.map((a) => `#${a.id}`).join(' ')}` : '') +
               (missing.length ? ` (ignored unknown attachment ids: ${missing.join(', ')})` : '') +
               (t.engine ? `, runs on ${t.engine} (this task only)${reviewOf != null ? `, reviewing #${reviewOf}` : ''}` : '') +

@@ -28,4 +28,4 @@ Recent commits use short, imperative, sentence-case subjects such as `Add phone 
 
 ## Configuration & Security
 
-Keep personal paths, hosts, and secrets in ignored `config/*.local.yaml` files; use `config/servers.example.yaml` as the server template. Do not commit runtime files from `data/` or `workspaces/`. Preserve approval checks around remote commands and sanitize agent-authored Markdown before rendering it in the browser.
+Keep personal paths, hosts, and secrets in ignored `config/*.local.yaml` files; use `config/servers.example.yaml` as the server template. Do not commit runtime files from `data/` or `workspaces/`. Where employees file their reports (`reports/<topic>/<date>-<title>.md`, the header block, `work/<topic>/` for scratch) is defined once, in the `common:` block of `config/roles.yaml`; change it there and keep role prompts consistent with it. Preserve approval checks around remote commands and sanitize agent-authored Markdown before rendering it in the browser.

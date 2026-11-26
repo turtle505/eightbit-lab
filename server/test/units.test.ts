@@ -2016,7 +2016,7 @@ describe('task chains', async () => {
   type Task = import('../../shared/protocol.ts').Task;
   const { isFinished, waitsOn, readyFollowers, orphanedFollowers, followBlock } = await import('../src/schedule.ts');
   const task = (id: number, state: Task['state'], afterTask: number | null = null, assignee: string | null = 'eval'): Task =>
-    ({ id, title: `t${id}`, detail: '', assignee, state, result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask, attachments: [], createdAt: 0, updatedAt: 0 }) as Task;
+    ({ id, title: `t${id}`, detail: '', assignee, state, result: null, createdBy: null, requireApproval: false, startAt: null, engine: null, afterTask, topic: null, attachments: [], createdAt: 0, updatedAt: 0 }) as Task;
   const known = (id: string) => id === 'eval' || id === 'lit';
 
   it('a task counts as finished once it reaches review or done', () => {
@@ -2117,5 +2117,72 @@ describe('the office title', async () => {
     expect(page).toContain('<h1>👾 Lab &lt;b&gt;&amp;&quot;x&quot;</h1>');
     expect(page).toContain('<title>Lab &lt;b&gt;&amp;&quot;x&quot; · ');
     expect(page).not.toContain('<b>&"x"');
+  });
+});
+
+describe('topics', async () => {
+  const { normalizeTopic, topicOfReport, knownTopics, topicLine, TOPIC_MAX } = await import('../../shared/topics.ts');
+
+  it('tells the assignee where a topic\'s files go, and says nothing without one', () => {
+    expect(topicLine('design-survey')).toContain('reports/design-survey/');
+    expect(topicLine('design-survey')).toContain('work/design-survey/');
+    expect(topicLine(null)).toBe('');
+  });
+
+  it('tidies what was typed into a folder name, and refuses what would not make one', () => {
+    expect(normalizeTopic('design-survey')).toEqual({ topic: 'design-survey' });
+    expect(normalizeTopic('  Design Survey ')).toEqual({ topic: 'design-survey' });
+    expect(normalizeTopic('1ru7_analysis')).toEqual({ topic: '1ru7-analysis' });
+    expect(normalizeTopic('a--b')).toEqual({ topic: 'a-b' });
+    expect(normalizeTopic('')).toEqual({ topic: null });
+    expect(normalizeTopic(null)).toEqual({ topic: null });
+    expect(normalizeTopic('   ')).toEqual({ topic: null });
+    for (const bad of ['설계 조사', 'a/b', '../x', 'a.b', 'daily', 'misc', 'figures', 'x'.repeat(TOPIC_MAX + 1)]) expect(normalizeTopic(bad), bad).toHaveProperty('error');
+    expect(normalizeTopic('x'.repeat(TOPIC_MAX))).toEqual({ topic: 'x'.repeat(TOPIC_MAX) });
+  });
+
+  it('reads a report\'s topic from the folder right under reports/', () => {
+    expect(topicOfReport('shared/reports/design-survey/2026-11-26-x.md')).toBe('design-survey');
+    expect(topicOfReport('shared/reports/design-survey/figures/notes.md')).toBe('design-survey');
+    expect(topicOfReport('lit/reports/x.md')).toBeNull(); // directly in reports/
+    expect(topicOfReport('secretary/reports/daily/2026-11-26-mail.md')).toBeNull();
+    expect(topicOfReport('shared/reports/misc/2026-11-26-x.md')).toBeNull();
+    expect(topicOfReport('notebook/2026-11-26.md')).toBeNull(); // not under a reports folder at all
+  });
+
+  it('lists the topics in use, the most recently touched first', () => {
+    const tasks = [{ topic: 'a', updatedAt: 10 }, { topic: null, updatedAt: 99 }, { topic: 'b', updatedAt: 30 }];
+    const reports = [{ topic: 'a', mtime: 50 }, { topic: 'c', mtime: 20 }, { topic: null, mtime: 99 }];
+    expect(knownTopics(tasks, reports)).toEqual(['a', 'b', 'c']);
+    expect(knownTopics([], [])).toEqual([]);
+  });
+
+  it('is stored on the task, and an older database opens without it', () => {
+    const s = new Store(':memory:');
+    const a = s.createTask('조사', '', 'lit', null, false, null, null, null, 'design-survey');
+    expect(s.getTask(a.id)!.topic).toBe('design-survey');
+    expect(s.createTask('주제 없음', '', null).topic).toBeNull();
+    expect(s.searchTasks(['조사'], 5)[0].topic).toBe('design-survey');
+
+    const f = join(mkdtempSync(join(tmpdir(), 'office-db-')), 'office.db');
+    const old = new DatabaseSync(f);
+    old.exec(`CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', assignee TEXT, state TEXT NOT NULL DEFAULT 'todo', result TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+      INSERT INTO tasks (title, createdAt, updatedAt) VALUES ('예전 작업', 1, 1);`);
+    old.close();
+    expect(new Store(f).listTasks()[0]).toMatchObject({ title: '예전 작업', topic: null });
+  });
+
+  it('the report index tags each file with its topic', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'office-topic-'));
+    const w = (rel: string) => {
+      mkdirSync(join(ws, rel, '..'), { recursive: true });
+      writeFileSync(join(ws, rel), '# t');
+    };
+    w('shared/reports/design-survey/2026-11-26-a.md');
+    w('shared/reports/daily/2026-11-26-mail.md');
+    w('shared/reports/loose.md');
+    const lib = new ReportLibrary(() => reportRoots(ws, [], () => null));
+    const by = Object.fromEntries(lib.scan().map((r) => [r.path, r.topic]));
+    expect(by).toEqual({ 'shared/reports/design-survey/2026-11-26-a.md': 'design-survey', 'shared/reports/daily/2026-11-26-mail.md': null, 'shared/reports/loose.md': null });
   });
 });

@@ -1,5 +1,6 @@
 import { dowShort, hhmm, tr } from '../../../shared/i18n.ts';
-import type { Task } from '../../../shared/protocol.ts';
+import type { ReportFile, Task } from '../../../shared/protocol.ts';
+import { knownTopics, normalizeTopic } from '../../../shared/topics.ts';
 
 /** value for <input type="datetime-local"> (local time, minutes) */
 const toLocalInput = (d: Date) => {
@@ -70,6 +71,27 @@ export function checkAfter(value: string, assignee: string | null): number | nul
   if (!value) return null;
   if (!assignee) return void alert(tr({ ko: '다른 작업 뒤에 시작하려면 담당 직원을 골라 주세요.', en: 'Pick an assignee for a task that starts after another one.' }));
   return Number(value);
+}
+
+// ---- topics (shared/topics.ts): the research subject a task belongs to ----
+/** The topic field's value as a folder name; alerts and returns undefined when it would not make one. */
+export function checkTopic(value: string): string | null | undefined {
+  const n = normalizeTopic(value);
+  if ('error' in n)
+    return void alert(tr({ ko: '주제는 폴더 이름이 됩니다. 영문 소문자, 숫자, 하이픈만 쓸 수 있습니다 (예: design-survey).', en: 'A topic becomes a folder name: only a-z, 0-9 and hyphens (e.g. design-survey).' }));
+  return n.topic;
+}
+export const topicBadge = (t: Task): string => (t.topic ? `<span class="topic-badge" title="${tr({ ko: '주제', en: 'Topic' })}">#${t.topic}</span>` : '');
+/** Fill the shared datalist and the two fields' placeholders (called from both task forms' renders). */
+export function renderTopicInputs(tasks: Task[], reports: ReportFile[]) {
+  const list = document.getElementById('topic-list');
+  if (list) list.innerHTML = knownTopics(tasks, reports).map((t) => `<option value="${t}"></option>`).join('');
+  for (const id of ['task-topic', 'c-task-topic']) {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (!el) continue;
+    el.placeholder = tr({ ko: '주제 (선택, 예: design-survey)', en: 'Topic (optional, e.g. design-survey)' });
+    el.title = tr({ ko: '이 작업이 속한 연구 주제. 보고서가 reports/<주제>/ 아래에 저장됩니다.', en: 'The research subject this task belongs to. Its reports are saved under reports/<topic>/.' });
+  }
 }
 
 /**

@@ -133,6 +133,8 @@ export interface Task {
    * then starts with that task's result in its instructions; null = does not follow anything
    */
   afterTask: number | null;
+  /** the research subject this task belongs to (see shared/topics.ts): its reports go in reports/<topic>/; null = none */
+  topic: string | null;
   attachments: AttachmentView[];
   createdAt: number;
   updatedAt: number;
@@ -219,6 +221,8 @@ export interface ReportFile {
   title: string;
   size: number;
   mtime: number;
+  /** the topic folder it is in (reports/<topic>/…), if any */
+  topic: string | null;
 }
 
 /** One card in the 📨 report feed: a report file that appeared/changed, or a finished run's final answer. */
@@ -391,7 +395,7 @@ export type ServerMsg =
 
 // client -> server
 export type ClientMsg =
-  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[]; startAt?: number | null; afterTask?: number | null }
+  | { t: 'createTask'; title: string; detail: string; assignee?: string | null; requireApproval?: boolean; attachmentIds?: number[]; startAt?: number | null; afterTask?: number | null; topic?: string | null }
   /** whether this tab is in front (phone notifications are held back while someone is watching) */
   | { t: 'presence'; visible: boolean }
   | { t: 'assignTask'; taskId: number; employeeId: string }

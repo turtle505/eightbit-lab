@@ -1,6 +1,6 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
-import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, scheduledBadge, waitingFor } from './schedule.ts';
+import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, renderTopicInputs, scheduledBadge, topicBadge, waitingFor } from './schedule.ts';
 import { approvalRisk } from './approvalRisk.ts';
 import { lineDiff, type DiffLine } from './diff.ts';
 import type { Approval, ClientMsg, EmployeeView, LogLine, Snapshot, Task, TaskState, UsageRow } from '../../../shared/protocol.ts';
@@ -260,6 +260,7 @@ export function renderBoard(st: UIState, send: Send) {
     sel.innerHTML = `<option value="">${tr({ ko: '(나중에 배정)', en: '(assign later)' })}</option>` + emps.map((e) => `<option value="${esc(e.id)}">${esc(short(e.name))} · ${esc(e.title)}</option>`).join('');
     sel.value = v;
   }
+  if (changed('topicInputs', [s.tasks.map((t) => t.topic), s.reports.map((r) => r.topic), getLang()])) renderTopicInputs(s.tasks, s.reports);
   // "start after" picker: the tasks that have not finished yet
   if (changed('afterSelect', [s.tasks.map((t) => [t.id, t.title, t.state]), getLang()])) {
     const sel = $('task-after') as HTMLSelectElement;
@@ -283,7 +284,7 @@ export function renderBoard(st: UIState, send: Send) {
       agoText(t.updatedAt),
     ].join(' · ');
     const waits = !!waitingFor(t, s.tasks);
-    const marks = `${engineBadge(t)}${t.requireApproval ? lock + ' ' : ''}${t.startAt != null && state === 'todo' ? scheduledBadge(t) + ' ' : ''}${waits ? chainBadge(t, s.tasks) + ' ' : ''}${
+    const marks = `${engineBadge(t)}${t.requireApproval ? lock + ' ' : ''}${t.startAt != null && state === 'todo' ? scheduledBadge(t) + ' ' : ''}${waits ? chainBadge(t, s.tasks) + ' ' : ''}${t.topic ? topicBadge(t) + ' ' : ''}${
       t.attachments?.length ? `<span class="muted">📎${t.attachments.length}</span> ` : ''
     }`;
     const body = open
@@ -585,11 +586,13 @@ export function bindNewTaskForm(send: Send) {
     const detail = ($('task-detail') as HTMLTextAreaElement).value;
     const assignee = ($('task-assignee') as HTMLSelectElement).value || null;
     const requireApproval = ($('task-lock') as HTMLInputElement).checked;
+    const topic = checkTopic(($('task-topic') as HTMLInputElement).value);
+    if (topic === undefined) return;
     const afterTask = checkAfter(($('task-after') as HTMLSelectElement).value, assignee);
     if (afterTask === undefined) return;
     const startAt = checkSchedule(when.take(), assignee);
     if (startAt === undefined) return;
-    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt, afterTask });
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt, afterTask, topic });
     form.reset();
     when.reset();
   });

@@ -60,7 +60,7 @@ export function inferLogEngines(lines: Pick<LegacyLog, 'kind' | 'text'>[]): Engi
   return out;
 }
 
-const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, engine: r.engine === 'claude' || r.engine === 'codex' ? r.engine : null, afterTask: r.afterTask ?? null, attachments });
+const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, engine: r.engine === 'claude' || r.engine === 'codex' ? r.engine : null, afterTask: r.afterTask ?? null, topic: r.topic ?? null, attachments });
 
 export interface RoutineRow {
   id: string;
@@ -166,6 +166,7 @@ export class Store {
     if (!tcols.includes('startAt')) this.db.exec('ALTER TABLE tasks ADD COLUMN startAt INTEGER');
     if (!tcols.includes('engine')) this.db.exec('ALTER TABLE tasks ADD COLUMN engine TEXT');
     if (!tcols.includes('afterTask')) this.db.exec('ALTER TABLE tasks ADD COLUMN afterTask INTEGER');
+    if (!tcols.includes('topic')) this.db.exec('ALTER TABLE tasks ADD COLUMN topic TEXT');
     const lcols = (this.db.prepare('PRAGMA table_info(logs)').all() as any[]).map((c) => c.name);
     if (!lcols.includes('engine')) {
       this.db.exec('ALTER TABLE logs ADD COLUMN engine TEXT');
@@ -215,11 +216,12 @@ export class Store {
     startAt: number | null = null,
     engine: Engine | null = null,
     afterTask: number | null = null,
+    topic: string | null = null,
   ): Task {
     const now = Date.now();
     const r = this.db
-      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, startAt, engine, afterTask, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, startAt, engine, afterTask, now, now);
+      .prepare('INSERT INTO tasks (title, detail, assignee, state, createdBy, requireApproval, startAt, engine, afterTask, topic, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(title, detail, assignee, 'todo', createdBy, requireApproval ? 1 : 0, startAt, engine, afterTask, topic, now, now);
     return this.getTask(Number(r.lastInsertRowid))!;
   }
   updateTask(id: number, patch: Partial<Pick<Task, 'assignee' | 'state' | 'result' | 'startAt' | 'afterTask'>>): Task | undefined {

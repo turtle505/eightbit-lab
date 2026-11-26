@@ -3,7 +3,7 @@ import { attachmentLinks, bindAttach } from './attach.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, agoText, byRecent, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
-import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, scheduledBadge } from './schedule.ts';
+import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, scheduledBadge, topicBadge } from './schedule.ts';
 
 const STATE: Record<TaskState, { ko: string; en: string }> = {
   todo: { ko: '할 일', en: 'To do' },
@@ -113,7 +113,7 @@ export function renderTaskTable(st: UIState, send: Send) {
         <td class="num">#${t.id}</td>
         <td class="title"><button class="link" data-act="expand" aria-expanded="${open}">${open ? '▾' : '▸'} ${engineBadge(t)}${t.requireApproval ? tr({ ko: '[승인] ', en: '[ask] ' }) : ''}${esc(t.title)}${
           t.attachments?.length ? ` <span class="muted">${tr({ ko: `[첨부 ${t.attachments.length}]`, en: `[${t.attachments.length} files]` })}</span>` : ''
-        }</button> ${scheduledBadge(t)}${chainBadge(t, st.snap.tasks)}</td>
+        }</button> ${scheduledBadge(t)}${chainBadge(t, st.snap.tasks)}${topicBadge(t)}</td>
         <td><select data-act="state">${stateOpts(t.state)}</select></td>
         <td><select data-act="assign">${empOpts(t.assignee)}</select></td>
         <td class="num muted">${ago(t.updatedAt)}</td>
@@ -174,11 +174,13 @@ export function bindConsoleTaskForm(send: Send) {
     const detail = ($('c-task-detail') as HTMLInputElement).value;
     const assignee = ($('c-task-assignee') as HTMLSelectElement).value || null;
     const requireApproval = ($('c-task-lock') as HTMLInputElement).checked;
+    const topic = checkTopic(($('c-task-topic') as HTMLInputElement).value);
+    if (topic === undefined) return;
     const afterTask = checkAfter(($('c-task-after') as HTMLSelectElement).value, assignee);
     if (afterTask === undefined) return;
     const startAt = checkSchedule(when.take(), assignee);
     if (startAt === undefined) return;
-    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt, afterTask });
+    send({ t: 'createTask', title, detail, assignee, requireApproval, attachmentIds: att.take(), startAt, afterTask, topic });
     form.reset();
     when.reset();
   });

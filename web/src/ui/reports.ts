@@ -85,12 +85,22 @@ interface Dir {
   latest: number;
 }
 
+/** group by topic folder (whoever's desk it is on) instead of by desk */
+let byTopic = false;
+try {
+  byTopic = localStorage.getItem('office.reports.byTopic') === '1';
+} catch {
+  /* storage unavailable: by desk */
+}
+
 function buildTree(reports: ReportFile[]): Dir {
   const root: Dir = { name: '', key: '', dirs: new Map(), files: [], latest: 0 };
   for (const r of reports) {
     // the root label ("secretary/reports") is one node; folders below it are nested
     const rest = r.path.slice(r.root.length + 1).split('/');
-    const segs = [r.root, ...rest.slice(0, -1)];
+    // by topic: one node per topic with its sub-folders under it; everything without a topic under "(no topic)", by desk
+    const noTopic = tr({ ko: '(주제 없음)', en: '(no topic)' });
+    const segs = !byTopic ? [r.root, ...rest.slice(0, -1)] : r.topic ? [`# ${r.topic}`, ...rest.slice(rest.indexOf(r.topic) + 1, -1)] : [noTopic, r.root, ...rest.slice(0, -1)];
     let d = root;
     for (const seg of segs) {
       const key = d.key ? `${d.key}/${seg}` : seg;
@@ -145,12 +155,24 @@ export function renderReports(st: UIState) {
     box.innerHTML = `<aside class="panel rp-side">
         <div class="row space"><h2 id="rp-h"></h2><a id="rp-newwin" class="small" href="?view=reports" target="_blank" rel="noopener"></a></div>
         <input id="rp-filter" autocomplete="off" />
+        <label class="small rp-bytopic"><input type="checkbox" id="rp-bytopic" /> <span id="rp-bytopic-label"></span></label>
         <div id="rp-tree" class="rp-tree"></div>
       </aside>
       <section class="panel rp-main" id="rp-viewer"></section>`;
     const f = $('rp-filter') as HTMLInputElement;
     f.addEventListener('input', () => {
       filter = f.value.trim().toLowerCase();
+      renderReports(st);
+    });
+    const bt = $('rp-bytopic') as HTMLInputElement;
+    bt.checked = byTopic;
+    bt.addEventListener('change', () => {
+      byTopic = bt.checked;
+      try {
+        localStorage.setItem('office.reports.byTopic', byTopic ? '1' : '0');
+      } catch {
+        /* not remembered */
+      }
       renderReports(st);
     });
     const tree = $('rp-tree');
@@ -198,9 +220,10 @@ export function renderReports(st: UIState) {
     a.textContent = tr({ ko: '새 창 ↗', en: 'New window ↗' });
     a.title = tr({ ko: '보고서 창을 새 브라우저 창으로 열기', en: 'Open the reports in a new browser window' });
     ($('rp-filter') as HTMLInputElement).placeholder = tr({ ko: '제목·파일명 검색', en: 'Search titles and file names' });
+    $('rp-bytopic-label').textContent = tr({ ko: '주제별로 보기', en: 'Group by topic' });
   }
 
-  if (changed('rp-tree', [reports, filter, openPath, seenVersion, [...collapsed]])) {
+  if (changed('rp-tree', [reports, filter, openPath, seenVersion, [...collapsed], byTopic])) {
     const q = filter;
     const tree = $('rp-tree');
     if (!reports.length) {

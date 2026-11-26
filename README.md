@@ -111,7 +111,8 @@ Once the tutorial is cleared, this is the full list of controls.
 | Assign a task | Add a card on the task board → drag it onto an employee (or pick from the card's dropdown) |
 | Approve / deny | Use the yellow approval panel (<kbd>a</kbd> / <kbd>d</kbd> in the console view) |
 | Check results | Finished cards move to **Review** (newest on top): click a card title to open its report, then **Done**, or **All done** for the whole column. Done keeps the latest five in view |
-| Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts |
+| Group work by research topic | The **Topic** box in the task form (e.g. `design-survey`; earlier topics are suggested). The employee files that task's reports under `reports/<topic>/`, and a task that follows another takes its topic. Lower-case letters, digits and hyphens only, since it becomes a folder name |
+| Read old reports | **Reports** tab: every `.md` report as a folder tree, with unread counts. Tick **By topic** to group them by topic instead of by employee |
 | Find something from before | The search box in the top bar (<kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd>): looks through report text, employee logs, task cards and the report feed. Several words must all occur |
 | Stop someone | **Stop** in the employee panel (ends the current turn, keeps the conversation) |
 | Start fresh | **New session** in the employee panel (clears the conversation) |
@@ -163,7 +164,7 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `config/routines.yaml` | Starter routines: weekday 09:00 morning briefing, weekday 18:00 evening report, Friday 17:00 weekly review (off) |
 | `config/servers.local.yaml` | Your GPU servers (copy `servers.example.yaml`) |
 
-**Workspaces.** With `researchRepo` set, each engineer works in their own git worktree (branch `office/<id>`), so they don't step on each other. Without it, everyone shares `workspaces/shared`. Reports go to `workspaces/<employee>/reports/`.
+**Workspaces.** With `researchRepo` set, each engineer works in their own git worktree (branch `office/<id>`), so they don't step on each other. Without it, everyone shares `workspaces/shared`. Reports go to `workspaces/<employee>/reports/`, and inside it employees follow one layout: `reports/<topic>/<date>-<short-title>.md` for a research topic (with `figures/` and `data/` beside it and a `README.md` listing the topic's reports), `reports/daily/` for recurring briefings, `reports/misc/` for one-offs. Every report opens with the same header (date, author, task, topic, status, inputs, outputs), and scratch work stays out of `reports/`, in `work/<topic>/`. The rule lives in the `common:` block of `roles.yaml` and applies to reports written from now on; older ones stay where they are unless you ask the assistant to tidy them.
 
 **The team.**
 

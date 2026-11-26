@@ -1733,3 +1733,31 @@ body .md-body h4 {
 .t-game .office-title {
   text-transform: uppercase;
 }
+
+/* topics: the field in the task forms, the tag on cards, the toggle in the reports view */
+.topic-input {
+  font-size: 12px;
+  min-width: 0;
+}
+.task-extra {
+  margin-top: 6px;
+  gap: 6px;
+}
+.task-extra .topic-input,
+.task-extra .after-select {
+  flex: 1 1 0;
+  width: auto;
+  margin-top: 0;
+}
+.topic-badge {
+  font-size: 11px;
+  color: #3d6b8c;
+  background: rgba(79, 129, 189, 0.14);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.rp-bytopic {
+  display: block;
+  margin: 6px 0;
+}
