@@ -5,6 +5,7 @@ import { bus } from './bus.ts';
 import type { RoleConfig } from './config.ts';
 import type { Store } from './db.ts';
 import type { HostRegistry } from './hosts.ts';
+import { canSeat, SEATS_PER_TABLE, TABLES } from '../../shared/seating.ts';
 
 /** Deterministic colour from a string, so a session always looks the same. */
 const hashOf = (s: string) => {
@@ -193,6 +194,16 @@ export class ProjectRegistry {
 
   /** Give a session a desk in the office, or send it back to the projects tab. */
   setInOffice(id: string, inOffice: boolean) {
+    if (inOffice) {
+      // the office has two project tables of four seats (shared/seating.ts); the room does not grow for sessions
+      const fit = canSeat(this.store.listProjectSessions(), id);
+      if (!fit.ok)
+        throw new Error(
+          fit.why === 'tables'
+            ? tr({ ko: `사무실의 탁자 ${TABLES}개를 다른 프로젝트가 쓰고 있습니다. 세션은 프로젝트 탭에서 그대로 쓸 수 있습니다.`, en: `Both of the office's ${TABLES} tables belong to other projects. The session still works from the projects tab.` })
+            : tr({ ko: `이 프로젝트의 탁자가 찼습니다 (탁자당 ${SEATS_PER_TABLE}명). 세션은 프로젝트 탭에서 그대로 쓸 수 있습니다.`, en: `This project's table is full (${SEATS_PER_TABLE} to a table). The session still works from the projects tab.` }),
+        );
+    }
     const desk = this.store.setSessionDesk(id, inOffice, this.staffDesks());
     this.agents.updateWorker(id, { desk });
     this.send();

@@ -572,7 +572,12 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       break;
     }
     case 'setSessionInOffice':
-      projects.setInOffice(msg.id, msg.inOffice);
+      try {
+        projects.setInOffice(msg.id, msg.inOffice);
+      } catch (e) {
+        // no seat at the project tables: say so, without the alarm of an error
+        reply({ t: 'notice', level: 'warn', text: String((e as Error).message) });
+      }
       break;
     case 'setProviderModel':
       providers.setModel(msg.providerId, msg.model);

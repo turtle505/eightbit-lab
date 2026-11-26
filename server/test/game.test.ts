@@ -309,3 +309,50 @@ describe('where the desks go', async () => {
     expect(widthFor(1)).toBe(400); // never narrower than the starting room
   });
 });
+
+describe('project tables', async () => {
+  const { tablePlan, canSeat, projectOfSession, TABLES, SEATS_PER_TABLE } = await import('../../shared/seating.ts');
+  const s = (id: string, desk: number) => ({ id, desk });
+
+  it('reads the project out of a session id', () => {
+    expect(projectOfSession('p:pr-ca2c2ec1:2')).toBe('pr-ca2c2ec1');
+    expect(projectOfSession('p:odd:name:7')).toBe('odd:name');
+    expect(projectOfSession('lit')).toBeNull();
+  });
+
+  it('gives each project a table in the order they came in, and seats its sessions along it', () => {
+    const plan = tablePlan([s('p:b:1', 8), s('p:a:1', 6), s('p:a:2', 7), s('p:a:3', -1), s('p:b:2', 9), s('lit', 0)]);
+    expect(plan.tables).toEqual(['a', 'b']); // a's first session came in before b's
+    expect(Object.fromEntries(plan.seats)).toEqual({
+      'p:a:1': { table: 0, seat: 0 },
+      'p:a:2': { table: 0, seat: 1 },
+      'p:b:1': { table: 1, seat: 0 },
+      'p:b:2': { table: 1, seat: 1 },
+    });
+    expect(plan.seats.has('p:a:3')).toBe(false); // not in the office
+    expect(plan.seats.has('lit')).toBe(false); // staff keep their desks
+  });
+
+  it('closes the gap when someone leaves, and gives up the table when the last one does', () => {
+    const before = [s('p:a:1', 6), s('p:a:2', 7), s('p:a:3', 8), s('p:b:1', 9)];
+    const after = tablePlan(before.filter((x) => x.id !== 'p:a:1'));
+    expect(after.seats.get('p:a:2')).toEqual({ table: 0, seat: 0 });
+    expect(after.seats.get('p:a:3')).toEqual({ table: 0, seat: 1 });
+    expect(tablePlan([s('p:b:1', 9)]).tables).toEqual(['b']); // b moves up to the first table
+    expect(tablePlan([]).tables).toEqual([]);
+  });
+
+  it('has room for two projects of four and says which limit was hit', () => {
+    expect([TABLES, SEATS_PER_TABLE]).toEqual([2, 4]);
+    const full = [1, 2, 3, 4].map((n) => s(`p:a:${n}`, 5 + n));
+    expect(canSeat(full.slice(0, 3), 'p:a:4')).toEqual({ ok: true });
+    expect(canSeat(full, 'p:a:5')).toEqual({ ok: false, why: 'seats' });
+    expect(canSeat(full, 'p:a:2')).toEqual({ ok: true }); // already seated: asking again is fine
+    expect(canSeat(full, 'p:b:1')).toEqual({ ok: true }); // the second table is free
+    const two = [...full, s('p:b:1', 10)];
+    expect(canSeat(two, 'p:c:1')).toEqual({ ok: false, why: 'tables' });
+    expect(canSeat(two, 'p:b:2')).toEqual({ ok: true });
+    expect(canSeat([...two, s('p:c:1', -1)], 'p:c:1')).toEqual({ ok: false, why: 'tables' }); // being listed but outside does not hold a table
+    expect(canSeat(two, 'lit')).toEqual({ ok: true }); // not a session: not this rule's business
+  });
+});

@@ -10,6 +10,7 @@ import {
 } from './rules.ts';
 import type { AgentStatus, EmployeeView, Seat, ServerView, Task } from '../../../shared/protocol.ts';
 import { BASE_COLS, BASE_ROWS, BASE_W, COL_W, colsFor, deskCell, rowsFor, widthFor } from './rules.ts';
+import { SEATS_PER_TABLE, tablePlan, type TablePlan } from '../../../shared/seating.ts';
 import { COFFEE, COFFEE_COLORS, PLANT_COLORS, PLANT_STAGES, PROF_H, PROF_W, SPRITE_W, characterSprite, spriteHeight, MANAGER_H, MANAGER_W, MANAGER_HEAD, managerSprite, type ManagerPose, paintMap, professorSprite, type Pose } from './sprites.ts';
 
 /** current canvas width; grows by a column at a time as desks are added (see OfficeScene.layout) */
@@ -35,10 +36,10 @@ export { rowsFor };
 /** current canvas height; grows as desks are added (see OfficeScene.layout) */
 export let H = heightFor(MIN_ROWS);
 /**
- * Where the professor (the `seat: 'podium'` employee) stands: in the aisle between the last desk row and the
- * manager, right of the manager desk. Kept clear of the grid — he used to stand on the lead's desk.
+ * Where the professor (the `seat: 'podium'` employee) stands: by the right wall, between the two project
+ * tables (see tableY), clear of the desk grid.
  */
-let PROF = { x: 346, y: 150 };
+let PROF = { x: 346, y: H - 80 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
 /** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
 const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
@@ -100,6 +101,16 @@ const seatPos = (seat: 'reception' | 'lead') => (seat === 'reception' ? { x: 206
 const cornerSpot = (i: number): Spot => ({ x: 44 + i * 32, y: H - 10 });
 /** how tall a character stands, in canvas pixels: a look can rise above the head, and the professor is on a podium */
 const tallOf = (v: { seat?: Seat; sprite?: { look?: string } }): number => (v.seat === 'podium' ? PROF_H + 2 : spriteHeight(v.sprite?.look));
+// Project sessions share a table per project in the strip between the desk grid and the right wall, one above
+// the professor and one below him, so the room never grows with the number of sessions (shared/seating.ts).
+// clear of the desk rug on the left and the bookshelf above; the professor stands between the two tables
+const TABLE_W = 72;
+const TABLE_SEAT_W = 17;
+const tableX = () => rx(322);
+const tableY = (table: number) => (table === 0 ? 118 : H - 48);
+/** where the session in seat `seat` of table `table` sits: behind the table, like at a desk */
+const tableSeat = (table: number, seat: number): Spot => ({ x: tableX() + 10 + Math.min(seat, SEATS_PER_TABLE - 1) * TABLE_SEAT_W, y: tableY(table) + 2 });
+const isSession = (v: { kind?: string }) => v.kind === 'project';
 /** characters who stand at a fixed spot and talk in speech bubbles instead of working at a desk */
 const isChat = (v: { seat?: Seat }) => v.seat === 'corner' || v.seat === 'podium';
 const standSpot = (i: number, seat: Seat): Spot => (seat === 'podium' ? { x: PROF.x, y: PROF.y } : cornerSpot(i));
@@ -215,6 +226,9 @@ export class OfficeScene {
   /** grid rows currently drawn; grows as desks are handed out */
   private rows = MIN_ROWS;
   private cols = BASE_COLS;
+  /** which project session sits at which table seat (recomputed when sessions come and go) */
+  private plan: TablePlan = tablePlan([]);
+  private tableTags: HTMLDivElement[] = [];
   private figureTags = new Map<SceneFigure, HTMLDivElement>();
   private boardText = '';
   /** the manager's line to a corner character, shown over the manager's head */
@@ -350,6 +364,13 @@ export class OfficeScene {
     this.bagTag = document.createElement('div');
     this.bagTag.className = 'nametag';
     overlay.append(this.bagTag);
+    for (let t = 0; t < 2; t++) {
+      const tag = document.createElement('div');
+      tag.className = 'nametag table-tag';
+      tag.hidden = true;
+      overlay.append(tag);
+      this.tableTags.push(tag);
+    }
     // defer to the next frame: resizing inside the observer callback re-triggers it ("ResizeObserver loop" warning)
     new ResizeObserver(() => requestAnimationFrame(() => this.resize())).observe(host);
     this.resize();
@@ -1089,7 +1110,9 @@ export class OfficeScene {
    * and the static layer all follow the row count, so adding a session just makes the office taller.
    */
   private layout() {
-    const maxSlot = Math.max(-1, ...[...this.actors.values()].filter((a) => !a.view.seat).map((a) => a.view.desk));
+    // sessions sit at the project tables, so only the staff's desks size the room
+    this.plan = tablePlan([...this.actors.values()].filter((a) => isSession(a.view)).map((a) => ({ id: a.id, desk: a.view.desk })));
+    const maxSlot = Math.max(-1, ...[...this.actors.values()].filter((a) => !a.view.seat && !isSession(a.view)).map((a) => a.view.desk));
     const rows = rowsFor(maxSlot);
     const cols = colsFor(maxSlot);
     if (rows === this.rows && cols === this.cols) return;
@@ -1097,7 +1120,7 @@ export class OfficeScene {
     this.cols = cols;
     H = heightFor(rows);
     W = widthFor(cols);
-    PROF = { x: rx(346), y: H - 86 };
+    PROF = { x: rx(346), y: H - 80 };
     this.canvas.width = W;
     this.canvas.height = H;
     this.floor = this.paintStatic();
@@ -1133,7 +1156,7 @@ export class OfficeScene {
     }
     let a = this.actors.get(v.id);
     if (!a) {
-      const start = isChat(v) || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
+      const start = isSession(v) ? { x: tableX() + TABLE_W / 2, y: tableY(0) + 2 } : isChat(v) || v.stayAtDesk || v.live ? seatSpot(v.desk, v.seat) : coffeeSpot(v.desk);
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const tag = document.createElement('div');
@@ -1477,6 +1500,35 @@ export class OfficeScene {
     g.fillRect(x + 46, y + 18, 6, 1);
   }
 
+  /** A project's shared table: a plain long table with a laptop in front of each session (its screen lit while that one works). */
+  private drawTable(table: number) {
+    const g = this.g;
+    const x = tableX();
+    const y = tableY(table);
+    g.fillStyle = '#7d5a3c';
+    g.fillRect(x, y, TABLE_W, 9);
+    g.fillStyle = '#93704e';
+    g.fillRect(x, y, TABLE_W, 2);
+    g.fillStyle = '#5f432b';
+    g.fillRect(x, y + 9, TABLE_W, 2);
+    g.fillRect(x + 2, y + 11, 3, 5);
+    g.fillRect(x + TABLE_W - 5, y + 11, 3, 5);
+    for (const a of this.actors.values()) {
+      const at = this.plan.seats.get(a.id);
+      if (!at || at.table !== table) continue;
+      const sx = tableSeat(table, at.seat).x;
+      const here = a.x === sx && a.y === y + 2;
+      const busy = here && a.view.status in MONITOR_GLOW;
+      // the laptop, seen from behind: lid up, a glow on the lid edge while its owner is working
+      g.fillStyle = '#30343c';
+      g.fillRect(sx - 5, y - 4, 10, 6);
+      g.fillStyle = busy ? (Math.floor(this.t / 10) % 2 ? '#bfe6ff' : '#8fd0ff') : '#4a505c';
+      g.fillRect(sx - 4, y - 5, 8, 1);
+      g.fillStyle = '#c9ced6';
+      g.fillRect(sx - 6, y + 2, 12, 2);
+    }
+  }
+
   // ---- team lead's desk: a regular desk plus a simple office chair and a small brass nameplate (kept modest
   // so the manager's desk next to it stays the showpiece)
   private drawLeadChair(i: number, seat?: Seat) {
@@ -1519,8 +1571,17 @@ export class OfficeScene {
     });
   }
 
+  /** Where this employee sits: a desk in the grid, a fixed spot, or (a project session) a seat at its project's table. */
+  private seatOf(v: EmployeeView): Spot {
+    if (!isSession(v)) return seatSpot(v.desk, v.seat);
+    const at = this.plan.seats.get(v.id);
+    return at ? tableSeat(at.table, at.seat) : tableSeat(0, 0);
+  }
+
   private target(a: Actor): Spot {
     const v = a.view;
+    // a session stays at its table: the strip it sits in is too narrow for comings and goings
+    if (isSession(v)) return this.seatOf(v);
     if (v.stayAtDesk || isChat(v)) return seatSpot(v.desk, v.seat);
     // Hana goes from one ball of paper to the next while she is tidying up
     if (this.cleaning && v.id === 'sec') {
@@ -1589,10 +1650,10 @@ export class OfficeScene {
 
     for (const a of this.actors.values()) {
       const v = a.view;
-      const spot = seatSpot(v.desk, v.seat);
+      const spot = this.seatOf(v);
       const seated = a.x === spot.x && a.y === spot.y;
       items.push({ y: a.y + (seated ? -0.5 : 0), draw: () => this.drawActor(a, seated) });
-      if (isChat(v)) continue; // they stand; no desk
+      if (isChat(v) || isSession(v)) continue; // they stand, or sit at a shared table; no desk of their own
       desks.set(key(v.desk, v.seat), {
         i: v.desk,
         seat: v.seat,
@@ -1608,6 +1669,8 @@ export class OfficeScene {
         items.push({ y: p.y + 2, draw: () => this.drawLeadDesk(d.i, d.status, d.seat) });
       } else items.push({ y: p.y + 2, draw: () => this.drawDesk(d.i, d.status, d.local, d.seat) });
     }
+    // one table per project that has sessions in the office, drawn in front of the people sitting at it
+    this.plan.tables.forEach((_, t) => items.push({ y: tableY(t) + 2.5, draw: () => this.drawTable(t) }));
     // the corner characters' rug, under everything
     if ([...this.actors.values()].some((a) => a.view.seat === 'corner')) items.push({ y: -1e9, draw: () => this.drawCornerRug() });
     // the manager (you) behind the manager desk
@@ -2074,9 +2137,23 @@ export class OfficeScene {
         a.bubble.style.top = `${(a.y - tallOf(a.view) - 5) * s}px`;
       }
       a.bubble.classList.toggle('selected', this.selected === a.id);
+      // a table of four idle sessions would be a row of coffee cups: a session shows a bubble only when it has something to say
+      if (isSession(a.view)) a.bubble.hidden = a.view.status === 'idle' && !this.quips.has(a.id);
       a.tag.style.left = `${a.x * s}px`;
       a.tag.style.top = `${(a.y + 2) * s}px`;
+      // four to a table sit too close for a tag each: the table carries the project's name, and a session shows its own while picked
+      if (isSession(a.view)) a.tag.hidden = this.selected !== a.id;
     }
+    this.tableTags.forEach((tag, t) => {
+      const project = this.plan.tables[t];
+      const anyone = project ? [...this.actors.values()].find((a) => this.plan.seats.get(a.id)?.table === t) : undefined;
+      tag.hidden = !anyone;
+      if (!anyone) return;
+      const name = `📁 ${(anyone.view.name.split('·')[0] ?? '').trim()}`;
+      if (tag.textContent !== name) tag.textContent = name;
+      tag.style.left = `${(tableX() + TABLE_W / 2) * s}px`;
+      tag.style.top = `${(tableY(t) + 10) * s}px`;
+    });
     const label = this.bagName || tr({ ko: '샌드백', en: 'Punching bag' });
     if (this.bagTag.textContent !== label) this.bagTag.textContent = label;
     this.bagTag.style.left = `${(this.bag.x + 2) * s}px`;

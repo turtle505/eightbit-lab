@@ -1399,6 +1399,40 @@ describe('project sessions', async () => {
     }
   });
 
+  it('seats sessions at two project tables of four and turns the rest away', async () => {
+    const { ProjectRegistry } = await import('../src/projects.ts');
+    const { HostRegistry } = await import('../src/hosts.ts');
+    const { AgentManager } = await import('../src/agents/manager.ts');
+    const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const store = new Store(':memory:');
+    const cfg: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: mkdtempSync(`${tmpdir()}/office-tables-`), reportDirs: [], obsidian: null, providers: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787 };
+    const agents = new AgentManager(cfg, [], store, new Broker(), { list: () => [] } as any);
+    const hosts = new HostRegistry([{ id: 'here', name: 'here', ssh: 'local', projectRoot: '/work' }] as any);
+    hosts.get('here')!.view.ok = true;
+    const reg = new ProjectRegistry(store, agents, hosts);
+    const [a, b, c] = ['alpha', 'beta', 'gamma'].map((n) => store.createProject('here', n, n));
+    const as = [1, 2, 3, 4, 5].map(() => reg.addSession(a.id).id);
+    const b1 = reg.addSession(b.id).id;
+    const c1 = reg.addSession(c.id).id;
+    const desk = (id: string) => store.listProjectSessions().find((x) => x.id === id)!.desk;
+    for (const id of as.slice(0, 4)) reg.setInOffice(id, true);
+    expect(as.slice(0, 4).map(desk).every((d) => d >= 0)).toBe(true);
+    expect(() => reg.setInOffice(as[4], true)).toThrow(/table is full|탁자가 찼습니다/);
+    expect(desk(as[4])).toBe(-1); // refused: it stays in the projects tab
+    reg.setInOffice(b1, true);
+    expect(() => reg.setInOffice(c1, true)).toThrow(/other projects|다른 프로젝트/);
+    expect(desk(c1)).toBe(-1);
+    // a seat opens up when someone leaves, and a table when its last session does
+    reg.setInOffice(as[0], false);
+    reg.setInOffice(as[4], true);
+    expect(desk(as[4])).toBeGreaterThanOrEqual(0);
+    reg.setInOffice(b1, false);
+    reg.setInOffice(c1, true);
+    expect(desk(c1)).toBeGreaterThanOrEqual(0);
+  });
+
   it('keeps projects on different hosts apart', () => {
     const s = new Store(':memory:');
     const a = s.createProject('desktop', 'same-name', 'proj');
