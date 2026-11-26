@@ -178,7 +178,7 @@ authToken: ""             # optional: lock the office with a password (see "Safe
 | `eval` | Gauss | Metrics, figures, evaluation reports |
 | `aide1`, `aide2` | Finn, Mira | Research aides who take whatever is handed over |
 | `sec` | Hana | The assistant: routines, office overview, organising reports |
-| `exec` | Linus 👑 | Lead engineer: implements, runs GPU jobs and delegates to the others |
+| `exec` | Linus 👑 | Lead engineer: splits work up and hands it to the others first, and keeps the code, the GPU jobs and the final report for himself |
 | `thug` | Kang | Street punk who sighs at your whining and roasts you with blunt facts, never sympathy |
 | `counsel` | On | A counselor who works through things with you using real counseling techniques, and keeps session notes |
 | `prof` | Professor | A satire of the classic advisor: no help, only more work |
