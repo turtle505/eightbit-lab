@@ -19,6 +19,8 @@ export interface MuxDeps {
   check(alias: string): Promise<boolean>;
   /** Open the master connection. The one call here that reaches the server. */
   open(alias: string): Promise<{ ok: boolean; err: string }>;
+  /** Close the master connection (`ssh -O exit`): a request over the local socket. */
+  close(alias: string): Promise<void>;
   now(): number;
 }
 
@@ -48,6 +50,22 @@ export class SshMux {
   /** Was the master up the last time anyone looked? `ensure()` is the real check. */
   isReady(alias: string): boolean {
     return this.ready.has(alias);
+  }
+
+  /** Look whether the master is up, without opening it and without spending anything (keeps `isReady` current). */
+  async peek(alias: string): Promise<boolean> {
+    if (this.flights.has(alias)) return this.ready.has(alias); // an attempt is under way; its result will say
+    const up = await this.deps.check(alias);
+    if (up) this.ready.add(alias);
+    else this.ready.delete(alias);
+    return up;
+  }
+
+  /** Close the master. Whatever was riding it ends; the next `ensure()` opens a new one. */
+  async close(alias: string): Promise<void> {
+    await this.flights.get(alias)?.catch(() => {});
+    this.ready.delete(alias);
+    await this.deps.close(alias);
   }
 
   /** Seconds until a host that failed may be tried again (0 = it may be tried now). */
@@ -139,6 +157,7 @@ export function realMuxDeps(controlDir: string): MuxDeps {
       );
       return { ok: r.code === 0, err: r.err.trim().split('\n').pop() || (r.code === 0 ? '' : `ssh exit ${r.code}`) };
     },
+    close: async (alias) => void (await run(['-O', 'exit', '-o', path, alias], 5_000)),
     now: () => Date.now(),
   };
 }

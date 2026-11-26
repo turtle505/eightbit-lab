@@ -138,6 +138,9 @@ export class Host {
       projectRoot: cfg.projectRoot,
       sshUsed: 0,
       sshLimit: 0,
+      connected: false,
+      sessions: 0,
+      retryInSec: 0,
       error: tr({ ko: '확인 중…', en: 'Checking…' }),
     };
     if (cfg.ssh !== 'local') sshThrottle.setLimit(cfg.ssh, cfg.sshPerMinute);
@@ -223,14 +226,27 @@ export class Host {
     return r.code === 0 ? r.stdout.split('\n').map((s) => s.trim()).filter(Boolean).sort() : [];
   }
 
-  /** Keep the badge's ssh counter current; pushes only when the numbers actually move. */
+  /** how many sessions are open on this host (bound by the registry to the agents' views) */
+  countSessions: () => number = () => 0;
+
+  /** Keep the host's live numbers current (ssh budget, connection, sessions); pushes only when something moved. */
   refreshUsage(push = true) {
-    if (this.isLocal) return;
-    const sshUsed = sshThrottle.used(this.cfg.ssh);
-    const sshLimit = sshThrottle.limitFor(this.cfg.ssh);
-    if (sshUsed === this.view.sshUsed && sshLimit === this.view.sshLimit) return;
-    this.view = { ...this.view, sshUsed, sshLimit };
+    const sessions = this.countSessions();
+    const remote = !this.isLocal;
+    const sshUsed = remote ? sshThrottle.used(this.cfg.ssh) : 0;
+    const sshLimit = remote ? sshThrottle.limitFor(this.cfg.ssh) : 0;
+    const connected = remote && sshMux.isReady(this.cfg.ssh);
+    const retryInSec = remote ? sshMux.retryIn(this.cfg.ssh) : 0;
+    const v = this.view;
+    if (sshUsed === v.sshUsed && sshLimit === v.sshLimit && connected === v.connected && sessions === v.sessions && retryInSec === v.retryInSec) return;
+    this.view = { ...v, sshUsed, sshLimit, connected, sessions, retryInSec };
     if (push) bus.send({ t: 'host', data: { ...this.view } });
+  }
+
+  /** Look at the connection locally (no packet leaves) and refresh the numbers: the master closes by itself when idle. */
+  async watch() {
+    if (!this.isLocal) await sshMux.peek(this.cfg.ssh);
+    this.refreshUsage();
   }
 
   /** Absolute working directory for a project folder on this host. */
@@ -310,10 +326,19 @@ export class HostRegistry {
   bindLiveness(anyLiveOn: (hostId: string) => boolean) {
     for (const h of this.hosts.values()) h.hasLiveSession = () => anyLiveOn(h.cfg.id);
   }
-  start() {
+  /** Tell each host how to count the sessions open on it. */
+  bindSessions(openOn: (hostId: string) => number) {
+    for (const h of this.hosts.values()) h.countSessions = () => openOn(h.cfg.id);
+  }
+  private watcher: NodeJS.Timeout | null = null;
+  start(watchEveryMs = 20_000) {
     for (const h of this.hosts.values()) h.start();
+    // a local look every so often keeps "connected" and the session count honest without touching any server
+    this.watcher = setInterval(() => void Promise.all([...this.hosts.values()].map((h) => h.watch())), watchEveryMs);
   }
   stop() {
     for (const h of this.hosts.values()) h.stop();
+    if (this.watcher) clearInterval(this.watcher);
+    this.watcher = null;
   }
 }

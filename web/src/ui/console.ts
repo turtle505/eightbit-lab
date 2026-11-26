@@ -1,5 +1,6 @@
 // Console view: plain, table-based rendering of the same office state.
 import { attachmentLinks, bindAttach } from './attach.ts';
+import { staffOf } from './targets.ts';
 import type { TaskState } from '../../../shared/protocol.ts';
 import { locale, tr } from '../../../shared/i18n.ts';
 import { $, type Send, type UIState, ago, agoText, byRecent, changed, engineBadge, esc, hostBadge, plain, providerBadge, resetText, short, statusLabel, usageShare } from './panels.ts';
@@ -28,8 +29,7 @@ const hms = (ts: number) => new Date(ts).toLocaleTimeString(locale(), { hour: '2
 /** The office staff. Project sessions are employees too, but they belong to the projects tab. */
 export function sortedEmployees(st: UIState) {
   // chat characters (corner, podium) number their own spots, so they go after the desk grid (keeps 1–n on the working staff)
-  const corner = (e: { seat?: string }) => (e.seat === 'corner' || e.seat === 'podium' ? 1 : 0);
-  return st.snap.employees.filter((e) => e.kind !== 'project').sort((a, b) => corner(a) - corner(b) || a.desk - b.desk);
+  return staffOf(st.snap.employees);
 }
 
 export function renderStaffTable(st: UIState, send: Send, select: (id: string | null) => void) {

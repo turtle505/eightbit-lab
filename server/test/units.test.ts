@@ -1443,7 +1443,7 @@ describe('ssh connection pressure', async () => {
 
   it('a session cannot be spawned on a host whose connection was never opened', () => {
     setSshLimit(5, 4);
-    setMuxDeps({ check: async () => false, open: async () => ({ ok: true, err: '' }), now: () => Date.now() });
+    setMuxDeps({ check: async () => false, open: async () => ({ ok: true, err: '' }), close: async () => {}, now: () => Date.now() });
     const cfg: any = { id: 't', name: 't', ssh: 'never-opened-host', projectRoot: '~/x', claudePath: '/bin/true' };
     expect(() => spawnRemote(cfg, { command: 'claude', args: ['--version'], cwd: '/tmp', env: {} } as any)).toThrow(/No connection to never-opened-host/);
   });
@@ -1480,7 +1480,7 @@ describe('ssh connection pressure', async () => {
     setSshLimit(5, 4);
     let opens = 0;
     let t = 1_000_000;
-    setMuxDeps({ check: async () => false, open: async () => (opens++, { ok: false, err: 'Connection refused' }), now: () => t });
+    setMuxDeps({ check: async () => false, open: async () => (opens++, { ok: false, err: 'Connection refused' }), close: async () => {}, now: () => t });
     const h = new Host({ id: 'g', name: 'g', ssh: 'down-host', projectRoot: '~/p' } as any);
     await h.check();
     expect(opens).toBe(1);
@@ -1514,6 +1514,7 @@ describe('one ssh connection per host', async () => {
         if (o.openOk) up.add(a);
         return { ok: o.openOk, err: o.openOk ? '' : 'Connection timed out' };
       },
+      close: async (a) => void up.delete(a),
       now: () => now,
     });
     return { mux, throttle, up, opens, o, tick: (ms: number) => (now += ms), now: () => now };
@@ -2963,5 +2964,146 @@ describe('updating from the screen', async () => {
     await v.init();
     expect(v.apply([])).toBe('no-restart');
     expect(f.runs() + g.runs()).toBe(0);
+  });
+});
+
+describe('hosts and the sessions on them', async () => {
+  const { commandTargets, staffOf, groupByHost } = await import('../../web/src/ui/targets.ts');
+  const { SshMux } = await import('../src/sshMux.ts');
+  const { SshThrottle } = await import('../src/sshRate.ts');
+  const { Host, HostRegistry, setMuxDeps, setSshLimit, sshMux: _unused } = await import('../src/hosts.ts');
+  void _unused;
+  const H = await import('../src/hosts.ts');
+  const { AgentManager } = await import('../src/agents/manager.ts');
+  const { PermissionBroker: Broker } = await import('../src/permissions/broker.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const emp = (id: string, desk: number, over: Record<string, unknown> = {}) => ({ id, desk, name: id, ...over });
+  const office = [emp('lit', 0), emp('eval', 1), emp('thug', 0, { seat: 'corner' }), emp('prof', 0, { seat: 'podium' }), emp('p:1:1', 6, { kind: 'project' }), emp('p:1:2', -1, { kind: 'project' }), emp('p:2:1', 5, { kind: 'project' })];
+
+  it('lets the command bar instruct the staff and the sessions that have a desk in the office', () => {
+    expect(staffOf(office).map((e) => e.id)).toEqual(['lit', 'eval', 'thug', 'prof']); // 1–n and assignee pickers: staff only
+    expect(commandTargets(office, null).map((e) => e.id)).toEqual(['lit', 'eval', 'thug', 'prof', 'p:2:1', 'p:1:1']);
+    // a session without a desk is offered only while it is the one selected
+    expect(commandTargets(office, 'p:1:2').map((e) => e.id)).toEqual(['lit', 'eval', 'thug', 'prof', 'p:2:1', 'p:1:1', 'p:1:2']);
+    expect(commandTargets(office.slice(0, 4), 'lit').map((e) => e.id)).toEqual(['lit', 'eval', 'thug', 'prof']); // no sessions: as before
+  });
+
+  it('puts each project under its host, keeps a host with none, and gathers the ones whose host is gone', () => {
+    const hosts: any[] = [{ id: 'macmini' }, { id: 'desktop' }, { id: 'master' }];
+    const projects: any[] = [{ id: 'a', hostId: 'desktop' }, { id: 'b', hostId: 'macmini' }, { id: 'c', hostId: 'gone' }, { id: 'd', hostId: 'macmini' }];
+    const g = groupByHost(hosts, projects);
+    expect(g.map((x) => [x.host?.id ?? null, x.projects.map((p) => p.id)])).toEqual([['macmini', ['b', 'd']], ['desktop', ['a']], ['master', []], [null, ['c']]]);
+    expect(groupByHost(hosts, []).map((x) => x.host?.id)).toEqual(['macmini', 'desktop', 'master']);
+  });
+
+  function world() {
+    const up = new Set<string>();
+    const opens: string[] = [];
+    const closes: string[] = [];
+    const throttle = new SshThrottle(5, 4);
+    const deps = { check: async (a: string) => up.has(a), open: async (a: string) => (opens.push(a), up.add(a), { ok: true, err: '' }), close: async (a: string) => (closes.push(a), void up.delete(a)), now: () => Date.now() };
+    return { up, opens, closes, throttle, deps, mux: new SshMux(() => throttle, deps) };
+  }
+
+  it('looks at a connection without opening it or spending anything', async () => {
+    const w = world();
+    expect(await w.mux.peek('master')).toBe(false);
+    expect([w.opens.length, w.throttle.usedTotal()]).toEqual([0, 0]);
+    await w.mux.ensure('master');
+    expect(await w.mux.peek('master')).toBe(true);
+    w.up.delete('master'); // it closed by itself after ten idle minutes
+    expect(w.mux.isReady('master')).toBe(true); // nobody has looked yet
+    expect(await w.mux.peek('master')).toBe(false);
+    expect(w.mux.isReady('master')).toBe(false);
+    expect(w.opens).toHaveLength(1); // looking never reconnects
+  });
+
+  it('closes a connection on request, and the next use opens exactly one again', async () => {
+    const w = world();
+    await w.mux.ensure('master');
+    await w.mux.close('master');
+    expect([w.closes, w.mux.isReady('master')]).toEqual([['master'], false]);
+    await Promise.all([w.mux.ensure('master'), w.mux.ensure('master')]);
+    expect(w.opens).toEqual(['master', 'master']);
+  });
+
+  it('reports whether a host is connected and how many sessions are open on it', async () => {
+    setSshLimit(5, 4);
+    const w = world();
+    setMuxDeps(w.deps);
+    const reg = new HostRegistry([{ id: 'm', name: 'm', ssh: 'm-alias', projectRoot: '~' }, { id: 'here', name: 'here', ssh: 'local', projectRoot: '~' }] as any);
+    let open = 0;
+    reg.bindSessions((id) => (id === 'm' ? open : 0));
+    expect(reg.views().find((v) => v.id === 'm')).toMatchObject({ connected: false, sessions: 0, retryInSec: 0 });
+    await H.sshMux.ensure('m-alias');
+    open = 2;
+    expect(reg.views().find((v) => v.id === 'm')).toMatchObject({ connected: true, sessions: 2, sshUsed: 1 });
+    expect(reg.views().find((v) => v.id === 'here')).toMatchObject({ connected: false, sshLimit: 0 }); // the local machine has no connection to show
+    // the master times out; a local look notices, with no connection attempt
+    w.up.delete('m-alias');
+    await reg.get('m')!.watch();
+    expect(reg.get('m')!.view.connected).toBe(false);
+    expect(w.opens).toEqual(['m-alias']);
+    void Host;
+  });
+
+  it('will not close the sessions of someone who is working, and closes the idle ones', async () => {
+    // one remote employee whose session stays open after a turn
+    let release: () => void = () => {};
+    const queryFn: any = ({ prompt }: any) => {
+      const out: any[] = [];
+      let wake: any = null;
+      let closed = false;
+      const emit = (m: any) => (out.push(m), wake?.());
+      void (async () => {
+        for await (const m of prompt as AsyncIterable<any>) {
+          emit({ type: 'system', subtype: 'init', session_id: 's', model: 'claude', permissionMode: 'auto' });
+          if (String(m.message.content).includes('slow')) await new Promise<void>((r) => (release = r));
+          emit({ type: 'result', subtype: 'success', result: 'ok', num_turns: 1, duration_ms: 1, total_cost_usd: 0 });
+        }
+        closed = true;
+        wake?.();
+      })();
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (;;) {
+            while (out.length) yield out.shift();
+            if (closed) return;
+            await new Promise<void>((r) => (wake = r));
+            wake = null;
+          }
+        },
+        setPermissionMode: async () => {},
+        setModel: async () => {},
+        interrupt: async () => {},
+        close: () => ((closed = true), wake?.()),
+      };
+    };
+    const root = mkdtempSync(join(tmpdir(), 'office-hostsess-'));
+    const cfg: any = { maxConcurrent: 3, model: '', researchRepo: '', workspaceRoot: root, reportDirs: [], obsidian: null, providers: [], permissionMode: 'auto', sessionIdleMinutes: 30, port: 8787 };
+    const role: any = { id: 'lit', name: 'Ada', title: 'R', desk: 0, sprite: {}, useWorktree: false, autoAllow: [], systemPrompt: '', host: 'here' };
+    const m = new AgentManager(cfg, [role], new Store(':memory:'), new Broker(), { list: () => [] } as any);
+    m.queryFn = queryFn;
+    m.hosts = new HostRegistry([{ id: 'here', name: 'here', ssh: 'local', projectRoot: root }] as any);
+    m.hosts.get('here')!.view.ok = true; // as after its one check at start
+    const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+    m.instruct('lit', 'quick');
+    await settle();
+    expect(m.views()[0].live).toBe(true);
+    m.instruct('lit', 'slow one');
+    await settle();
+    expect(m.busyOn('here')).toEqual(['Ada']);
+    expect(m.closeSessionsOn('here')).toBe(0); // mid-turn: left alone
+    expect(m.views()[0].live).toBe(true);
+    release();
+    await settle();
+    expect(m.busyOn('here')).toEqual([]);
+    expect(m.busyOn('elsewhere')).toEqual([]);
+    expect(m.closeSessionsOn('here')).toBe(1);
+    expect(m.views()[0].live).toBe(false);
+    expect(m.views()[0].sessionId).toBe('s'); // the conversation is kept
   });
 });

@@ -227,9 +227,10 @@ Employees then get the `mcp__lab__*` tools: `list_servers`, `gpu_status`, `submi
 <details>
 <summary><b>📁 Project sessions (a Claude Code session in any folder)</b></summary>
 
-In the **Projects** tab, pick a host and an existing folder to open a Claude Code session there. It's like `ssh host`, `cd ~/project/x`, `claude`, but with approvals, logs and reports. One project can run several independent sessions.
+The **Projects** tab is grouped by server. Under a server, **+ Project** adds an existing folder there and opens a Claude Code session in it. It's like `ssh host`, `cd ~/project/x`, `claude`, but with approvals, logs and reports. One project can run several independent sessions.
 
-- Sessions live in the tab. Press **Bring to office** to give one a desk and a character.
+- A server's line shows its one ssh connection: connected, idle (it closes after ten unused minutes and reconnects when used) or unreachable, how many sessions are open on it out of the ten or so a connection carries, and the new connections made this minute. **↻** checks now; **Disconnect** closes the connection and the idle sessions on it (refused while someone is working there).
+- Sessions live in the tab. Press **Bring to office** to give one a desk and a character; from then on you can click it and type in the instruction box like any employee. Number keys and task assignment stay with the regular staff.
 - Sessions share the same approval rules and count towards `maxConcurrent`.
 - Closing a session discards its conversation; the files stay.
 </details>

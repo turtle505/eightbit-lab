@@ -768,6 +768,22 @@ export class AgentManager {
     else this.sendView(e);
   }
 
+  /** Names of the employees mid-turn on a host: closing its connection now would cut them off. */
+  busyOn(hostId: string): string[] {
+    return [...this.emps.values()].filter((e) => e.role.host === hostId && e.current).map((e) => e.view.name);
+  }
+
+  /** Close the open sessions on a host (conversations are kept), before its connection is closed. Returns how many. */
+  closeSessionsOn(hostId: string): number {
+    let n = 0;
+    for (const e of this.emps.values()) {
+      if (e.role.host !== hostId || !e.live || e.current) continue;
+      this.closeSession(e, tr({ ko: '🔌 매니저가 서버 연결을 끊어 세션을 닫았습니다 (다음 지시 때 이어서 엽니다)', en: '🔌 The manager closed the connection to the server, so the session was closed (the next instruction reopens it)' }));
+      n++;
+    }
+    return n;
+  }
+
   /** Close sessions that were opened against this provider, so a model change takes effect. */
   reopenProviderSessions(providerId: string) {
     for (const e of this.emps.values()) {

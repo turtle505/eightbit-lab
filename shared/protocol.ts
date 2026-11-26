@@ -82,6 +82,12 @@ export interface HostView {
   /** ssh/scp runs used in the last minute, and this host's budget (0 = no limit) */
   sshUsed: number;
   sshLimit: number;
+  /** the shared ssh connection to this host is up right now (always false for the local machine: it has none) */
+  connected: boolean;
+  /** sessions open on this host now */
+  sessions: number;
+  /** seconds this host is still being left alone after a failed connection (0 = it may be tried) */
+  retryInSec: number;
   error: string | null;
 }
 
@@ -486,6 +492,8 @@ export type ClientMsg =
   | { t: 'setSessionInOffice'; id: string; inOffice: boolean }
   /** check a host now (it is otherwise only checked at startup, to keep idle traffic at zero) */
   | { t: 'recheckHost'; hostId: string }
+  /** close the shared ssh connection to a host (and the idle sessions on it); refused while someone is working there */
+  | { t: 'disconnectHost'; hostId: string }
   /** restart work that was parked on the usage limit, without waiting for the reset */
   | { t: 'resumeWork'; employeeId: string }
   /** switch the office language (UI, statuses, and what agents report in) */

@@ -1,7 +1,7 @@
 import { getLang, tr } from '../../../shared/i18n.ts';
 import { noteCommand } from '../../../shared/note.ts';
 import { bindAttach } from './attach.ts';
-import { sortedEmployees } from './console.ts';
+import { commandTargets, isProjectSession } from './targets.ts';
 import { $, type Send, type UIState, changed, esc, plain, short, statusLabel } from './panels.ts';
 
 const MAX_ROWS = 5;
@@ -19,7 +19,8 @@ let current: UIState;
 export function renderCommandBar(st: UIState, send: Send, select: (id: string | null) => void) {
   current = st;
   if (!built) build(send, select);
-  const emps = sortedEmployees(st);
+  // the staff, plus project sessions that have a desk in the office
+  const emps = commandTargets(st.snap.employees, st.selected);
   const target = emps.find((e) => e.id === st.selected) ?? null;
   if (!changed('cmd', [emps.map((e) => [e.id, e.name, e.status, e.activity]), st.selected, st.view, getLang()])) return;
 
@@ -31,7 +32,7 @@ export function renderCommandBar(st: UIState, send: Send, select: (id: string | 
   const pick = $('cmd-target') as HTMLSelectElement;
   pick.innerHTML =
     `<option value="">${tr({ ko: '직원 선택…', en: 'Pick someone…' })}</option>` +
-    emps.map((e) => `<option value="${esc(e.id)}">${BUSY.has(e.status) ? '●' : '○'} ${esc(short(e.name))}</option>`).join('');
+    emps.map((e) => `<option value="${esc(e.id)}">${BUSY.has(e.status) ? '●' : '○'} ${isProjectSession(e) ? `📁 ${esc(plain(e.name))}` : esc(short(e.name))}</option>`).join('');
   pick.value = target?.id ?? '';
 
   const input = $('cmd-input') as HTMLTextAreaElement;
@@ -85,7 +86,7 @@ function build(send: Send, select: (id: string | null) => void) {
 
   const submit = () => {
     const st = current;
-    const target = st.snap.employees.find((e) => e.id === st.selected);
+    const target = commandTargets(st.snap.employees, st.selected).find((e) => e.id === st.selected);
     const text = input.value.trim();
     // "/note …" is the manager's own line for the lab notebook; nobody is instructed
     const note = noteCommand(text);

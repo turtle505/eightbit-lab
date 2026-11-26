@@ -1796,3 +1796,15 @@ body .md-body h4 {
 .update-commits { margin: 6px 0 10px; padding-left: 20px; max-height: 40vh; overflow: auto; font-size: 13px; }
 .update-log { max-height: 30vh; overflow: auto; margin-top: 10px; padding: 8px; background: var(--code-bg); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pill.version-pill { cursor: pointer; font-family: ui-monospace, monospace; font-size: 11px; }
+
+/* projects tab, grouped by host: the host line says how its one ssh connection is doing */
+.phost { margin-bottom: 14px; }
+.phost-head { display: flex; align-items: center; gap: 10px; padding: 6px 2px; flex-wrap: wrap; border-bottom: 2px solid var(--line); margin-bottom: 6px; }
+.phost-head .grow { flex: 1; }
+.phost-head .conn { font-size: 12px; white-space: nowrap; }
+.phost-head .conn.on { color: var(--ok); }
+.phost-head .conn.bad { color: var(--bad); }
+.phost-head .conn.idle { color: var(--muted); }
+.phost > .pcard { margin: 0 0 6px 14px; }
+.phost > .pnew { margin: 0 0 8px 14px; }
+.phost-empty { margin: 4px 0 0 14px; }

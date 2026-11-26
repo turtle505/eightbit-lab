@@ -28,7 +28,7 @@ import { ProviderHub } from './providers.ts';
 import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock, hasPdfToText } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
 import { cookieHeader, isAuthorized, loginPage, suggestToken, tokenMatches } from './auth.ts';
-import { HostRegistry, setSshLimit } from './hosts.ts';
+import { HostRegistry, setSshLimit, sshMux } from './hosts.ts';
 import { ProjectRegistry } from './projects.ts';
 import { mkdirSync } from 'node:fs';
 
@@ -80,6 +80,7 @@ for (const r of roles)
       }),
     );
 hosts.bindLiveness((hostId) => agents.views().some((v) => v.hostId === hostId && v.live));
+hosts.bindSessions((hostId) => agents.views().filter((v) => v.hostId === hostId && v.live).length);
 const projects = new ProjectRegistry(store, agents, hosts, teamPrompt(office.domain, withServers));
 const providers = new ProviderHub(office.providers, store);
 agents.providers = providers;
@@ -554,6 +555,18 @@ function handle(msg: ClientMsg, ws: WebSocket) {
     case 'recheckHost':
       void hosts.get(msg.hostId)?.recheck();
       break;
+    case 'disconnectHost': {
+      const h = hosts.get(msg.hostId);
+      if (!h || h.isLocal) break;
+      const busy = agents.busyOn(h.cfg.id);
+      if (busy.length) {
+        reply({ t: 'notice', level: 'warn', text: tr({ ko: `${h.view.name}에서 일하는 중이라 끊지 않았습니다: ${busy.join(', ')}`, en: `Not disconnecting ${h.view.name}: ${busy.join(', ')} ${busy.length > 1 ? 'are' : 'is'} working there` }) });
+        break;
+      }
+      agents.closeSessionsOn(h.cfg.id);
+      void sshMux.close(h.cfg.ssh).then(() => h.refreshUsage());
+      break;
+    }
     case 'setSessionInOffice':
       projects.setInOffice(msg.id, msg.inOffice);
       break;
