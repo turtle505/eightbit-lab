@@ -6,7 +6,7 @@ import { getLang, hhmm, LANG_NAME_EN, tr, type Lang } from '../../../shared/i18n
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { OfficeConfig, RoleConfig } from '../config.ts';
 import type { Store } from '../db.ts';
-import { labToolsServer } from '../mcp/labTools.ts';
+import { labToolsServer, RECORD_TOOL } from '../mcp/labTools.ts';
 import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { ProviderHub } from '../providers.ts';
@@ -162,6 +162,12 @@ export const reportLanguageLine = (lang: Lang) =>
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 /** when the limit report carries no reset time */
 const LIMIT_FALLBACK_MS = 30 * 60_000;
+
+/** Kang, On and the professor only talk: they sit in the corner or on the podium and run no experiments. */
+const isChatSeat = (role: Pick<RoleConfig, 'seat'>): boolean => role.seat === 'corner' || role.seat === 'podium';
+
+/** What a role may call without asking: its own list, plus the tools that only write to the office's own records. */
+export const roleAllow = (role: Pick<RoleConfig, 'autoAllow'>): string[] => [...role.autoAllow, RECORD_TOOL];
 
 /** Exact tool name, or a server-level rule like "mcp__office" that covers every "mcp__office__*" tool. */
 export function isAutoAllowed(rules: Iterable<string>, toolName: string): boolean {
@@ -425,6 +431,12 @@ export class AgentManager {
     this.pump();
   }
 
+  /** The topic of the task this employee is on right now, if any. */
+  private topicNow(e: Employee): string | null {
+    const id = e.current?.taskId;
+    return id != null ? (this.store.getTask(id)?.topic ?? null) : null;
+  }
+
   /** Mark a task card that is in 'doing' with nobody working on it, and tell the browsers. */
   private haltTask(taskId: number, halt: TaskHalt, error: string | null = null) {
     const t = this.store.getTask(taskId);
@@ -577,10 +589,11 @@ export class AgentManager {
     e.view.cwd = cwd;
 
     const lang = getLang();
-    const autoAllow = new Set(e.role.autoAllow);
+    const autoAllow = new Set(roleAllow(e.role));
     const mcpServers: Record<string, any> = {};
     // no GPU servers configured → no lab tools, so agents aren't offered jobs on machines that don't exist
-    if (this.registry.list().length) mcpServers.lab = labToolsServer(e.role.id, cwd, this.registry, this.store);
+    // with no GPU servers this is only record_result (the experiment table), which a chat character has no use for
+    if (this.registry.list().length || !isChatSeat(e.role)) mcpServers.lab = labToolsServer(e.role.id, cwd, this.registry, this.store, () => this.topicNow(e));
     if (e.role.officeTools && this.officeApi) mcpServers.office = officeToolsServer(e.role.id, this.officeApi);
 
     let model = e.role.model || this.office.model || undefined;
@@ -845,19 +858,19 @@ export class AgentManager {
     let prompt = `${e.role.systemPrompt}\n\n${reportLanguageLine(getLang())}\nThe office MCP names mcp__office__X and mcp__lab__X appear here as office.X and lab.X. Use those tools with the same approval rules.\n\nCurrent instruction:\n${work.text}${skillText}`;
     try {
       if (host && !host.isLocal) prompt = await stageCodexAttachments(host.cfg, prompt, work.attachmentPaths);
-      if (this.registry.list().length) await tools.add('lab', labToolsServer(e.role.id, cwd, this.registry, this.store).instance);
+      if (this.registry.list().length || !isChatSeat(e.role)) await tools.add('lab', labToolsServer(e.role.id, cwd, this.registry, this.store, () => this.topicNow(e)).instance);
       if (e.role.officeTools && this.officeApi) await tools.add('office', officeToolsServer(e.role.id, this.officeApi).instance);
       const callTool = async (namespace: string, tool: string, args: Record<string, unknown>) => {
         const name = `mcp__${namespace}__${tool}`;
         const readOnly = new Set(['mcp__lab__list_servers', 'mcp__lab__gpu_status', 'mcp__lab__job_status', 'mcp__lab__tail_log', 'mcp__office__office_status', 'mcp__office__list_tasks', 'mcp__office__office_activity', 'mcp__office__list_routines', 'mcp__office__list_skills']);
-        const allowed = isAutoAllowed(e.role.autoAllow, name) || work.extraAllow.some((rule) => matchesRule(rule, name, args));
+        const allowed = isAutoAllowed(roleAllow(e.role), name) || work.extraAllow.some((rule) => matchesRule(rule, name, args));
         if (!allowed && (!readOnly.has(name) || codexPermission === 'ask')) {
           const decision = await this.broker.request(e.role.id, name, args, new AbortController().signal);
           if (decision.behavior !== 'allow') throw new Error(decision.message || 'Manager denied the tool call');
         }
         return tools.call(namespace, tool, args);
       };
-      const autoApprove = (method: string, input: Record<string, unknown>) => codexAutoApproval(method, input, codexPermission, e.role.autoAllow, work.extraAllow);
+      const autoApprove = (method: string, input: Record<string, unknown>) => codexAutoApproval(method, input, codexPermission, roleAllow(e.role), work.extraAllow);
       turn = new CodexTurn(e.role.id, this.broker, tools, callTool, autoApprove, host?.cfg);
       e.codexTurn = turn;
       this.sendView(e);

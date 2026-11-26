@@ -1,6 +1,7 @@
-// Search across what the office has kept: report files, employee logs, task cards and the report feed.
+// Search across what the office has kept: report files, employee logs, task cards, the report feed and experiments.
 // There is no index: a few thousand log lines and a few dozen reports are scanned on each query (SQL LIKE,
 // and reading the report files). If that ever gets slow, this is the place to put an index.
+import { experimentText } from '../../shared/experiments.ts';
 import type { SearchHit } from '../../shared/protocol.ts';
 import type { Store } from './db.ts';
 import type { ReportLibrary } from './reports.ts';
@@ -63,5 +64,7 @@ export function searchAll(q: string, store: Store, reports: ReportLibrary, nameO
     hits.push({ kind: 'log', ts: l.ts, title: nameOf(l.employeeId), snippet: snippet(l.text, tokens), text: clip(l.text), employeeId: l.employeeId, logKind: l.kind });
   for (const f of store.searchFeed(tokens, PER_KIND))
     hits.push({ kind: 'feed', ts: f.ts, title: f.title, snippet: snippet(`${f.title} ${f.body}`, tokens), text: clip(f.body), path: f.path ?? undefined, employeeId: f.employeeId ?? undefined });
+  for (const j of store.searchExperiments(tokens, PER_KIND, experimentText))
+    hits.push({ kind: 'experiment', ts: j.updatedAt, title: `#${j.id} ${j.name}`, snippet: snippet(experimentText(j), tokens), text: clip(experimentText(j)), employeeId: j.submittedBy ?? undefined });
   return hits;
 }

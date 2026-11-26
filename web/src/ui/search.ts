@@ -20,9 +20,9 @@ let hits: SearchHit[] | null = null;
 /** hits opened to read in place, by index */
 const open = new Set<number>();
 
-const KINDS: SearchHit['kind'][] = ['report', 'task', 'log', 'feed'];
+const KINDS: SearchHit['kind'][] = ['report', 'task', 'experiment', 'log', 'feed'];
 const kindLabel = (k: SearchHit['kind']) =>
-  k === 'report' ? tr({ ko: '보고서', en: 'Reports' }) : k === 'task' ? tr({ ko: '작업', en: 'Tasks' }) : k === 'log' ? tr({ ko: '로그', en: 'Logs' }) : tr({ ko: '보고 피드', en: 'Report feed' });
+  k === 'report' ? tr({ ko: '보고서', en: 'Reports' }) : k === 'task' ? tr({ ko: '작업', en: 'Tasks' }) : k === 'log' ? tr({ ko: '로그', en: 'Logs' }) : k === 'experiment' ? tr({ ko: '실험', en: 'Experiments' }) : tr({ ko: '보고 피드', en: 'Report feed' });
 const logKindLabel = (k?: string) =>
   k === 'user' ? tr({ ko: '지시', en: 'instruction' }) : k === 'assistant' ? tr({ ko: '답변', en: 'reply' }) : k === 'tool' ? tr({ ko: '도구', en: 'tool' }) : k === 'error' ? tr({ ko: '오류', en: 'error' }) : (k ?? '');
 

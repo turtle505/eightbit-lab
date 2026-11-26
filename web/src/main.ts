@@ -19,6 +19,7 @@ import {
 import { applyView, initialView, setOfficeTitle, viewTitle } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
 import { renderCommandBar } from './ui/command.ts';
+import { renderExperiments } from './ui/experiments.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
 import { initReports, onReportContent, openReport, renderReports, unreadReports } from './ui/reports.ts';
 import { renderProjects, setHostDirs } from './ui/projects.ts';
@@ -105,6 +106,7 @@ function renderAll() {
   renderEmployeePanel(state, send);
   renderRoutines(state, send);
   renderJobs(state, send);
+  renderExperiments(state);
   if (state.view === 'game') {
     renderBoard(state, send);
   } else {

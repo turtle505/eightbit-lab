@@ -1,5 +1,6 @@
 import { attachmentLinks, bindAttach } from './attach.ts';
 import { followBottom } from './follow.ts';
+import { experimentCount, openExperiments } from './experiments.ts';
 import { afterOptions, bindSchedule, chainBadge, checkAfter, checkSchedule, checkTopic, haltLabel, haltReason, renderTopicInputs, retryLabel, scheduledBadge, topicBadge, waitingFor } from './schedule.ts';
 import { approvalRisk } from './approvalRisk.ts';
 import { lineDiff, type DiffLine } from './diff.ts';
@@ -391,7 +392,10 @@ export function renderJobs(st: UIState, send: Send) {
         ko: '등록된 GPU 서버가 없습니다. <code>config/servers.example.yaml</code>을 <code>config/servers.local.yaml</code>로 복사해 채우고 백엔드를 재시작하세요.',
         en: 'No GPU servers registered. Copy <code>config/servers.example.yaml</code> to <code>config/servers.local.yaml</code>, fill it in and restart the backend.',
       })}</p>`;
-  const jobs = [...s.jobs]
+  const exps = experimentCount(s.jobs);
+  // a result recorded by name is an experiment, not a remote job
+  const jobs = s.jobs
+    .filter((j) => j.state !== 'recorded')
     .reverse()
     .slice(0, 30)
     .map(
@@ -403,13 +407,14 @@ export function renderJobs(st: UIState, send: Send) {
   $('jobs').innerHTML = `
     <div class="row space"><h2>${ico('🖥️')}${tr({ ko: '서버실', en: 'Server room' })}</h2><button id="refresh-servers">${tr({ ko: '새로고침', en: 'Refresh' })}</button></div>
     ${servers}
-    <h2>${ico('📦')}${tr({ ko: '원격 Job', en: 'Remote jobs' })}</h2>
+    <div class="row space"><h2>${ico('📦')}${tr({ ko: '원격 Job', en: 'Remote jobs' })}</h2><button id="open-experiments" title="${esc(tr({ ko: '실험마다 설정과 결과 지표를 한 표에서 비교', en: 'Compare the setup and metrics of every run in one table' }))}">📊 ${tr({ ko: '실험 비교', en: 'Experiments' })}${exps ? ` <span class="muted">${exps}</span>` : ''}</button></div>
     ${
       jobs
         ? `<table class="jobs"><thead><tr><th></th><th>${tr({ ko: '이름', en: 'Name' })}</th><th>${tr({ ko: '서버', en: 'Server' })}</th><th>${tr({ ko: '제출', en: 'By' })}</th><th>${tr({ ko: '상태', en: 'State' })}</th><th></th><th></th></tr></thead><tbody>${jobs}</tbody></table>`
         : `<p class="muted">${tr({ ko: '아직 제출된 job이 없습니다.', en: 'No jobs submitted yet.' })}</p>`
     }`;
   $('refresh-servers').addEventListener('click', () => send({ t: 'refreshServers' }));
+  $('open-experiments').addEventListener('click', () => openExperiments(st));
   $('jobs').querySelectorAll<HTMLButtonElement>('button[data-cancel]').forEach((b) =>
     b.addEventListener('click', () => {
       if (confirm(tr({ ko: `job #${b.dataset.cancel}을 취소할까요?`, en: `Cancel job #${b.dataset.cancel}?` }))) send({ t: 'cancelJob', jobId: Number(b.dataset.cancel) });

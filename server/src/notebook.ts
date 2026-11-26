@@ -8,6 +8,7 @@ import { join } from 'node:path';
 export type NoteItem =
   | { kind: 'task'; ts: number; taskId: number; title: string; who: string; ok: boolean; topic: string | null; text: string; error?: string }
   | { kind: 'job'; ts: number; jobId: number; name: string; server: string; state: string; topic?: string | null; metrics?: Record<string, number> | null; note?: string }
+  | { kind: 'result'; ts: number; jobId: number; name: string; who: string; topic: string | null; metrics: Record<string, number>; params?: Record<string, string | number | boolean> | null; note?: string | null }
   | { kind: 'memo'; ts: number; text: string };
 
 const RESULT_MAX = 600;
@@ -62,6 +63,15 @@ function quote(text: string): string {
 export function noteEntry(item: NoteItem): string {
   const at = clock(item.ts);
   if (item.kind === 'memo') return `## ${at} · 📝\n${item.text.trim()}\n\n`;
+  if (item.kind === 'result') {
+    const lines = [`## ${at} · 📊 #${item.jobId} ${oneLine(item.name)} · ${item.who}`];
+    if (item.topic) lines.push(`- Topic: ${item.topic}`);
+    lines.push(`- Metrics: ${Object.entries(item.metrics).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    const p = Object.entries(item.params ?? {});
+    if (p.length) lines.push(`- Params: ${p.map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    if (item.note?.trim()) lines.push(`- Note: ${oneLine(item.note)}`);
+    return `${lines.join('\n')}\n\n`;
+  }
   if (item.kind === 'job') {
     const lines = [`## ${at} · 🖥 Job #${item.jobId} ${oneLine(item.name)} · ${item.server} · ${item.state}`];
     if (item.topic) lines.push(`- Topic: ${item.topic}`);

@@ -60,6 +60,16 @@ export function inferLogEngines(lines: Pick<LegacyLog, 'kind' | 'text'>[]): Engi
   return out;
 }
 
+const jsonObj = (s: unknown): any => {
+  if (typeof s !== 'string' || !s) return null;
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+};
+const rowToJob = (r: any): Job => ({ ...r, topic: r.topic ?? null, params: jsonObj(r.params), metrics: jsonObj(r.metrics), note: r.note ?? null });
 const rowToTask = (r: any, attachments: Task['attachments'] = []): Task => ({ ...r, requireApproval: !!r.requireApproval, startAt: r.startAt ?? null, engine: r.engine === 'claude' || r.engine === 'codex' ? r.engine : null, afterTask: r.afterTask ?? null, topic: r.topic ?? null, halt: r.halt === 'failed' || r.halt === 'stopped' || r.halt === 'restart' ? r.halt : null, error: r.error ?? null, attachments });
 
 export interface RoutineRow {
@@ -167,6 +177,8 @@ export class Store {
     if (!tcols.includes('engine')) this.db.exec('ALTER TABLE tasks ADD COLUMN engine TEXT');
     if (!tcols.includes('afterTask')) this.db.exec('ALTER TABLE tasks ADD COLUMN afterTask INTEGER');
     if (!tcols.includes('topic')) this.db.exec('ALTER TABLE tasks ADD COLUMN topic TEXT');
+    const jcols = (this.db.prepare('PRAGMA table_info(jobs)').all() as any[]).map((c) => c.name);
+    for (const c of ['topic', 'params', 'metrics', 'note']) if (!jcols.includes(c)) this.db.exec(`ALTER TABLE jobs ADD COLUMN ${c} TEXT`);
     if (!tcols.includes('halt')) this.db.exec('ALTER TABLE tasks ADD COLUMN halt TEXT');
     if (!tcols.includes('error')) this.db.exec('ALTER TABLE tasks ADD COLUMN error TEXT');
     const lcols = (this.db.prepare('PRAGMA table_info(logs)').all() as any[]).map((c) => c.name);
@@ -567,25 +579,45 @@ export class Store {
 
   // ---- jobs
   listJobs(limit = 100): Job[] {
-    return (this.db.prepare('SELECT * FROM jobs ORDER BY id DESC LIMIT ?').all(limit) as unknown as Job[]).reverse();
+    return (this.db.prepare('SELECT * FROM jobs ORDER BY id DESC LIMIT ?').all(limit) as any[]).map(rowToJob).reverse();
   }
   activeJobs(): Job[] {
-    return this.db.prepare("SELECT * FROM jobs WHERE state IN ('pending','running','unknown')").all() as unknown as Job[];
+    return (this.db.prepare("SELECT * FROM jobs WHERE state IN ('pending','running','unknown')").all() as any[]).map(rowToJob);
   }
   getJob(id: number): Job | undefined {
-    return this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as unknown as Job | undefined;
+    const r = this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+    return r ? rowToJob(r) : undefined;
   }
-  createJob(j: Omit<Job, 'id' | 'createdAt' | 'updatedAt'>): Job {
+  createJob(j: Omit<Job, 'id' | 'createdAt' | 'updatedAt' | 'topic' | 'params' | 'metrics' | 'note'> & Partial<Pick<Job, 'topic' | 'params' | 'metrics' | 'note'>>): Job {
     const now = Date.now();
     const r = this.db
       .prepare(
-        'INSERT INTO jobs (server, remoteId, name, command, submittedBy, state, logPath, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO jobs (server, remoteId, name, command, submittedBy, state, logPath, topic, params, metrics, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(j.server, j.remoteId, j.name, j.command, j.submittedBy, j.state, j.logPath, now, now);
+      .run(j.server, j.remoteId, j.name, j.command, j.submittedBy, j.state, j.logPath, j.topic ?? null, j.params ? JSON.stringify(j.params) : null, j.metrics ? JSON.stringify(j.metrics) : null, j.note ?? null, now, now);
     return this.getJob(Number(r.lastInsertRowid))!;
   }
   setJobState(id: number, state: JobState): Job | undefined {
     this.db.prepare('UPDATE jobs SET state = ?, updatedAt = ? WHERE id = ?').run(state, Date.now(), id);
     return this.getJob(id);
+  }
+  /**
+   * Write a result onto a job: metrics and params are merged into what is there (a name given again replaces
+   * its value), a note or topic given replaces the old one.
+   */
+  recordResult(id: number, r: { metrics?: Record<string, number>; params?: Job['params']; note?: string | null; topic?: string | null }): Job | undefined {
+    const j = this.getJob(id);
+    if (!j) return undefined;
+    const metrics = { ...(j.metrics ?? {}), ...(r.metrics ?? {}) };
+    const params = { ...(j.params ?? {}), ...(r.params ?? {}) };
+    this.db
+      .prepare('UPDATE jobs SET metrics = ?, params = ?, note = ?, topic = ?, updatedAt = ? WHERE id = ?')
+      .run(Object.keys(metrics).length ? JSON.stringify(metrics) : null, Object.keys(params).length ? JSON.stringify(params) : null, r.note ?? j.note, r.topic ?? j.topic, Date.now(), id);
+    return this.getJob(id);
+  }
+  /** Jobs with something recorded whose text contains every token, newest first. */
+  searchExperiments(tokens: string[], limit: number, textOf: (j: Job) => string): Job[] {
+    const rows = (this.db.prepare('SELECT * FROM jobs WHERE metrics IS NOT NULL OR params IS NOT NULL ORDER BY updatedAt DESC LIMIT 2000').all() as any[]).map(rowToJob);
+    return rows.filter((j) => tokens.every((k) => textOf(j).toLowerCase().includes(k))).slice(0, limit);
   }
 }

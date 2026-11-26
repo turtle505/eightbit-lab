@@ -1657,7 +1657,7 @@ describe('language', async () => {
       await settle(60);
       expect(appends).toHaveLength(2);
       expect(appends[1]).toContain('in English');
-      expect(mcpNames[0]).not.toContain('lab'); // no GPU servers configured → no lab tools
+      expect(mcpNames[0]).toContain('lab'); // no GPU servers configured → it holds only record_result
     } finally {
       setLang(before);
       m.stop('lit');
@@ -2426,5 +2426,133 @@ describe('failed and stopped tasks', async () => {
     old.close();
     const s = new Store(file);
     expect(s.listTasks()[0]).toMatchObject({ title: 'old', halt: null, error: null });
+  });
+});
+
+describe('experiments', async () => {
+  type Job = import('../../shared/protocol.ts').Job;
+  const { cleanMetrics, cleanParams, experimentTable, experimentCsv, experimentTopics, isExperiment, lowerIsBetter, fmtNum } = await import('../../shared/experiments.ts');
+  const { labToolsServer, RECORD_TOOL } = await import('../src/mcp/labTools.ts');
+  const { ServerRegistry } = await import('../src/compute/registry.ts');
+  const { roleAllow, needsLabApproval, isAutoAllowed } = await import('../src/agents/manager.ts');
+  const { searchAll } = await import('../src/search.ts');
+  const { bus } = await import('../src/bus.ts');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const job = (id: number, over: Partial<Job> = {}): Job => ({ id, server: 'gpu-a', remoteId: '1', name: `run${id}`, command: 'python train.py', submittedBy: 'eval', state: 'completed', logPath: '', topic: null, params: null, metrics: null, note: null, createdAt: id * 1000, updatedAt: id * 1000, ...over });
+
+  it('accepts only finite numbers as metrics', () => {
+    expect(cleanMetrics({ ' val loss ': 0.4, rmsd: 1 })).toEqual({ metrics: { val_loss: 0.4, rmsd: 1 } });
+    expect(cleanMetrics({ acc: '0.9' })).toMatchObject({ error: expect.stringContaining('acc') });
+    expect(cleanMetrics({ acc: NaN })).toHaveProperty('error');
+    expect(cleanMetrics({})).toHaveProperty('error');
+    expect(cleanMetrics([1])).toHaveProperty('error');
+  });
+
+  it('keeps params that are plain values', () => {
+    expect(cleanParams({ lr: 0.0003, model: 'v2', amp: true })).toEqual({ params: { lr: 0.0003, model: 'v2', amp: true } });
+    expect(cleanParams(undefined)).toEqual({ params: null });
+    expect(cleanParams({})).toEqual({ params: null });
+    expect(cleanParams({ layers: [1, 2] })).toHaveProperty('error');
+  });
+
+  it('stores params and metrics, merges a second result, and opens an old database', () => {
+    const s = new Store(':memory:');
+    const j = s.createJob({ server: 'gpu-a', remoteId: '9', name: 'ff', command: 'x', submittedBy: 'eval', state: 'pending', logPath: '/l', topic: 'design-survey', params: { lr: 0.1 } });
+    expect(j).toMatchObject({ topic: 'design-survey', params: { lr: 0.1 }, metrics: null, note: null });
+    s.recordResult(j.id, { metrics: { loss: 0.5, acc: 0.8 } });
+    const again = s.recordResult(j.id, { metrics: { loss: 0.4 }, params: { seed: 1 }, note: 'best ckpt' })!;
+    expect(again).toMatchObject({ metrics: { loss: 0.4, acc: 0.8 }, params: { lr: 0.1, seed: 1 }, note: 'best ckpt', topic: 'design-survey' });
+    expect(s.recordResult(999, { metrics: { a: 1 } })).toBeUndefined();
+    expect(s.listJobs()[0].metrics).toEqual({ loss: 0.4, acc: 0.8 });
+
+    const file = `${mkdtempSync(`${tmpdir()}/office-oldjobs-`)}/o.db`;
+    const old = new DatabaseSync(file);
+    old.exec('CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, server TEXT NOT NULL, remoteId TEXT NOT NULL, name TEXT NOT NULL, command TEXT NOT NULL, submittedBy TEXT, state TEXT NOT NULL, logPath TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)');
+    old.exec("INSERT INTO jobs (server, remoteId, name, command, state, logPath, createdAt, updatedAt) VALUES ('gpu-a', '1', 'old', 'x', 'completed', '/l', 1, 1)");
+    old.close();
+    const reopened = new Store(file);
+    expect(reopened.listJobs()[0]).toMatchObject({ name: 'old', topic: null, params: null, metrics: null, note: null });
+    expect(reopened.recordResult(1, { metrics: { acc: 0.9 } })!.metrics).toEqual({ acc: 0.9 });
+  });
+
+  it('builds the table from every column any run has, sorted, with the best value per metric', () => {
+    const jobs = [
+      job(1, { topic: 'a', params: { lr: 0.1 }, metrics: { loss: 0.5, acc: 0.7 } }),
+      job(2, { topic: 'a', params: { lr: 0.01, seed: 3 }, metrics: { loss: 0.3 } }),
+      job(3, { topic: 'b', metrics: { acc: 0.9 } }),
+      job(4), // nothing recorded: not an experiment
+    ];
+    expect(isExperiment(jobs[3])).toBe(false);
+    const all = experimentTable(jobs);
+    expect(all.rows.map((j) => j.id)).toEqual([3, 2, 1]); // newest first
+    expect([all.params, all.metrics]).toEqual([['lr', 'seed'], ['loss', 'acc']]); // in order of first appearance
+    expect(all.best).toEqual({ acc: 0.9, loss: 0.3 }); // loss counts down, acc up
+    expect(experimentTable(jobs, { lower: { acc: true } }).best.acc).toBe(0.7);
+    const a = experimentTable(jobs, { topic: 'a', sort: { col: 'loss', kind: 'metric', desc: false } });
+    expect(a.rows.map((j) => j.id)).toEqual([2, 1]);
+    expect(a.best).toEqual({ loss: 0.3 }); // acc has one value in this topic: nothing to compare
+    // rows without the sorted value go last either way
+    expect(experimentTable(jobs, { sort: { col: 'loss', kind: 'metric', desc: true } }).rows.map((j) => j.id)).toEqual([1, 2, 3]);
+    expect(experimentTable(jobs, { sort: { col: 'lr', kind: 'param', desc: false } }).rows.map((j) => j.id)).toEqual([2, 1, 3]);
+    expect(experimentTopics(jobs)).toEqual(['b', 'a']);
+  });
+
+  it('guesses which way a metric is better and formats numbers', () => {
+    expect(['val_loss', 'RMSD', 'error_rate', 'latency_ms'].map(lowerIsBetter)).toEqual([true, true, true, true]);
+    expect(['acc', 'f1', 'designability', 'tm_score'].map(lowerIsBetter)).toEqual([false, false, false, false]);
+    expect([fmtNum(3), fmtNum(0.123456), fmtNum(1.5), fmtNum(0.0000123456), fmtNum(123456.789)]).toEqual(['3', '0.1235', '1.5', '0.00001235', '123456.8']);
+  });
+
+  it('writes the table as CSV with quotes where needed', () => {
+    const t = experimentTable([job(1, { name: 'a,b', topic: 't', params: { note: 'say "hi"' }, metrics: { loss: 0.5 } })]);
+    const [head, row] = experimentCsv(t).trim().split('\n');
+    expect(head).toBe('id,name,topic,state,date,note,loss');
+    expect(row).toBe('1,"a,b",t,completed,1970-01-01,"say ""hi""",0.5');
+  });
+
+  it('records a result by job id or by name, and refuses what is not a number', async () => {
+    const store = new Store(':memory:');
+    const seen: Job[] = [];
+    const onRec = (j: Job) => seen.push(j);
+    bus.on('resultRecorded', onRec);
+    const bridge = new CodexTools();
+    try {
+      await bridge.add('lab', labToolsServer('eval', '/tmp', new ServerRegistry([], store), store, () => 'design-survey').instance);
+      expect(bridge.specs[0].tools.map((t) => t.name)).toEqual(['record_result']); // no GPU servers: nothing else
+      const byName = await bridge.call('lab', 'record_result', { name: 'local eval', metrics: { rmsd: 1.4 }, params: { split: 'test' } });
+      expect(byName.success).toBe(true);
+      const row = store.listJobs()[0];
+      expect(row).toMatchObject({ name: 'local eval', state: 'recorded', topic: 'design-survey', metrics: { rmsd: 1.4 }, params: { split: 'test' }, submittedBy: 'eval' });
+      await bridge.call('lab', 'record_result', { job_id: row.id, metrics: { rmsd: 1.2, n: 100 }, note: 'after  fix' });
+      expect(store.getJob(row.id)).toMatchObject({ metrics: { rmsd: 1.2, n: 100 }, note: 'after fix', topic: 'design-survey' });
+      expect((await bridge.call('lab', 'record_result', { job_id: 999, metrics: { a: 1 } })).success).toBe(false);
+      expect((await bridge.call('lab', 'record_result', { metrics: { a: 1 } })).success).toBe(false); // neither id nor name
+      expect((await bridge.call('lab', 'record_result', { name: 'x', metrics: { a: 1 }, topic: '설계 조사' })).success).toBe(false);
+      expect(store.listJobs()).toHaveLength(1);
+      expect(seen.map((j) => j.id)).toEqual([row.id, row.id]);
+      expect(store.activeJobs()).toEqual([]); // a recorded row is never polled as a running job
+    } finally {
+      bus.off('resultRecorded', onRec);
+      await bridge.close();
+    }
+  });
+
+  it('lets every role record a result without asking, and never treats it as reaching a server', () => {
+    expect(isAutoAllowed(roleAllow({ autoAllow: ['Read'] }), RECORD_TOOL)).toBe(true);
+    expect(needsLabApproval(RECORD_TOOL, {})).toBe(false);
+    expect(needsLabApproval('mcp__lab__submit_job', {})).toBe(true);
+  });
+
+  it('finds an experiment by its name, topic, params and metrics', () => {
+    const store = new Store(':memory:');
+    store.createJob({ server: '', remoteId: '', name: 'frameflow-v2', command: '', submittedBy: 'eval', state: 'recorded', logPath: '', topic: 'design-survey', params: { lr: 0.0003 }, metrics: { designability: 0.82 } });
+    store.createJob({ server: 'gpu-a', remoteId: '1', name: 'plain job', command: 'designability.py', submittedBy: 'eval', state: 'completed', logPath: '' });
+    const reports = { search: () => [] } as any;
+    const hits = searchAll('designability frameflow', store, reports, (id) => id).filter((h) => h.kind === 'experiment');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ title: '#1 frameflow-v2' });
+    expect(hits[0].text).toContain('designability=0.82');
+    expect(searchAll('plain job', store, reports, (id) => id).filter((h) => h.kind === 'experiment')).toEqual([]); // nothing recorded on it
   });
 });

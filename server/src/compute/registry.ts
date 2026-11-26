@@ -71,7 +71,7 @@ export class ServerRegistry {
     );
   }
 
-  async submit(spec: SubmitSpec & { server: string; submittedBy: string | null }): Promise<Job> {
+  async submit(spec: SubmitSpec & { server: string; submittedBy: string | null; topic?: string | null; params?: Job['params'] }): Promise<Job> {
     const a = this.get(spec.server);
     const { remoteId, logPath } = await a.submit(spec);
     const job = this.store.createJob({
@@ -82,6 +82,8 @@ export class ServerRegistry {
       submittedBy: spec.submittedBy,
       state: 'pending',
       logPath,
+      topic: spec.topic ?? null,
+      params: spec.params ?? null,
     });
     bus.send({ t: 'job', data: job });
     return job;

@@ -7,6 +7,9 @@ import { isLocalHost, sq } from '../compute/adapter.ts';
 import { sshControlOpts, sshThrottle } from '../hosts.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { Store } from '../db.ts';
+import { bus } from '../bus.ts';
+import { cleanMetrics, cleanParams } from '../../../shared/experiments.ts';
+import { normalizeTopic } from '../../../shared/topics.ts';
 
 const text = (s: string, isError = false) => ({ content: [{ type: 'text' as const, text: s }], isError });
 
@@ -42,16 +45,67 @@ function tarFetch(sshHost: string, remotePath: string, dest: string): Promise<nu
   });
 }
 
-export function labToolsServer(employeeId: string, cwd: string, registry: ServerRegistry, store: Store) {
+/** The tool that writes a result into the office's experiment table. It touches no server, so it is always allowed. */
+export const RECORD_TOOL = 'mcp__lab__record_result';
+
+const paramsShape = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
+
+/**
+ * `currentTopic` is the topic of the task the employee is on right now (read at call time: the server is built
+ * once per session). With no GPU servers configured only `record_result` is offered.
+ */
+export function labToolsServer(employeeId: string, cwd: string, registry: ServerRegistry, store: Store, currentTopic: () => string | null = () => null) {
+  const hasServers = registry.list().length > 0;
+  /** an explicit topic must be a valid one; none falls back to the task being worked on */
+  const topicOf = (given: string | undefined): { topic: string | null } | { error: string } => (given?.trim() ? normalizeTopic(given) : { topic: currentTopic() });
+  const recordResult = tool(
+    'record_result',
+    'Write the final numbers of an experiment into the office\'s comparison table, so runs can be compared later. ' +
+      'For an office job pass job_id; for something run another way (a local evaluation, a script) pass name instead and a row is created. ' +
+      'Calling it again for the same job_id adds to what is there (a metric given again replaces its value). Only record numbers you actually measured.',
+    {
+      job_id: z.number().int().optional().describe('office job id (from submit_job / job_status)'),
+      name: z.string().optional().describe('experiment name, when there is no office job for it'),
+      metrics: z.record(z.string(), z.number()).describe('final metrics, name → number, e.g. {"val_loss": 0.412, "rmsd": 1.38}'),
+      params: paramsShape.optional().describe('the setup it was run with, if not given at submit, e.g. {"lr": 0.0003, "seed": 1}'),
+      topic: z.string().optional().describe('research topic folder name; defaults to the topic of your current task'),
+      note: z.string().optional().describe('one line of context: data split, checkpoint, anything needed to read the numbers'),
+    },
+    async (a) => {
+      const m = cleanMetrics(a.metrics);
+      if ('error' in m) return text(m.error, true);
+      const p = cleanParams(a.params);
+      if ('error' in p) return text(p.error, true);
+      const tp = topicOf(a.topic);
+      if ('error' in tp) return text(tp.error, true);
+      const note = a.note?.replace(/\s+/g, ' ').trim().slice(0, 300) || null;
+      let job;
+      if (a.job_id != null) {
+        if (!store.getJob(a.job_id)) return text(`job ${a.job_id} not found`, true);
+        job = store.recordResult(a.job_id, { metrics: m.metrics, params: p.params, note, topic: a.topic?.trim() ? tp.topic : undefined });
+      } else {
+        const name = a.name?.replace(/\s+/g, ' ').trim().slice(0, 80);
+        if (!name) return text('give job_id, or name for a run that was not an office job', true);
+        job = store.createJob({ server: '', remoteId: '', name, command: '', submittedBy: employeeId, state: 'recorded', logPath: '', topic: tp.topic, params: p.params, metrics: m.metrics, note });
+      }
+      if (!job) return text('could not record the result', true);
+      bus.send({ t: 'job', data: job });
+      bus.emit('resultRecorded', job);
+      return text(`recorded on #${job.id} ${job.name}: ${Object.entries(job.metrics ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    },
+  );
   return createSdkMcpServer({
     name: 'lab',
     // always in the prompt: these are few, and deferring them costs a ToolSearch turn on every run
     alwaysLoad: true,
     version: '1.0.0',
-    instructions:
-      'Remote GPU servers this office can submit jobs to. Check gpu_status before submit_job. Jobs run in a fresh directory on the server; ' +
-      'use absolute paths or cd into the project inside `command`. Results stay on the server unless you call fetch_results.',
-    tools: [
+    instructions: hasServers
+      ? 'Remote GPU servers this office can submit jobs to. Check gpu_status before submit_job. Jobs run in a fresh directory on the server; ' +
+        'use absolute paths or cd into the project inside `command`. Results stay on the server unless you call fetch_results. ' +
+        'Pass the run\'s setup as `params` to submit_job, and when a run is done write its final numbers with record_result.'
+      : 'The office\'s experiment table. When you have measured final numbers for a run (training, evaluation, benchmark), write them with record_result so they can be compared with other runs.',
+    tools: !hasServers ? [recordResult] : [
+      recordResult,
       tool('list_servers', 'List the lab GPU servers with type (ssh/slurm), online status and GPU usage.', {}, async () =>
         text(JSON.stringify(registry.list(), null, 2)),
       ),
@@ -68,10 +122,16 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
           name: z.string().describe('short job name, e.g. train-frameflow-v2'),
           command: z.string().describe('bash commands, e.g. "cd ~/proj && python train.py --cfg cfg.yaml"'),
           gpus: z.number().int().min(0).max(8).optional().describe('GPUs to request (slurm only)'),
+          params: paramsShape.optional().describe('the setup of this run for the comparison table, e.g. {"lr": 0.0003, "model": "v2", "seed": 1}'),
+          topic: z.string().optional().describe('research topic folder name; defaults to the topic of your current task'),
         },
         async (a) => {
+          const p = cleanParams(a.params);
+          if ('error' in p) return text(p.error, true);
+          const tp = topicOf(a.topic);
+          if ('error' in tp) return text(tp.error, true);
           try {
-            const job = await registry.submit({ ...a, submittedBy: employeeId });
+            const job = await registry.submit({ server: a.server, name: a.name, command: a.command, gpus: a.gpus, submittedBy: employeeId, topic: tp.topic, params: p.params });
             return text(`submitted job #${job.id} on ${job.server} (remote id ${job.remoteId}). log: ${job.logPath}`);
           } catch (e) {
             return text(String((e as Error).message), true);

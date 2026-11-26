@@ -157,7 +157,8 @@ export interface Approval {
   createdAt: number;
 }
 
-export type JobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+/** `recorded` is a result written down by name for something that did not run as an office job */
+export type JobState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown' | 'recorded';
 
 export interface Job {
   id: number;
@@ -168,6 +169,14 @@ export interface Job {
   submittedBy: string | null;
   state: JobState;
   logPath: string;
+  /** the research subject this run belongs to (see shared/topics.ts); null = none */
+  topic: string | null;
+  /** what it was run with (name → value), given at submit or with the result; null = not written down */
+  params: Record<string, string | number | boolean> | null;
+  /** what came out (name → number), written by `record_result`; null = none yet */
+  metrics: Record<string, number> | null;
+  /** a line of comment recorded with the result */
+  note: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -250,7 +259,7 @@ export interface FeedItem {
 
 /** One result of a search across reports, logs, task cards and the report feed. */
 export interface SearchHit {
-  kind: 'report' | 'log' | 'task' | 'feed';
+  kind: 'report' | 'log' | 'task' | 'feed' | 'experiment';
   ts: number;
   title: string;
   /** the text around the first match, on one line */

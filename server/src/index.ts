@@ -18,7 +18,7 @@ import { searchAll } from './search.ts';
 import { normalizeTopic, topicLine } from '../../shared/topics.ts';
 import { TodayNote } from './todos.ts';
 import type { RunFinished } from './agents/manager.ts';
-import type { Engine, FeedItem } from '../../shared/protocol.ts';
+import type { Engine, FeedItem, Job } from '../../shared/protocol.ts';
 import { UsageMonitor } from './usage.ts';
 import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
@@ -96,6 +96,8 @@ const sendSkills = () => bus.send({ t: 'skills', data: skills.list() });
 const pushFeed = (f: FeedItem) => bus.send({ t: 'feed', data: f });
 const notifier = new Notifier(office.notify);
 const empName = (id: string) => agents.views().find((v) => v.id === id)?.name ?? id;
+/** Evaluation Analyst "Gauss" → Gauss */
+const shortName = (id: string) => empName(id).replace(/^.*"(.*)".*$/, '$1');
 bus.on('runFinished', (r: RunFinished) => {
   void notifier.send(r.ok ? 'result' : 'error', `${r.ok ? '✅' : '⚠️'} ${empName(r.employeeId)}: ${r.label}`, notifier.preview(r.text), r.ok ? 'default' : 'high');
 });
@@ -114,7 +116,7 @@ const reports = new ReportLibrary(() =>
 const notebook = new Notebook(resolve(office.workspaceRoot, NOTEBOOK_ROOT), office.notebook, (text) => bus.send({ t: 'notice', level: 'warn', text }));
 bus.on('runFinished', (r: RunFinished) => {
   const t = r.taskId != null ? store.getTask(r.taskId) : undefined;
-  if (t) notebook.add({ kind: 'task', ts: Date.now(), taskId: t.id, title: t.title, who: empName(r.employeeId).replace(/^.*"(.*)".*$/, '$1'), ok: r.ok, topic: t.topic, text: r.text, error: r.error });
+  if (t) notebook.add({ kind: 'task', ts: Date.now(), taskId: t.id, title: t.title, who: shortName(r.employeeId), ok: r.ok, topic: t.topic, text: r.text, error: r.error });
 });
 reports.scan(); // baseline: files that already exist are not announced
 const today = new TodayNote(office.obsidian);
@@ -336,14 +338,17 @@ bus.on('runFinished', (r: RunFinished) => {
 });
 
 // When a remote job ends, tell whoever submitted it so they can follow up.
+bus.on('resultRecorded', (job: Job) => {
+  notebook.add({ kind: 'result', ts: Date.now(), jobId: job.id, name: job.name, who: job.submittedBy ? shortName(job.submittedBy) : 'manager', topic: job.topic, metrics: job.metrics ?? {}, params: job.params, note: job.note });
+});
 registry.onJobFinished((job) => {
-  notebook.add({ kind: 'job', ts: Date.now(), jobId: job.id, name: job.name, server: job.server, state: job.state });
+  notebook.add({ kind: 'job', ts: Date.now(), jobId: job.id, name: job.name, server: job.server, state: job.state, topic: job.topic });
   bus.send({ t: 'notice', level: job.state === 'completed' ? 'info' : 'warn', text: `Job #${job.id} ${job.name} @${job.server}: ${job.state}` });
   void notifier.send('job', `🖥️ Job #${job.id} ${job.name} @${job.server}: ${job.state}`, '', job.state === 'completed' ? 'default' : 'high');
   if (job.submittedBy && agents.has(job.submittedBy)) {
     agents.instruct(
       job.submittedBy,
-      `[Automatic notice] Remote job #${job.id} (${job.name}, ${job.server}) ended in state '${job.state}'. Check the log with mcp__lab__tail_log and report the result briefly. If the next step is not clear, only suggest it.`,
+      `[Automatic notice] Remote job #${job.id} (${job.name}, ${job.server}) ended in state '${job.state}'. Check the log with mcp__lab__tail_log and report the result briefly. If the log shows final metrics, write them with mcp__lab__record_result (job_id ${job.id}) so the run appears in the comparison table; record only numbers that are in the log. If the next step is not clear, only suggest it.`,
       null,
       { label: `🖥️ Job #${job.id} ${job.name} (${job.state})` },
     );
