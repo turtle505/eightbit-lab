@@ -1,6 +1,7 @@
 // Switching between the pixel "game" view, the plain "console" view and the "reports" browser.
 import type { ViewMode } from './panels.ts';
 import { tr } from '../../../shared/i18n.ts';
+import { DEFAULT_TITLE } from '../../../shared/protocol.ts';
 
 const KEY = 'eightbit-lab:view';
 /** Panels that exist once and move into whichever view is active. */
@@ -50,11 +51,18 @@ export function applyView(view: ViewMode) {
   }
 }
 
+/** the office's name (the manager can change it; main.ts keeps this in step with the snapshot) */
+let officeTitle = DEFAULT_TITLE;
+export function setOfficeTitle(title: string) {
+  officeTitle = title || DEFAULT_TITLE;
+}
+
+/** what the browser tab says */
 export const viewTitle = (view: ViewMode): string =>
   view === 'console'
-    ? '8-bit Lab · Console'
+    ? `${officeTitle} · Console`
     : view === 'reports'
-      ? tr({ ko: '8-bit Lab · 보고서', en: '8-bit Lab · Reports' })
+      ? tr({ ko: `${officeTitle} · 보고서`, en: `${officeTitle} · Reports` })
       : view === 'projects'
-        ? tr({ ko: '8-bit Lab · 프로젝트', en: '8-bit Lab · Projects' })
-        : '8-bit Lab';
+        ? tr({ ko: `${officeTitle} · 프로젝트`, en: `${officeTitle} · Projects` })
+        : officeTitle;

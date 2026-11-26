@@ -1721,3 +1721,15 @@ body .md-body h4 {
   width: 100%;
   margin-top: 6px;
 }
+
+/* the office's title in the top bar: click to rename (main.ts) */
+.office-title {
+  cursor: pointer;
+}
+.office-title:hover {
+  text-decoration: underline dotted;
+}
+/* the game view shows it in capitals, as the original "8-BIT LAB" was (no effect on Hangul) */
+.t-game .office-title {
+  text-transform: uppercase;
+}

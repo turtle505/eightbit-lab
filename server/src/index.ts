@@ -528,7 +528,7 @@ function handleApi(req: import('node:http').IncomingMessage, res: import('node:h
     req.on('end', () => {
       const token = new URLSearchParams(Buffer.concat(chunks).toString()).get('token') ?? '';
       if (!tokenMatches(token, office.authToken)) {
-        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(true));
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(true, figureName('title')));
         return;
       }
       res.writeHead(303, { location: '/', 'set-cookie': cookieHeader(office.authToken) }).end();
@@ -583,7 +583,7 @@ const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
   if (!isAuthorized(req, office.authToken)) {
-    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(false));
+    res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(loginPage(false, figureName('title')));
     return;
   }
   let p = resolve(DIST, '.' + decodeURIComponent(url.pathname));

@@ -16,7 +16,7 @@ import {
   renderJobs,
   renderRoutines,
 } from './ui/panels.ts';
-import { applyView, initialView, viewTitle } from './ui/view.ts';
+import { applyView, initialView, setOfficeTitle, viewTitle } from './ui/view.ts';
 import { renderReportFeed } from './ui/feed.ts';
 import { renderCommandBar } from './ui/command.ts';
 import { renderTodos, todosUpdated } from './ui/todos.ts';
@@ -61,6 +61,25 @@ function setView(v: ViewMode) {
   scene.paused = v !== 'game';
   renderAll();
 }
+
+/** The office's name, wherever it shows: the top bar (once per view) and the browser tab. */
+function applyTitle() {
+  const title = state.snap.figureNames.title || figureDefaultName('title');
+  setOfficeTitle(title);
+  document.title = viewTitle(state.view);
+  const tip = tr({ ko: '클릭해서 사무실 이름 바꾸기', en: 'Click to rename the office' });
+  document.querySelectorAll<HTMLElement>('.office-title').forEach((el) => {
+    if (el.textContent !== title) el.textContent = title;
+    el.title = tip;
+  });
+}
+document.querySelectorAll<HTMLElement>('.office-title').forEach((el) =>
+  el.addEventListener('click', () => {
+    const d = figureDefaultName('title');
+    const name = prompt(tr({ ko: `사무실 이름 (비우면 "${d}")`, en: `Office name (empty = "${d}")` }), state.snap.figureNames.title ?? d);
+    if (name !== null) send({ t: 'renameFigure', key: 'title', name });
+  }),
+);
 
 function renderAll() {
   renderSearch(state);
@@ -117,8 +136,8 @@ function onMsg(m: ServerMsg) {
   switch (m.t) {
     case 'snapshot':
       applyLang(m.data.language);
-      document.title = viewTitle(state.view);
       state.snap = m.data;
+      applyTitle();
       state.feed = [...(m.data.recentLogs ?? [])];
       scene.setEmployees(m.data.employees);
       scene.setServers(m.data.servers);
@@ -205,6 +224,7 @@ function onMsg(m: ServerMsg) {
       break;
     case 'figureName':
       s.figureNames = { ...s.figureNames, [m.key]: m.name };
+      if (m.key === 'title') applyTitle();
       scene.setFigureNames({ [m.key]: m.name });
       break;
     case 'routine': {
@@ -260,7 +280,7 @@ function onMsg(m: ServerMsg) {
       break;
     case 'notice':
       toast(m.text, m.level);
-      notify('8-bit Lab', m.text);
+      notify(state.snap.figureNames.title || figureDefaultName('title'), m.text);
       break;
   }
   renderAll();

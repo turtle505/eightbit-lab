@@ -351,11 +351,13 @@ export interface Snapshot {
   language: Lang;
 }
 
-/** editable labels in the game view that are not employees: the manager's name tag and the whiteboard text */
-export type FigureKey = 'manager' | 'board';
-export const FIGURE_KEYS: readonly FigureKey[] = ['manager', 'board'];
-export const figureDefaultName = (key: FigureKey): string => (key === 'manager' ? tr({ ko: '매니저', en: 'Manager' }) : '');
-export const FIGURE_MAX_LEN: Record<FigureKey, number> = { manager: 20, board: 60 };
+/** editable labels that are not employees: the manager's name tag, the whiteboard text, and the office's title in the top bar */
+export type FigureKey = 'manager' | 'board' | 'title';
+export const FIGURE_KEYS: readonly FigureKey[] = ['manager', 'board', 'title'];
+/** the office's name until the manager gives it another (top bar, browser tab, desktop notifications, the login page) */
+export const DEFAULT_TITLE = '8-bit Lab';
+export const figureDefaultName = (key: FigureKey): string => (key === 'manager' ? tr({ ko: '매니저', en: 'Manager' }) : key === 'title' ? DEFAULT_TITLE : '');
+export const FIGURE_MAX_LEN: Record<FigureKey, number> = { manager: 20, board: 60, title: 30 };
 
 // server -> client
 export type ServerMsg =

@@ -120,6 +120,7 @@ Once the tutorial is cleared, this is the full list of controls.
 | Schedule recurring work | Routine panel → **+ New routine**, or just ask the assistant |
 | Switch views | **Game / Console / Reports / Projects** at the top right, or <kbd>`</kbd> |
 | Switch language | The **EN / 한국어** button at the top right |
+| Rename the office | Click the title in the top bar. It also shows in the browser tab, desktop notifications and the login page; empty brings back "8-bit Lab" |
 
 **Views.** *Game* is the pixel office. *Console* shows the same data as tables: staff, tasks, a combined activity feed and approvals, all driven from the keyboard. *Reports* is a reader for report files. Add `?view=console` or `?view=reports` to the URL to open one directly.
 

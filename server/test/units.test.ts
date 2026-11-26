@@ -2088,3 +2088,34 @@ describe('task chains', async () => {
     expect(migrated.createTask('새 작업', '', 'eval', null, false, null, null, 1).afterTask).toBe(1);
   });
 });
+
+describe('the office title', async () => {
+  const { DEFAULT_TITLE, FIGURE_KEYS, FIGURE_MAX_LEN, figureDefaultName } = await import('../../shared/protocol.ts');
+  const { loginPage } = await import('../src/auth.ts');
+
+  it('is one of the labels the manager can change, "8-bit Lab" until they do, 30 characters at most', () => {
+    expect(FIGURE_KEYS).toContain('title');
+    expect(figureDefaultName('title')).toBe('8-bit Lab');
+    expect(DEFAULT_TITLE).toBe('8-bit Lab');
+    expect(FIGURE_MAX_LEN.title).toBe(30);
+  });
+
+  it('is stored like the other labels, and an empty one falls back to the default', () => {
+    // the same reserved-key scheme index.ts uses for the manager tag and the whiteboard
+    const s = new Store(':memory:');
+    const name = () => s.getEmployeeName('__title') ?? figureDefaultName('title');
+    expect(name()).toBe('8-bit Lab');
+    s.setEmployeeName('__title', '유빈 연구실');
+    expect(name()).toBe('유빈 연구실');
+    s.setEmployeeName('__title', null); // what renameFigure does with an empty name
+    expect(name()).toBe('8-bit Lab');
+  });
+
+  it('shows on the login page, escaped', () => {
+    expect(loginPage(false)).toContain('<h1>👾 8-bit Lab</h1>');
+    const page = loginPage(false, 'Lab <b>&"x"');
+    expect(page).toContain('<h1>👾 Lab &lt;b&gt;&amp;&quot;x&quot;</h1>');
+    expect(page).toContain('<title>Lab &lt;b&gt;&amp;&quot;x&quot; · ');
+    expect(page).not.toContain('<b>&"x"');
+  });
+});

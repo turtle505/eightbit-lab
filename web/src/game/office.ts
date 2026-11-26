@@ -39,11 +39,13 @@ let PROF = { x: 346, y: 150 };
 /** decorative figures (not employees): name-tag anchor and click box in canvas pixels */
 /** `fromBottom` entries have y measured up from the canvas bottom, so they follow a growing office. */
 const figAt = (f: { fromBottom?: boolean }, y: number) => (f.fromBottom ? H + y : y);
+/** the labels drawn in the scene; the office title is in the top bar, not here */
+type SceneFigure = Exclude<FigureKey, 'title'>;
 const askName = (k: FigureKey) => {
   const d = figureDefaultName(k);
   return tr({ ko: `이름 (비우면 "${d}")`, en: `Name (empty = "${d}")` });
 };
-const FIGURES: Record<FigureKey, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: () => string; fromBottom?: boolean }> = {
+const FIGURES: Record<SceneFigure, { tag?: { x: number; y: number }; box: { x0: number; x1: number; y0: number; y1: number }; ask: () => string; fromBottom?: boolean }> = {
   manager: { tag: { x: 150, y: -13 }, box: { x0: 141, x1: 159, y0: -54, y1: -36 }, ask: () => askName('manager'), fromBottom: true },
   // whiteboard inner area (frame drawn in paintStatic); empty text → task-count stickies are shown instead
   board: { box: { x0: 104, x1: 216, y0: 4, y1: 32 }, ask: () =>
@@ -204,7 +206,7 @@ export class OfficeScene {
   private floor: HTMLCanvasElement;
   /** grid rows currently drawn; grows as desks are handed out */
   private rows = MIN_ROWS;
-  private figureTags = new Map<FigureKey, HTMLDivElement>();
+  private figureTags = new Map<SceneFigure, HTMLDivElement>();
   private boardText = '';
   /** the manager's line to a corner character, shown over the manager's head */
   private managerLine: { to: string; speech: Speech; hideAt: number | null } | null = null;
@@ -307,7 +309,7 @@ export class OfficeScene {
     host.prepend(this.canvas);
     this.g = this.canvas.getContext('2d')!;
     this.floor = this.paintStatic();
-    for (const key of Object.keys(FIGURES) as FigureKey[]) {
+    for (const key of Object.keys(FIGURES) as SceneFigure[]) {
       const tag = document.createElement('div');
       tag.className = FIGURES[key].tag ? `nametag figure-${key}` : `figure-${key}`;
       if (!FIGURES[key].tag) tag.hidden = true;
@@ -1032,17 +1034,18 @@ export class OfficeScene {
     return null;
   }
 
-  private hitFigure(ev: MouseEvent): FigureKey | null {
+  private hitFigure(ev: MouseEvent): SceneFigure | null {
     const r = this.canvas.getBoundingClientRect();
     const x = ((ev.clientX - r.left) / r.width) * W;
     const y = ((ev.clientY - r.top) / r.height) * H;
-    for (const [key, f] of Object.entries(FIGURES) as [FigureKey, (typeof FIGURES)[FigureKey]][])
+    for (const [key, f] of Object.entries(FIGURES) as [SceneFigure, (typeof FIGURES)[SceneFigure]][])
       if (x >= f.box.x0 && x <= f.box.x1 && y >= figAt(f, f.box.y0) && y <= figAt(f, f.box.y1)) return key;
     return null;
   }
 
   setFigureNames(names: Partial<Record<FigureKey, string>>) {
     for (const [key, name] of Object.entries(names) as [FigureKey, string][]) {
+      if (key === 'title') continue; // shown in the top bar (main.ts)
       const tag = this.figureTags.get(key);
       if (!tag) continue;
       tag.textContent = name;
