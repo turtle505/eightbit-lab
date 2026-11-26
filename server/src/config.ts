@@ -35,6 +35,8 @@ export interface OfficeConfig {
   language: Lang;
   /** what the team works on, one line; put in front of every prompt as "About this team: …" (empty = left out) */
   domain: string;
+  /** keep the lab notebook (workspaces/notebook/<date>.md); on unless set to false */
+  notebook: boolean;
   /** phone / chat notifications; null = off */
   notify: NotifyConfig | null;
 }
@@ -197,6 +199,7 @@ export function loadOffice(): OfficeConfig {
     sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
     language: c.language === 'ko' ? 'ko' : 'en',
     domain: String(c.domain ?? '').trim(),
+    notebook: c.notebook !== false,
     notify: normalizeNotify(c.notify),
     hosts: normalizeHosts(mergeByKey(base.hosts ?? [], local.hosts ?? [], 'id')),
     providers: normalizeProviders(mergeByKey(base.providers ?? [], local.providers ?? [], 'id')),

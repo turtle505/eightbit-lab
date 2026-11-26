@@ -402,6 +402,8 @@ export type ClientMsg =
   | { t: 'moveTask'; taskId: number; state: TaskState }
   | { t: 'deleteTask'; taskId: number }
   | { t: 'instruct'; employeeId: string; text: string; attachmentIds?: number[] }
+  /** "/note …" from the command bar: a line for the lab notebook, not for an employee */
+  | { t: 'addNote'; text: string }
   | { t: 'stop'; employeeId: string }
   | { t: 'resetSession'; employeeId: string }
   | { t: 'setPermission'; employeeId: string; mode: PermissionSetting }

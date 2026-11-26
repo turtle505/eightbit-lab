@@ -12,17 +12,23 @@ export interface ReportRoot {
 }
 
 const MAX_READ = 1_000_000;
+/** label of the lab notebook's root (workspaces/notebook itself, not a reports/ folder inside it) */
+export const NOTEBOOK_ROOT = 'notebook';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'office-skills']);
+/** workspace folders that are not an employee's desk */
+const NOT_DESKS = new Set(['attachments', NOTEBOOK_ROOT]);
 
 /**
- * Report folders: every `<workspaceRoot>/<name>/reports` (employee desks) plus extra dirs from config.
+ * Report folders: every `<workspaceRoot>/<name>/reports` (employee desks) plus extra dirs from config, and the
+ * lab notebook's own folder when it is kept.
  * `employeeFor(dir)` maps a workspace folder back to the employee whose cwd it is.
  */
-export function reportRoots(workspaceRoot: string, extra: string[], employeeFor: (dir: string) => string | null): ReportRoot[] {
+export function reportRoots(workspaceRoot: string, extra: string[], employeeFor: (dir: string) => string | null, notebook = false): ReportRoot[] {
   const roots: ReportRoot[] = [];
+  if (notebook) roots.push({ label: NOTEBOOK_ROOT, dir: join(workspaceRoot, NOTEBOOK_ROOT), employeeId: null });
   if (existsSync(workspaceRoot)) {
     for (const d of readdirSync(workspaceRoot, { withFileTypes: true })) {
-      if (!d.isDirectory() || d.name.startsWith('.') || SKIP_DIRS.has(d.name)) continue;
+      if (!d.isDirectory() || d.name.startsWith('.') || SKIP_DIRS.has(d.name) || NOT_DESKS.has(d.name)) continue;
       const ws = join(workspaceRoot, d.name);
       roots.push({ label: `${d.name}/reports`, dir: join(ws, 'reports'), employeeId: employeeFor(ws) });
     }

@@ -185,4 +185,5 @@ Kang 옆. 정수리에 묶음머리.
 | `workspaces/thug/notes.md` | Kang이 적어 둔 놀릴 거리 |
 | `workspaces/counsel/notes.md` | On의 상담 메모 |
 | `workspaces/prof/quotes.md` | 교수님 어록 |
+| `workspaces/notebook/<날짜>.md` | 연구 노트: 작업·GPU 작업이 끝날 때와 `/note 내용`을 칠 때 사무실이 한 줄씩 덧붙이는 하루치 기록 |
 | `data/office.db` | 대화 기록 전체 |

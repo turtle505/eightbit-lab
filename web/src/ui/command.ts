@@ -1,4 +1,5 @@
 import { getLang, tr } from '../../../shared/i18n.ts';
+import { noteCommand } from '../../../shared/note.ts';
 import { bindAttach } from './attach.ts';
 import { sortedEmployees } from './console.ts';
 import { $, type Send, type UIState, changed, esc, plain, short, statusLabel } from './panels.ts';
@@ -86,6 +87,16 @@ function build(send: Send, select: (id: string | null) => void) {
     const st = current;
     const target = st.snap.employees.find((e) => e.id === st.selected);
     const text = input.value.trim();
+    // "/note …" is the manager's own line for the lab notebook; nobody is instructed
+    const note = noteCommand(text);
+    if (note !== null) {
+      if (!note) return toast(tr({ ko: '/note 뒤에 적을 내용을 쓰세요.', en: 'Write the note after /note.' }), 'warn');
+      send({ t: 'addNote', text: note });
+      input.value = '';
+      grow();
+      input.focus();
+      return toast(tr({ ko: '📝 연구 노트에 적었습니다', en: '📝 Added to the notebook' }));
+    }
     if (!target) {
       ($('cmd-target') as HTMLSelectElement).focus();
       return toast(tr({ ko: '먼저 지시받을 직원을 고르세요.', en: 'Pick who should get it first.' }), 'warn');

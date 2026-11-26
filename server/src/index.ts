@@ -12,7 +12,8 @@ import { Store } from './db.ts';
 import { PermissionBroker } from './permissions/broker.ts';
 import { RoutineScheduler } from './routines.ts';
 import { SkillLibrary } from './skills.ts';
-import { ReportLibrary, reportRoots } from './reports.ts';
+import { NOTEBOOK_ROOT, ReportLibrary, reportRoots } from './reports.ts';
+import { Notebook } from './notebook.ts';
 import { searchAll } from './search.ts';
 import { normalizeTopic, topicLine } from '../../shared/topics.ts';
 import { TodayNote } from './todos.ts';
@@ -107,8 +108,14 @@ bus.on('runFinished', (r: RunFinished) => {
   pushFeed(store.addFeed({ ts: Date.now(), kind: 'result', employeeId: r.employeeId, title: r.label, body: r.text || tr({ ko: '(응답 없음 — 로그 확인)', en: '(no reply; check the log)' }), path: null, ok: r.ok }));
 });
 const reports = new ReportLibrary(() =>
-  reportRoots(office.workspaceRoot, office.reportDirs, (dir) => roles.find((ro) => ro.cwd && resolve(ROOT, ro.cwd) === dir)?.id ?? null),
+  reportRoots(office.workspaceRoot, office.reportDirs, (dir) => roles.find((ro) => ro.cwd && resolve(ROOT, ro.cwd) === dir)?.id ?? null, office.notebook),
 );
+// ---- lab notebook: the office's own dated record of what ended and what the manager jotted down
+const notebook = new Notebook(resolve(office.workspaceRoot, NOTEBOOK_ROOT), office.notebook, (text) => bus.send({ t: 'notice', level: 'warn', text }));
+bus.on('runFinished', (r: RunFinished) => {
+  const t = r.taskId != null ? store.getTask(r.taskId) : undefined;
+  if (t) notebook.add({ kind: 'task', ts: Date.now(), taskId: t.id, title: t.title, who: empName(r.employeeId).replace(/^.*"(.*)".*$/, '$1'), ok: r.ok, topic: t.topic, text: r.text });
+});
 reports.scan(); // baseline: files that already exist are not announced
 const today = new TodayNote(office.obsidian);
 today.poll();
@@ -123,6 +130,7 @@ function pollReports() {
   if (!any) return;
   bus.send({ t: 'reports', data: list });
   for (const f of changed) {
+    if (f.root === NOTEBOOK_ROOT) continue; // the notebook changes all day; it is read in the reports tab, not announced
     let body = '';
     try {
       const c = reports.read(f.path).content;
@@ -327,6 +335,7 @@ bus.on('runFinished', (r: RunFinished) => {
 
 // When a remote job ends, tell whoever submitted it so they can follow up.
 registry.onJobFinished((job) => {
+  notebook.add({ kind: 'job', ts: Date.now(), jobId: job.id, name: job.name, server: job.server, state: job.state });
   bus.send({ t: 'notice', level: job.state === 'completed' ? 'info' : 'warn', text: `Job #${job.id} ${job.name} @${job.server}: ${job.state}` });
   void notifier.send('job', `🖥️ Job #${job.id} ${job.name} @${job.server}: ${job.state}`, '', job.state === 'completed' ? 'default' : 'high');
   if (job.submittedBy && agents.has(job.submittedBy)) {
@@ -366,6 +375,13 @@ function handle(msg: ClientMsg, ws: WebSocket) {
       if (!msg.text.trim() && !rows.length) break;
       store.markAttachmentsUsed(rows.map((r) => r.id));
       agents.instruct(msg.employeeId, (msg.text.trim() || 'Please look at the attached files.') + attachmentBlock(rows), null, { attachmentPaths: rows.flatMap((r) => [r.path, ...(r.textPath ? [r.textPath] : [])]) });
+      break;
+    }
+    case 'addNote': {
+      const text = msg.text.trim().slice(0, 4000);
+      if (!text) break;
+      if (!notebook.on) reply({ t: 'notice', level: 'warn', text: tr({ ko: '연구 노트가 꺼져 있습니다 (office.yaml의 notebook).', en: 'The notebook is off (notebook in office.yaml).' }) });
+      else if (notebook.add({ kind: 'memo', ts: Date.now(), text })) pollReports();
       break;
     }
     case 'stop':

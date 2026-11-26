@@ -31,6 +31,9 @@ researchRepo: ""
 workspaceRoot: ./workspaces
 # Extra folders the reports tab collects .md files from (default: workspaces/<employee folder>/reports). Personal paths go in office.local.yaml.
 # reportDirs: [../research/reports]
+# Lab notebook: the office appends a line to workspaces/notebook/<date>.md whenever a task or a GPU job ends, and for every
+# "/note …" you type in the command bar. No model is called. It shows in the reports tab and in search. false = keep none.
+notebook: true
 # Today's to-dos panel: shows the checkboxes of an Obsidian daily note and lets you check/edit/add. Put your personal vault path in office.local.yaml.
 # obsidian:
 #   vault: /path/to/vault

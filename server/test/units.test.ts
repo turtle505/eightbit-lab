@@ -2186,3 +2186,87 @@ describe('topics', async () => {
     expect(by).toEqual({ 'shared/reports/design-survey/2026-11-26-a.md': 'design-survey', 'shared/reports/daily/2026-11-26-mail.md': null, 'shared/reports/loose.md': null });
   });
 });
+
+describe('lab notebook', async () => {
+  const { Notebook, extractPaths, noteDay, noteEntry } = await import('../src/notebook.ts');
+  const { noteCommand } = await import('../../shared/note.ts');
+  const { reportRoots: roots, NOTEBOOK_ROOT } = await import('../src/reports.ts');
+  const { mkdtempSync, existsSync, readFileSync: read, writeFileSync: write, mkdirSync: mkdir } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const at = (h: number, m: number, day = 26) => new Date(2026, 10, day, h, m).getTime();
+
+  it('finds the files a result mentions, once each, and ignores links and prose', () => {
+    const text = 'Saved to `reports/design-survey/2026-11-26-rmsd.md` and reports/design-survey/figures/a.png.\nScript: work/design-survey/run.py (see https://example.com/reports/x.md). Also /home/u/out/result.csv, and/or nothing, reports/design-survey/2026-11-26-rmsd.md again.';
+    expect(extractPaths(text)).toEqual([
+      'reports/design-survey/2026-11-26-rmsd.md',
+      'reports/design-survey/figures/a.png',
+      'work/design-survey/run.py',
+      '/home/u/out/result.csv',
+    ]);
+    expect(extractPaths('no files here, just a/b ratios and 3/4 done')).toEqual([]);
+  });
+
+  it('writes a finished task with its topic, quoted result and files', () => {
+    const e = noteEntry({ kind: 'task', ts: at(14, 32), taskId: 12, title: 'Recompute designability', who: 'Gauss', ok: true, topic: 'design-survey', text: 'Done.\nSee reports/design-survey/2026-11-26-d.md' });
+    expect(e).toBe('## 14:32 · #12 Recompute designability · Gauss · ✅\n- Topic: design-survey\n- Result:\n  > Done.\n  > See reports/design-survey/2026-11-26-d.md\n- Files: `reports/design-survey/2026-11-26-d.md`\n\n');
+  });
+
+  it('marks a failed task and leaves out what it does not have', () => {
+    const e = noteEntry({ kind: 'task', ts: at(9, 5), taskId: 3, title: 'Train', who: 'Ada', ok: false, topic: null, text: '' });
+    expect(e).toBe('## 09:05 · #3 Train · Ada · ⚠ failed\n\n');
+  });
+
+  it('cuts a long result', () => {
+    const e = noteEntry({ kind: 'task', ts: at(1, 1), taskId: 1, title: 't', who: 'A', ok: true, topic: null, text: 'x'.repeat(2000) });
+    expect(e).toContain(`> ${'x'.repeat(600)}…`);
+    expect(e).not.toContain('x'.repeat(601));
+  });
+
+  it('writes a remote job with its metrics, and a memo as typed', () => {
+    expect(noteEntry({ kind: 'job', ts: at(18, 0), jobId: 7, name: 'ff-v2', server: 'gpu-a', state: 'completed', topic: 'design-survey', metrics: { rmsd: 1.42, n: 100 } })).toBe(
+      '## 18:00 · 🖥 Job #7 ff-v2 · gpu-a · completed\n- Topic: design-survey\n- Metrics: rmsd=1.42, n=100\n\n',
+    );
+    expect(noteEntry({ kind: 'memo', ts: at(18, 1), text: ' lr 3e-4 diverges ' })).toBe('## 18:01 · 📝\nlr 3e-4 diverges\n\n');
+  });
+
+  it('appends to one file a day and starts a new one the next day', () => {
+    const dir = j(mkdtempSync(j(tmpdir(), 'nb-')), 'notebook');
+    const nb = new Notebook(dir, true);
+    expect(nb.add({ kind: 'memo', ts: at(10, 0), text: 'first' })).toBe(true);
+    nb.add({ kind: 'memo', ts: at(11, 0), text: 'second' });
+    nb.add({ kind: 'memo', ts: at(0, 5, 27), text: 'next day' });
+    expect(noteDay(at(10, 0))).toBe('2026-11-26');
+    expect(read(j(dir, '2026-11-26.md'), 'utf8')).toBe('# Notebook 2026-11-26\n\n## 10:00 · 📝\nfirst\n\n## 11:00 · 📝\nsecond\n\n');
+    expect(read(j(dir, '2026-11-27.md'), 'utf8')).toBe('# Notebook 2026-11-27\n\n## 00:05 · 📝\nnext day\n\n');
+  });
+
+  it('writes nothing when switched off, and survives a folder it cannot write', () => {
+    const base = mkdtempSync(j(tmpdir(), 'nb-'));
+    const off = new Notebook(j(base, 'off'), false);
+    expect(off.add({ kind: 'memo', ts: at(10, 0), text: 'x' })).toBe(false);
+    expect(existsSync(j(base, 'off'))).toBe(false);
+    write(j(base, 'blocked'), 'a file where the folder should be');
+    const warnings: string[] = [];
+    const bad = new Notebook(j(base, 'blocked'), true, (t) => warnings.push(t));
+    expect(bad.add({ kind: 'memo', ts: at(10, 0), text: 'x' })).toBe(false);
+    expect(bad.add({ kind: 'memo', ts: at(10, 1), text: 'y' })).toBe(false);
+    expect(warnings.length).toBe(1); // warned once, not per entry
+  });
+
+  it('reads "/note …" as a notebook line and anything else as an instruction', () => {
+    expect(noteCommand('/note lr 3e-4 diverges')).toBe('lr 3e-4 diverges');
+    expect(noteCommand('  /NOTE two\nlines ')).toBe('two\nlines');
+    expect(noteCommand('/note')).toBe('');
+    expect(noteCommand('/notebook is nice')).toBeNull();
+    expect(noteCommand('please /note this')).toBeNull();
+  });
+
+  it('lists the notebook as its own report root, not as a desk', () => {
+    const ws = mkdtempSync(j(tmpdir(), 'nbws-'));
+    mkdir(j(ws, 'notebook'));
+    mkdir(j(ws, 'shared', 'reports'), { recursive: true });
+    expect(roots(ws, [], () => null, true).map((r) => r.label)).toEqual([NOTEBOOK_ROOT, 'shared/reports']);
+    expect(roots(ws, [], () => null, false).map((r) => r.label)).toEqual(['shared/reports']);
+  });
+});
