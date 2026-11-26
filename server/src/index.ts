@@ -68,7 +68,7 @@ if (orphaned)
       en: `⚠️ Unassigned ${orphaned} task(s) that were assigned to employees who no longer exist`,
     }),
   );
-setSshLimit(office.sshPerMinute);
+setSshLimit(office.sshPerMinute, office.sshPerMinuteTotal);
 const hosts = new HostRegistry(office.hosts);
 agents.hosts = hosts;
 for (const r of roles)

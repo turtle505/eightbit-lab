@@ -250,12 +250,24 @@ hosts:
 - Remote sessions can't read attachments, which live on the backend's disk.
 - A conversation only exists on the machine that ran it, so moving an employee starts a new session.
 
-**Shared servers dislike noisy clients**, so the office is careful with ssh:
+**Shared servers ban noisy clients, and a campus network may cut a machine off** when it sees several new ssh connections in a short time (it looks like an attack). So the office keeps the number of connections down, not just the number of commands:
 
-- Short commands reuse one connection per host.
-- A reachable host is checked once and then left alone.
-- Each host has a budget of `sshPerMinute` connections (default 5; set per host on its `hosts` entry, `0` = unlimited). Employees' own `ssh`/`scp`/`rsync` count towards it too. Over the budget, the command is refused with a "try again in N seconds" message.
+- **One connection per host.** Everything the office does on a host (employee sessions, Codex turns, GPU polling, fetching results, sending attachments, the local-model tunnel) runs inside a single shared ssh connection. Ten employees working on one server are still one connection. If that connection drops, the sessions on it close together; their conversations are kept and the next instruction reconnects, and a task that was cut off is marked for retry.
+- **A budget for new connections**: `sshPerMinute` per host (default 5; set per host on its `hosts` entry, `0` = unlimited) and `sshPerMinuteTotal` for the whole machine (default 4). Only opening a host's connection counts, so polling never uses it up.
+- **Employees' own commands count too.** Every `ssh`/`scp`/`rsync` in a command takes a slot; over the budget the command is refused with a "try again in N seconds" message. A loop, `xargs` or `parallel` around ssh is refused outright, because nobody can count it.
+- A reachable host is checked once and then left alone. One that does not answer is left alone for 30 seconds, then longer each time up to 5 minutes; instructions arriving meanwhile fail at once instead of knocking again. ↻ on the host badge tries right away.
 - The host badge shows ⏳ when the budget is nearly spent.
+
+What the office cannot see is ssh inside a script an employee wrote, and connections a remote session makes from its own server. For the first, turn on connection sharing in `~/.ssh/config` on the backend machine, so that any number of commands to a server become one connection:
+
+```
+Host <your servers>
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%C
+    ControlPersist 10m
+```
+
+A server accepts about ten things at once on one connection (sshd's `MaxSessions`). Past that a session fails to start and the office says so; it does not quietly open a second connection.
 
 **Moving the backend to a server:** `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`. Copy `data/office.db` and `workspaces/` across to keep tasks, routines and attachments. Don't run two backends at once, or routines will fire twice.
 

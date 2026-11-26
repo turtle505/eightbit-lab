@@ -10,7 +10,7 @@ import { labToolsServer, RECORD_TOOL } from '../mcp/labTools.ts';
 import { type OfficeApi, officeToolsServer } from '../mcp/officeTools.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { ProviderHub } from '../providers.ts';
-import { sshThrottle, type HostRegistry } from '../hosts.ts';
+import { muxErrorText, sshMux, sshThrottle, type HostRegistry } from '../hosts.ts';
 import { SshThrottle } from '../sshRate.ts';
 import { describeToolCall, statusForTool } from './status.ts';
 import { ensureWorkspace } from './workspace.ts';
@@ -228,16 +228,38 @@ export function needsLabApproval(
 export const sessionHostId = (roleHost: string | undefined, backend = hostname()) => roleHost ?? `backend:${backend}`;
 const codexThreadKey = (role: RoleConfig) => `codex-thread:${role.id}:${sessionHostId(role.host)}`;
 
+export interface SshVerdict {
+  host: string;
+  waitSec: number;
+  /** how many connections the command would open */
+  count: number;
+  /** the command runs ssh in a loop (or xargs/parallel): a number of connections nobody can count */
+  loop: boolean;
+}
+
 /**
- * Decide what the per-minute budget says about a shell command the agent wants to run.
- * The slot is taken when the call is *attempted*, not when it succeeds — a denied approval still
- * costs one. Over-counting is the safe direction here: the point is to never flood a server.
+ * Decide what the per-minute budget says about a shell command the agent wants to run. Every ssh, scp
+ * and rsync in the command takes a slot, all or none. The slots are taken when the call is *attempted*,
+ * not when it succeeds — a denied approval still costs them. Over-counting is the safe direction: the
+ * point is to never flood a server or look like an attack to the network. A loop around ssh is refused
+ * outright (unless `allowLoop`: the manager named that exact command), since it cannot be counted.
  */
-export function sshBudgetVerdict(command: string, throttle = sshThrottle, now = Date.now()): { host: string; waitSec: number } | null {
-  const host = SshThrottle.targetOf(command);
-  if (!host) return null; // can't tell where it goes — don't block it
-  if (throttle.allow(host, now)) return null;
-  return { host, waitSec: Math.ceil(throttle.waitMs(host, now) / 1000) };
+export function sshBudgetVerdict(command: string, throttle = sshThrottle, now = Date.now(), allowLoop = false): SshVerdict | null {
+  const hosts = SshThrottle.targetsOf(command);
+  if (!allowLoop && SshThrottle.loopsOverSsh(command)) return { host: hosts[0] ?? 'the server', waitSec: 0, count: hosts.length, loop: true };
+  if (!hosts.length) return null; // can't tell where it goes — don't block it
+  const over = throttle.allowAll(hosts, now);
+  if (!over) return null;
+  return { host: over, waitSec: Math.ceil(throttle.waitMs(over, now) / 1000), count: hosts.length, loop: false };
+}
+
+/** What the agent is told when its command is refused (agent-facing, English). */
+export function sshDenyText(v: SshVerdict): string {
+  if (v.loop)
+    return `Blocked: this runs ssh/scp/rsync inside a loop (or xargs/parallel), which opens one connection per round. The network here cuts a machine off for repeated connections. Do the whole job in ONE connection instead: a single ssh running a remote loop or script (ssh ${v.host} 'for f in …; do …; done'), or one tar/rsync for many files.`;
+  if (v.count > 1)
+    return `Blocked: this command would open ${v.count} connections and the per-minute limit has no room for them (${v.host}). Combine them into one connection (ssh ${v.host} 'cmd1 && cmd2')${v.waitSec ? `, or retry in ${v.waitSec}s` : ''}.`;
+  return `Blocked: connections to ${v.host} are over the per-minute limit. Retry in ${v.waitSec}s, or combine several commands into one connection.`;
 }
 
 /** A 🔒 task always asks; otherwise the employee's own setting. Only ever tightens. */
@@ -665,18 +687,9 @@ export class AgentManager {
                     // Count it against the server's budget even when the manager would be asked:
                     // a flood of approved ssh calls is exactly what gets us banned.
                     if (name === 'Bash') {
-                      const over = sshBudgetVerdict(String(inp.command ?? ''));
-                      if (over) {
-                        this.hosts?.refreshUsage();
-                        return decide(
-                          'deny',
-                          tr({
-                            ko: `${over.host} 접속이 분당 한도를 넘어 막았습니다. ${over.waitSec}초 뒤에 다시 시도하거나, 여러 명령을 한 번의 접속으로 묶으세요.`,
-                            en: `Blocked: connections to ${over.host} are over the per-minute limit. Retry in ${over.waitSec}s, or combine several commands into one connection.`,
-                          }),
-                        );
-                      }
+                      const over = sshBudgetVerdict(String(inp.command ?? ''), sshThrottle, Date.now(), whitelisted);
                       this.hosts?.refreshUsage();
+                      if (over) return decide('deny', sshDenyText(over));
                     }
                     // anything reaching a lab server asks, unless the manager named that exact tool/command
                     if (!whitelisted) return decide('ask', tr({ ko: '랩 서버에 접근하는 작업이라 매니저 승인이 필요합니다.', en: 'This reaches a lab server, so it needs the manager\'s approval.' }));
@@ -725,8 +738,12 @@ export class AgentManager {
       for await (const m of live.q) this.handle(e, m);
     } catch (err) {
       if (!live.abort.signal.aborted) {
-        this.log(e, 'error', String((err as Error).message ?? err));
-        this.set(e, 'error', tr({ ko: '⚠️ 오류 발생 (로그 확인)', en: '⚠️ Error (see the log)' }));
+        const msg = String((err as Error).message ?? err);
+        // ssh itself exits with 255: on a remote host that is the shared connection going away, not the agent failing
+        const host = e.role.host ? this.hosts?.get(e.role.host) : undefined;
+        const dropped = !!host && !host.isLocal && /exited with code 255/.test(msg);
+        this.log(e, 'error', dropped ? tr({ ko: `${host.view.name} 접속이 끊겨 세션이 닫혔습니다. 대화는 남아 있고, 다음 지시 때 다시 연결해 이어갑니다.`, en: `The connection to ${host.view.name} dropped and the session closed. The conversation is kept; the next instruction reconnects and resumes it.` }) : msg);
+        this.set(e, 'error', dropped ? tr({ ko: '⚠️ 접속 끊김', en: '⚠️ Connection dropped' }) : tr({ ko: '⚠️ 오류 발생 (로그 확인)', en: '⚠️ Error (see the log)' }));
       }
     } finally {
       if (e.live === live) {
@@ -848,6 +865,7 @@ export class AgentManager {
       ? host.expand(e.role.cwd?.startsWith('/') || e.role.cwd?.startsWith('~') ? e.role.cwd : `${host.cfg.projectRoot}/${e.role.cwd || '.'}`)
       : ensureWorkspace(this.office, e.role);
     e.view.cwd = cwd;
+    if (host && !host.isLocal && !(await this.connect(e, host.cfg.ssh, host.view.name))) return;
     let turn: CodexTurn | null = null;
     const tools = new CodexTools();
     e.codexStopped = false;
@@ -872,6 +890,14 @@ export class AgentManager {
       };
       const autoApprove = (method: string, input: Record<string, unknown>) => codexAutoApproval(method, input, codexPermission, roleAllow(e.role), work.extraAllow);
       turn = new CodexTurn(e.role.id, this.broker, tools, callTool, autoApprove, host?.cfg);
+      // Codex's own shell commands count against the ssh budget too, before any approval card
+      turn.denyCommand = (command) => {
+        const over = sshBudgetVerdict(command, sshThrottle, Date.now(), isAutoAllowed(roleAllow(e.role), 'Bash') || work.extraAllow.some((rule) => matchesRule(rule, 'Bash', { command })));
+        this.hosts?.refreshUsage();
+        if (!over) return null;
+        this.log(e, 'system', sshDenyText(over));
+        return sshDenyText(over);
+      };
       e.codexTurn = turn;
       this.sendView(e);
       const result = await turn.start(cwd, prompt, e.view.sessionId, (method, params) => {
@@ -975,24 +1001,29 @@ export class AgentManager {
     }
   }
 
+  /**
+   * Have the shared ssh connection to a host ready before a session or a Codex turn is started on it.
+   * It is opened at most once however many employees ask together; while it cannot be had (budget used
+   * up for too long, or the host is being left alone after a failure) the run ends with the reason.
+   */
+  private async connect(e: Employee, alias: string, hostName: string): Promise<boolean> {
+    if (!sshMux.isReady(alias) && sshThrottle.waitMs(alias) > 0) this.set(e, 'queued', tr({ ko: `⏳ ${hostName} 접속 차례 기다리는 중`, en: `⏳ Waiting for a turn to connect to ${hostName}` }));
+    const m = await sshMux.ensure(alias, { wait: true });
+    this.hosts?.refreshUsage();
+    if (m.ok) return true;
+    this.log(e, 'error', muxErrorText(alias, m));
+    this.set(e, 'error', m.reason === 'throttled' ? tr({ ko: '⚠️ ssh 접속 한도', en: '⚠️ ssh connection limit' }) : tr({ ko: `⚠️ ${hostName} 접속 불가`, en: `⚠️ Cannot reach ${hostName}` }));
+    return false;
+  }
+
   /** Claude path of run(): push the instruction into the live session and wait for that turn to finish. */
   private async runClaude(e: Employee, work: Work): Promise<void> {
-    // a remote session costs one ssh connection; queue behind the per-host budget rather than
-    // hammering a server that bans noisy clients
+    // a remote session is a channel in its host's shared ssh connection: make sure that connection is up
     const remote = e.role.host ? this.hosts?.get(e.role.host) : undefined;
     if (remote && !remote.isLocal) {
       // the badge may be stale (we stopped polling); make sure before failing the manager
       if (!remote.view.ok) await this.hosts?.ensureChecked(remote.cfg.id);
-      if (sshThrottle.waitMs(remote.cfg.ssh) > 0) this.set(e, 'queued', tr({ ko: `⏳ ${remote.view.name} 접속 차례 기다리는 중`, en: `⏳ Waiting for a turn to connect to ${remote.view.name}` }));
-      // wait without consuming — spawnRemote takes the slot, so it is counted exactly once
-      if (!(await sshThrottle.waitForSlot(remote.cfg.ssh, 70_000))) {
-        this.log(e, 'error', tr({
-            ko: `ssh 횟수 제한 (${remote.cfg.ssh}: 분당 ${sshThrottle.limitFor(remote.cfg.ssh)}회)으로 세션을 열지 못했습니다`,
-            en: `Could not open the session: ssh rate limit (${remote.cfg.ssh}: ${sshThrottle.limitFor(remote.cfg.ssh)} per minute)`,
-          }));
-        this.set(e, 'error', tr({ ko: '⚠️ ssh 횟수 제한', en: '⚠️ ssh rate limit' }));
-        return;
-      }
+      if (!(await this.connect(e, remote.cfg.ssh, remote.view.name))) return;
     }
 
     // the report language is baked into the system prompt, so a language switch reopens the session (same conversation)

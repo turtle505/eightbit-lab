@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { sq } from '../compute/adapter.ts';
-import { SSH_BASE, sshThrottle } from '../hosts.ts';
+import { SSH_MUX, sshMux } from '../hosts.ts';
 import type { HostConfig } from '../config.ts';
 import type { PermissionBroker } from '../permissions/broker.ts';
 import type { CodexTools } from './codexTools.ts';
@@ -22,12 +22,15 @@ export class CodexTurn {
   private finished = false;
   private text = '';
   readonly done: Promise<{ threadId: string; text: string; status: string; error?: string }>;
+  /** a reason to refuse a shell command outright, before auto-approval or a card (the ssh budget); null = no objection */
+  denyCommand: (command: string) => string | null = () => null;
 
   constructor(private employeeId: string, private broker: PermissionBroker, private tools: CodexTools, private callTool: (namespace: string, tool: string, args: Record<string, unknown>) => Promise<{ contentItems: { type: string; text: string }[]; success: boolean }>, private autoApprove: (method: string, input: Json) => boolean, host?: HostConfig) {
     if (host && host.ssh !== 'local') {
-      if (!sshThrottle.allow(host.ssh)) throw new Error(`SSH rate limit: ${host.ssh}`);
+      // a turn is a channel inside the host's shared connection; the caller awaited sshMux.ensure() (a constructor cannot)
+      if (!sshMux.isReady(host.ssh)) throw new Error(`No connection to ${host.ssh} yet`);
       const command = `${sq(host.codexPath || 'codex')} app-server --listen stdio://`;
-      this.proc = spawn('ssh', [...SSH_BASE, host.ssh, `exec ${command}`], { stdio: ['pipe', 'pipe', 'pipe'] });
+      this.proc = spawn('ssh', [...SSH_MUX, host.ssh, `exec ${command}`], { stdio: ['pipe', 'pipe', 'pipe'] });
     } else this.proc = spawn('codex', ['app-server', '--listen', 'stdio://'], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.done = new Promise((resolve, reject) => { this.complete = resolve; this.failed = reject; });
     // A handshake failure can reject before start() reaches the completion promise.
@@ -71,6 +74,10 @@ export class CodexTurn {
     }
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
       const tool = method.includes('commandExecution') ? 'Bash' : 'Edit';
+      if (tool === 'Bash' && this.denyCommand(Array.isArray(input.command) ? input.command.join(' ') : String(input.command ?? ''))) {
+        this.write({ id: msg.id, result: { decision: 'decline' } });
+        return;
+      }
       if (this.autoApprove(method, input)) {
         this.write({ id: msg.id, result: { decision: 'accept' } });
         return;

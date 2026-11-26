@@ -5,9 +5,9 @@ import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { HostConfig } from '../config.ts';
 import { sq } from '../compute/adapter.ts';
-import { SSH_BASE, sshThrottle } from '../hosts.ts';
+import { muxErrorText, SSH_MUX, sshMux } from '../hosts.ts';
 
-/** Transfer the manager's attachments in one SSH connection and rewrite their prompt paths. */
+/** Transfer the manager's attachments as one archive inside the host's shared connection and rewrite their prompt paths. */
 export async function stageCodexAttachments(host: HostConfig, text: string, paths: string[]): Promise<string> {
   if (!paths.length || host.ssh === 'local') return text;
   const stage = await mkdtemp(join(tmpdir(), 'eightbit-codex-'));
@@ -18,9 +18,10 @@ export async function stageCodexAttachments(host: HostConfig, text: string, path
       await copyFile(src, join(stage, name));
       text = text.replaceAll(src, `${remote}/${name}`);
     }
-    if (!(await sshThrottle.waitForSlot(host.ssh, 70_000)) || !sshThrottle.allow(host.ssh)) throw new Error(`SSH rate limit: ${host.ssh}`);
+    const m = await sshMux.ensure(host.ssh, { wait: true });
+    if (!m.ok) throw new Error(muxErrorText(host.ssh, m));
     const archive = spawn('tar', ['-C', stage, '-cf', '-', '.'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const receiver = spawn('ssh', [...SSH_BASE, host.ssh, `mkdir -p ${sq(remote)} && tar -xf - -C ${sq(remote)}`], { stdio: ['pipe', 'ignore', 'pipe'] });
+    const receiver = spawn('ssh', [...SSH_MUX, host.ssh, `mkdir -p ${sq(remote)} && tar -xf - -C ${sq(remote)}`], { stdio: ['pipe', 'ignore', 'pipe'] });
     archive.stdout.pipe(receiver.stdin);
     let errors = '';
     archive.stderr.on('data', (b) => { errors += String(b); });

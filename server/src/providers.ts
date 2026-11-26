@@ -1,9 +1,10 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { tr } from '../../shared/i18n.ts';
 import type { ProviderView } from '../../shared/protocol.ts';
 import { bus } from './bus.ts';
 import type { ProviderConfig } from './config.ts';
 import type { Store } from './db.ts';
+import { muxErrorText, sshControlOpts, sshMux } from './hosts.ts';
 
 /**
  * Environment for a Claude Code session that talks to Ollama's Anthropic-compatible API instead of the
@@ -31,11 +32,25 @@ export function ollamaEnv(base: Record<string, string | undefined>, port: number
 
 const HEALTH_MS = 30_000;
 
-/** SSH tunnel to one Ollama server + periodic health check; broadcasts its ProviderView on change. */
+export const TUNNEL_RETRY_FIRST_MS = 30_000;
+export const TUNNEL_RETRY_MAX_MS = 300_000;
+
+/** `ssh -O forward|cancel`: a request to the host's master connection over its local socket (no new connection). */
+const muxForward = (op: 'forward' | 'cancel', spec: string, host: string) =>
+  new Promise<{ ok: boolean; err: string }>((res) => {
+    execFile('ssh', ['-O', op, ...sshControlOpts(), '-L', spec, host], { timeout: 10_000, encoding: 'utf8' }, (e, _o, stderr) => res({ ok: !e, err: String(stderr ?? '').trim().split('\n').pop() ?? '' }));
+  });
+
+/**
+ * A port forward to one Ollama server + periodic health check; broadcasts its ProviderView on change.
+ * The forward is a channel in the host's shared ssh connection (hosts.ts), not a connection of its own.
+ */
 export class OllamaLink {
   view: ProviderView;
-  private proc: ChildProcess | null = null;
-  private backoff = 5_000;
+  private retry: NodeJS.Timeout | null = null;
+  private backoff = TUNNEL_RETRY_FIRST_MS;
+  /** swapped in tests */
+  forward = muxForward;
   private stopped = false;
   private timers: NodeJS.Timeout[] = [];
 
@@ -67,7 +82,7 @@ export class OllamaLink {
   start() {
     this.stopped = false;
     // `ssh: local` → Ollama is on this machine already; no tunnel, talk to it directly
-    if (!this.isLocal) this.openTunnel();
+    if (!this.isLocal) void this.openTunnel();
     this.timers.push(setInterval(() => void this.check(), HEALTH_MS));
   }
 
@@ -75,33 +90,38 @@ export class OllamaLink {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
-    this.proc?.kill();
-    this.proc = null;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = null;
+    if (!this.isLocal && sshMux.isReady(this.cfg.ssh_host)) void this.forward('cancel', this.spec, this.cfg.ssh_host);
   }
 
-  private openTunnel() {
-    const { ssh_host, localPort, remotePort } = this.cfg;
-    const p = spawn(
-      'ssh',
-      ['-N', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
-        '-L', `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`, ssh_host],
-      { stdio: ['ignore', 'ignore', 'pipe'] },
-    );
-    this.proc = p;
-    let stderr = '';
-    p.stderr?.on('data', (d) => (stderr = (stderr + String(d)).slice(-500)));
-    p.on('error', (err) => (stderr = err.message));
-    p.on('exit', () => {
-      if (this.proc === p) this.proc = null;
-      if (this.stopped) return;
-      // a port already forwarded (e.g. by an earlier dev instance) also lands here; the health check decides
-      void this.check(stderr.trim().split('\n').pop() || tr({ ko: 'ssh 터널 종료', en: 'ssh tunnel closed' }));
-      const wait = this.backoff;
-      this.backoff = Math.min(this.backoff * 2, 60_000);
-      this.timers.push(setTimeout(() => !this.stopped && this.openTunnel(), wait));
-    });
-    // first check once the forward is likely up
-    this.timers.push(setTimeout(() => void this.check(), 2_500));
+  private get spec() {
+    return `127.0.0.1:${this.cfg.localPort}:127.0.0.1:${this.cfg.remotePort}`;
+  }
+
+  /**
+   * Ask the host's master connection to forward the port. Asking again for a forward that is already
+   * there is fine, so this is also how a forward lost with its master comes back. A failure is retried
+   * with a growing gap (30 s → 5 min): each attempt on a dead host could be a new connection.
+   */
+  async openTunnel() {
+    if (this.stopped) return;
+    this.retry = null;
+    const host = this.cfg.ssh_host;
+    const m = await sshMux.ensure(host, { wait: false });
+    const r = m.ok ? await this.forward('forward', this.spec, host) : { ok: false, err: muxErrorText(host, m) };
+    if (this.stopped) return;
+    if (r.ok) return void this.check();
+    await this.check(r.err || tr({ ko: 'ssh 포워딩 실패', en: 'ssh forward failed' }));
+    this.scheduleRetry();
+  }
+
+  private scheduleRetry() {
+    if (this.retry || this.stopped || this.isLocal) return;
+    const wait = this.backoff;
+    this.backoff = Math.min(this.backoff * 2, TUNNEL_RETRY_MAX_MS);
+    this.retry = setTimeout(() => void this.openTunnel(), wait);
+    this.timers.push(this.retry);
   }
 
   private async getJson(path: string): Promise<any> {
@@ -116,11 +136,13 @@ export class OllamaLink {
       const [ver, tags] = await Promise.all([this.getJson('/api/version'), this.getJson('/api/tags')]);
       const models = ((tags?.models ?? []) as any[]).map((m) => String(m.name)).sort();
       next = { ...this.view, ok: true, version: String(ver?.version ?? ''), models, error: null };
-      this.backoff = 5_000;
+      this.backoff = TUNNEL_RETRY_FIRST_MS;
     } catch (err) {
       const msg = tunnelError ?? (err as Error).message;
       const where = `${this.cfg.ssh_host}:${this.cfg.remotePort}`;
       next = { ...this.view, ok: false, error: tr({ ko: `${where} 응답 없음 (${msg})`, en: `no response from ${where} (${msg})` }) };
+      // the forward may have gone with its master: ask for it again, on the slow schedule
+      if (tunnelError === undefined) this.scheduleRetry();
     }
     const changed = JSON.stringify(next) !== JSON.stringify(this.view);
     this.view = next;

@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
@@ -8,10 +10,11 @@ import { bus } from './bus.ts';
 import { sq } from './compute/adapter.ts';
 import { ROOT, type HostConfig } from './config.ts';
 import { SshThrottle } from './sshRate.ts';
+import { isChannelLimit, isNoMaster, muxClientOpts, realMuxDeps, SshMux, type MuxDeps, type MuxResult } from './sshMux.ts';
 
-/** Every ssh/scp the office starts passes through this; index.ts replaces it with the configured limit. */
-export let sshThrottle = new SshThrottle(5);
-export const setSshLimit = (perMinute: number) => (sshThrottle = new SshThrottle(perMinute));
+/** Every new ssh connection is counted here; index.ts replaces it with the configured limits. */
+export let sshThrottle = new SshThrottle(5, 4);
+export const setSshLimit = (perMinute: number, total = 4) => (sshThrottle = new SshThrottle(perMinute, total));
 
 /** Shape the Agent SDK expects back from `spawnClaudeCodeProcess` (a ChildProcess satisfies it). */
 export type SpawnArgs = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; signal?: AbortSignal };
@@ -46,41 +49,74 @@ export function remoteCommand(cfg: HostConfig, a: SpawnArgs): string {
 export const SSH_BASE = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'];
 
 /**
- * Short commands (health checks, folder listings, GPU polling) run many times an hour. Opening a
- * fresh TCP connection each time trips fail2ban and sshd rate limits on shared lab servers — and
- * being locked out of a server is painful to undo. These share one master connection per host
- * instead: the first command opens it, the rest ride it over a local socket, and it lingers a few
- * minutes afterwards. Long-lived sessions deliberately do NOT multiplex, so one dropped connection
- * cannot take every session on that host down with it.
+ * Everything the office runs on a host — sessions, Codex turns, polls, transfers, tunnels — rides ONE
+ * master connection per host (see sshMux.ts): a campus network that sees several new ssh connections in a
+ * minute can take the machine for an attacker and cut it off. The master is opened only by
+ * `sshMux.ensure()`, which is also the only place the per-minute budget is spent; commands then attach to
+ * its socket in data/ssh and never open a connection of their own.
+ *
+ * Sessions used to keep a connection each, so that one dropped connection could not take every session on
+ * a host down. That is given up on purpose: a dropped master ends the sessions on it (their conversations
+ * resume on the next instruction, and a task cut off is marked for retry), which is far cheaper than a
+ * blocked network port.
  */
-export const CONTROL_DIR = resolve(ROOT, 'data/ssh');
-export const sshControlOpts = () => [
-  '-o', 'ControlMaster=auto',
-  // %C is a short hash of (host, port, user) — a long socket path would exceed the unix socket limit
-  '-o', `ControlPath=${CONTROL_DIR}/%C`,
-  '-o', 'ControlPersist=5m',
-];
-export const SSH_SHORT = [...SSH_BASE, ...sshControlOpts()];
+/**
+ * Where the master sockets live. A unix socket path is limited to about 104 bytes and ssh adds a
+ * 40-character name plus a temporary suffix, so an install in a deep folder gets a short folder under
+ * ~/.ssh instead of data/ssh (named after the install, so two offices on one machine stay apart).
+ */
+export function controlDirFor(root: string, home = homedir()): string {
+  const local = resolve(root, 'data/ssh');
+  return local.length <= 40 ? local : resolve(home, '.ssh', `8bit-${createHash('sha1').update(root).digest('hex').slice(0, 8)}`);
+}
+export const CONTROL_DIR = controlDirFor(ROOT);
+/** options that attach a command to the host's master connection (%C keeps the socket path short) */
+export const sshControlOpts = () => muxClientOpts(CONTROL_DIR);
+/** every ssh the office spawns uses these */
+export const SSH_MUX = [...SSH_BASE, ...sshControlOpts()];
 
 mkdirSync(CONTROL_DIR, { recursive: true, mode: 0o700 });
+
+/** The master connections. Tests swap the deps so nothing touches the network. */
+export let sshMux = new SshMux(() => sshThrottle, realMuxDeps(CONTROL_DIR));
+export const setMuxDeps = (deps: MuxDeps) => (sshMux = new SshMux(() => sshThrottle, deps));
+
+/** Why a connection could not be had, as a line for the manager. */
+export function muxErrorText(alias: string, r: Extract<MuxResult, { ok: false }>): string {
+  if (r.reason === 'throttled')
+    return tr({ ko: `ssh 접속 한도 (${alias}: 분당 ${sshThrottle.limitFor(alias)}회, 전체 ${sshThrottle.total}회) — ${r.retryInSec}초 뒤 다시 시도하세요`, en: `ssh connection limit (${alias}: ${sshThrottle.limitFor(alias)} per minute, ${sshThrottle.total} in all). Try again in ${r.retryInSec}s.` });
+  if (r.reason === 'down')
+    return tr({ ko: `${alias}에 접속할 수 없습니다 (${r.err}). 반복 접속을 피하려고 ${r.retryInSec}초 동안 다시 시도하지 않습니다.`, en: `Cannot connect to ${alias} (${r.err}). Not trying again for ${r.retryInSec}s, to avoid knocking repeatedly.` });
+  return tr({ ko: `${alias} 접속 실패: ${r.err}`, en: `Could not connect to ${alias}: ${r.err}` });
+}
+
+/** What ssh says when the master already carries as many channels as the server allows. */
+export const channelLimitText = (alias: string) =>
+  tr({ ko: `${alias}의 동시 세션이 너무 많습니다 (접속 하나에 서버가 받는 채널 수를 넘음). 다른 세션이 끝난 뒤 다시 시도하세요.`, en: `Too many things running on ${alias} at once (over the channels the server allows on one connection). Try again when another session has finished.` });
+export { isChannelLimit };
 
 /**
  * Run the Claude Code CLI on another machine. `-T` is required: a TTY would corrupt the
  * stream-json protocol that rides this pipe.
  */
 export function spawnRemote(cfg: HostConfig, a: SpawnArgs): SpawnedProcess {
-  // The budget is spent HERE, not in the caller: this is the only way a session reaches a server,
-  // so no future caller can route around the limit. Callers that can wait should call
-  // sshThrottle.waitForSlot() first (which does not consume) to avoid failing needlessly.
-  if (!sshThrottle.allow(cfg.ssh))
-    throw new Error(
-      tr({
-        ko: `ssh 횟수 제한 (${cfg.ssh}: 분당 ${sshThrottle.limitFor(cfg.ssh)}회) — 잠시 후 다시 시도하세요`,
-        en: `ssh rate limit (${cfg.ssh}: ${sshThrottle.limitFor(cfg.ssh)} per minute). Try again shortly.`,
-      }),
-    );
+  // This cannot await, so it cannot open the master itself: the caller must have awaited
+  // sshMux.ensure(cfg.ssh). Refusing here means no future caller can start a session that would
+  // quietly open its own connection.
+  if (!sshMux.isReady(cfg.ssh))
+    throw new Error(tr({ ko: `${cfg.ssh} 접속이 준비되지 않았습니다 — 잠시 후 다시 시도하세요`, en: `No connection to ${cfg.ssh} yet. Try again shortly.` }));
+  const p = spawn('ssh', [...SSH_MUX, cfg.ssh, remoteCommand(cfg, a)], { stdio: ['pipe', 'pipe', 'pipe'] });
+  // the one ssh failure worth translating: the master already carries as many channels as the server allows
+  // or the master went away in the instant between the check and this spawn (it does not connect on its own)
+  let told = false;
+  p.stderr.on('data', (d) => {
+    const s = String(d);
+    if (told || !(isChannelLimit(s) || isNoMaster(s))) return;
+    told = true;
+    bus.send({ t: 'notice', level: 'warn', text: isNoMaster(s) ? tr({ ko: `${cfg.ssh} 접속이 방금 끊겼습니다. 다시 지시하면 새로 연결합니다.`, en: `The connection to ${cfg.ssh} just dropped. Give the instruction again to reconnect.` }) : channelLimitText(cfg.ssh) });
+  });
   // stdio is all pipes, so stdin/stdout are non-null — ChildProcess types them as nullable
-  return spawn('ssh', [...SSH_BASE, cfg.ssh, remoteCommand(cfg, a)], { stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as SpawnedProcess;
+  return p as unknown as SpawnedProcess;
 }
 
 /** A host the office can start sessions on. `ssh: local` means this machine (plain SDK spawn). */
@@ -129,21 +165,16 @@ export class Host {
   }
 
   /**
-   * Run a short command on the host. Over ssh this is rate limited: a skipped poll is harmless,
-   * being locked out of the server is not.
+   * Run a short command on the host, over its shared connection. If that connection is not up and cannot
+   * be opened right now (budget used up, or the host is being left alone after a failure) the command is
+   * skipped: a missed poll is harmless, another knock on the server is not.
    */
-  private async exec(script: string, timeoutMs = 20_000): Promise<{ code: number; stdout: string; err: string; throttled?: boolean }> {
-    if (!this.isLocal && !sshThrottle.allow(this.cfg.ssh))
-      return {
-        code: -1,
-        stdout: '',
-        throttled: true,
-        err: tr({
-          ko: `ssh 횟수 제한 (${this.cfg.ssh}: 분당 ${sshThrottle.limitFor(this.cfg.ssh)}회) — 이번 확인은 건너뜁니다`,
-          en: `ssh rate limit (${this.cfg.ssh}: ${sshThrottle.limitFor(this.cfg.ssh)} per minute); skipping this check`,
-        }),
-      };
-    const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_SHORT, this.cfg.ssh, script]);
+  private async exec(script: string, timeoutMs = 20_000, force = false): Promise<{ code: number; stdout: string; err: string; throttled?: boolean }> {
+    if (!this.isLocal) {
+      const m = await sshMux.ensure(this.cfg.ssh, { wait: false, force });
+      if (!m.ok) return { code: -1, stdout: '', throttled: m.reason === 'throttled', err: muxErrorText(this.cfg.ssh, m) };
+    }
+    const p = this.isLocal ? spawn('bash', ['-lc', script]) : spawn('ssh', [...SSH_MUX, this.cfg.ssh, script]);
     return new Promise((resolve) => {
       let out = '';
       let err = '';
@@ -162,18 +193,20 @@ export class Host {
   }
 
   /** A skipped health check must not flip a working host to "down". */
-  async check() {
+  async check(force = false) {
     const claude = this.cfg.claudePath || 'claude';
-    const r = await this.exec(`printf '%s\\n' "$HOME"; ${sq(claude)} --version`);
+    const r = await this.exec(`printf '%s\\n' "$HOME"; ${sq(claude)} --version`, 20_000, force);
     const [home, ...rest] = r.stdout.split('\n');
     if (r.code === 0 && home.trim()) this.home = home.trim();
     r.stdout = rest.join('\n');
     if (r.throttled) return;
     this.refreshUsage(false);
     const fail = (r.err || r.stdout).trim().split('\n').pop() || `exit ${r.code}`;
+    // no connection at all is a different thing to say than "connected, but claude did not run"
+    const noConn = !this.isLocal && !sshMux.isReady(this.cfg.ssh);
     const next: HostView = r.code === 0
       ? { ...this.view, ok: true, claudeVersion: r.stdout.trim().split('\n').pop() ?? '', error: null }
-      : { ...this.view, ok: false, error: tr({ ko: `claude 실행 실패: ${fail}`, en: `Failed to run claude: ${fail}` }) };
+      : { ...this.view, ok: false, error: noConn ? fail : tr({ ko: `claude 실행 실패: ${fail}`, en: `Failed to run claude: ${fail}` }) };
     const changed = JSON.stringify(next) !== JSON.stringify(this.view);
     this.view = next;
     if (changed) bus.send({ t: 'host', data: { ...next } });
@@ -221,9 +254,9 @@ export class Host {
     void this.checkThenMaybeRetry();
   }
 
-  private async checkThenMaybeRetry() {
+  private async checkThenMaybeRetry(force = false) {
     if (this.stopped) return;
-    await this.check();
+    await this.check(force);
     if (this.view.ok) {
       this.retryMs = 30_000; // healthy: no timer at all
       return;
@@ -239,11 +272,12 @@ export class Host {
   }
 
   /** Manual re-check (the UI refresh button), and used before a session when we never got through. */
-  async recheck() {
+  async recheck(force = true) {
     this.stopped = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    await this.checkThenMaybeRetry();
+    // asked for by a person (force): try now even if we were leaving the host alone
+    await this.checkThenMaybeRetry(force);
   }
 }
 
@@ -268,7 +302,8 @@ export class HostRegistry {
   /** Check a host we never got through to; a healthy one is left alone. */
   async ensureChecked(id: string) {
     const h = this.hosts.get(id);
-    if (h && !h.view.ok) await h.recheck();
+    // not forced: an instruction arriving for a host that is down must not become another knock on it
+    if (h && !h.view.ok) await h.recheck(false);
   }
 
   /** Tell each host how to see whether one of its sessions is already proving it is up. */

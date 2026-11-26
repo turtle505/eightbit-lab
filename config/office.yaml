@@ -14,9 +14,13 @@ maxConcurrent: 3
 #   auto: tools the classifier deems safe run right away, only unclear ones ask for approval / ask: every tool outside autoAllow asks for approval
 # A task card marked 🔒 (requireApproval) always runs as ask.
 permissionMode: auto
-# How many ssh/scp runs per minute the office may make to a single host. Shared servers ban clients that connect too often, so keep it low.
-# Health checks and GPU polling skip that round when over the limit; opening a session waits until a slot frees up.
+# New ssh connections per minute. Shared servers ban clients that connect too often, and a campus network can cut a machine
+# off for looking like an attack, so keep these low. Everything the office runs on a host (sessions, GPU polling, transfers)
+# shares ONE connection per host, so only opening that connection, and the ssh commands employees type, count here.
+#   sshPerMinute: to a single host.  sshPerMinuteTotal: from this machine to all hosts together.
+# Polling skips a round when there is no room; opening a session waits until there is.
 sshPerMinute: 5
+sshPerMinuteTotal: 4
 # For a per-server value, set sshPerMinute on the hosts entry (0 = no limit for that server):
 #   - { id: gpu-a, ssh: gpu-a, projectRoot: "~/project", sshPerMinute: 3 }
 # How long to keep an employee's session open (minutes). An open session starts the next instruction immediately, and instructions sent mid-work are delivered right away.

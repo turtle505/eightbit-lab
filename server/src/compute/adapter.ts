@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
-import { sshControlOpts, sshThrottle } from '../hosts.ts';
-import { tr } from '../../../shared/i18n.ts';
+import { muxErrorText, sshControlOpts, sshMux } from '../hosts.ts';
 import type { GpuInfo, JobState } from '../../../shared/protocol.ts';
 import type { ServerConfig } from '../config.ts';
 
@@ -29,13 +28,12 @@ export interface Exec {
 }
 
 /** Run a bash script on a remote host via ssh (script sent on stdin; BatchMode so it never hangs on a password prompt). */
-export const sshExec: Exec = (host, script, timeoutMs = 30_000) =>
-  new Promise((resolve) => {
-    if (!sshThrottle.allow(host)) {
-      resolve({ code: -1, stdout: '', stderr: tr({ ko: `ssh 횟수 제한 (${host}: 분당 ${sshThrottle.limitFor(host)}회)`, en: `ssh rate limit (${host}: ${sshThrottle.limitFor(host)} per minute)` }) });
-      return;
-    }
-    // polled every 20-60s, so it shares one master connection per host (see hosts.ts sshControlOpts)
+export const sshExec: Exec = async (host, script, timeoutMs = 30_000) => {
+  // polled every 20-60s: it rides the host's shared connection (see hosts.ts), and when that is not up
+  // and cannot be opened this minute the round is simply skipped
+  const m = await sshMux.ensure(host, { wait: false });
+  if (!m.ok) return { code: -1, stdout: '', stderr: muxErrorText(host, m) };
+  return new Promise((resolve) => {
     const p = spawn('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...sshControlOpts(), host, 'bash -s'], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -57,6 +55,7 @@ export const sshExec: Exec = (host, script, timeoutMs = 30_000) =>
     });
     p.stdin.end(script);
   });
+};
 
 /**
  * Run the script on this machine. Used when a server's `ssh_host` is `local`, i.e. the backend

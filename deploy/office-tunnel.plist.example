@@ -7,8 +7,8 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <!-- the loop does the retrying: launchd holds back a job that keeps exiting quickly -->
-    <string>while :; do /usr/bin/ssh -N office-tunnel; sleep 30; done</string>
+    <!-- the loop does the retrying (launchd holds back a job that keeps exiting quickly). A connection that lasted over a minute is retried after 30 s; one that keeps failing is retried after 30 s, 1, 2, then every 5 minutes: each try is a new connection, and a network that sees many of them may block the machine -->
+    <string>w=30; while :; do s=$(date +%s); /usr/bin/ssh -N office-tunnel; d=$(( $(date +%s) - s )); if [ $d -gt 60 ]; then w=30; fi; sleep $w; if [ $d -le 60 ]; then w=$(( w * 2 )); if [ $w -gt 300 ]; then w=300; fi; fi; done</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

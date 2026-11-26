@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { isLocalHost, sq } from '../compute/adapter.ts';
-import { sshControlOpts, sshThrottle } from '../hosts.ts';
+import { muxErrorText, sshControlOpts, sshMux } from '../hosts.ts';
 import type { ServerRegistry } from '../compute/registry.ts';
 import type { Store } from '../db.ts';
 import { bus } from '../bus.ts';
@@ -24,7 +24,7 @@ const run = (cmd: string, args: string[]) =>
 
 /**
  * Pull a remote path as one gzip stream: `ssh host 'tar czf - -C dir base' | tar xzf - -C dest`.
- * A single connection and a single transfer — `scp -r` would negotiate per file, which is the
+ * A single transfer inside the host's shared connection — `scp -r` would negotiate per file, which is the
  * pattern that gets a lab's IP blocked.
  */
 function tarFetch(sshHost: string, remotePath: string, dest: string): Promise<number> {
@@ -180,11 +180,9 @@ export function labToolsServer(employeeId: string, cwd: string, registry: Server
               const code = await run('cp', ['-r', remote_path, dest]);
               return code === 0 ? text(`copied to ${dest}`) : text(`cp failed (exit ${code})`, true);
             }
-            if (!(await sshThrottle.reserve(cfg.ssh_host, 70_000)))
-              return text(
-                `ssh rate limit reached (${cfg.ssh_host}: ${sshThrottle.limitFor(cfg.ssh_host)} per minute), so the results cannot be fetched right now. Try again shortly.`,
-                true,
-              );
+            // the archive travels inside the host's shared connection; someone is waiting, so wait for room to open it
+            const m = await sshMux.ensure(cfg.ssh_host, { wait: true });
+            if (!m.ok) return text(`The results cannot be fetched right now: ${muxErrorText(cfg.ssh_host, m)}`, true);
             // One compressed stream over one connection. `scp -r` of a folder talks per file, which is
             // what gets lab IPs blocked; tar sends a single archive instead.
             const code = await tarFetch(cfg.ssh_host, remote_path, dest);

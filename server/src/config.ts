@@ -31,6 +31,8 @@ export interface OfficeConfig {
   authToken: string;
   /** most ssh/scp runs the office starts per host per minute (shared servers ban noisy clients) */
   sshPerMinute: number;
+  /** most NEW ssh connections this machine opens per minute across all hosts (a campus network may cut off a machine that opens more) */
+  sshPerMinuteTotal: number;
   /** language of the UI and of what agents report in (prompts stay English); the UI toggle overrides it */
   language: Lang;
   /** what the team works on, one line; put in front of every prompt as "About this team: …" (empty = left out) */
@@ -199,6 +201,7 @@ export function loadOffice(): OfficeConfig {
     sessionIdleMinutes: c.sessionIdleMinutes ?? 30,
     authToken: String(c.authToken ?? '').trim(),
     sshPerMinute: Math.max(1, c.sshPerMinute ?? 5),
+    sshPerMinuteTotal: Math.max(1, c.sshPerMinuteTotal ?? 4),
     language: c.language === 'ko' ? 'ko' : 'en',
     domain: String(c.domain ?? '').trim(),
     notebook: c.notebook !== false,

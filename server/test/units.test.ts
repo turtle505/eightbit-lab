@@ -1412,18 +1412,40 @@ describe('schema migrations', () => {
 });
 
 describe('ssh connection pressure', async () => {
-  const { SSH_SHORT, SSH_BASE, sshControlOpts, Host } = await import('../src/hosts.ts');
+  const { SSH_MUX, SSH_BASE, sshControlOpts, Host, setMuxDeps, setSshLimit, spawnRemote, controlDirFor } = await import('../src/hosts.ts');
 
-  it('short, frequent commands share one master connection per host', () => {
-    const joined = SSH_SHORT.join(' ');
-    expect(joined).toContain('ControlMaster=auto');
-    expect(joined).toContain('ControlPersist=5m');
+  it('every ssh the office spawns attaches to the host\'s one connection and never opens its own', () => {
+    const joined = SSH_MUX.join(' ');
+    expect(joined).toContain('ControlMaster=no'); // a client: only sshMux.ensure() opens the master
     expect(sshControlOpts().join(' ')).toMatch(/ControlPath=\S+\/%C/); // %C keeps the socket path short
+    expect(SSH_BASE.join(' ')).toContain('BatchMode=yes'); // never hangs on a password prompt
   });
 
-  it('long-lived sessions keep their own connection', () => {
-    // one dropped TCP connection must not take every session on a host down at once
-    expect(SSH_BASE.join(' ')).not.toContain('ControlMaster');
+  it('keeps the socket folder short enough for a unix socket path, wherever the office is installed', () => {
+    expect(controlDirFor('/home/me/eightbit-lab', '/home/me')).toBe('/home/me/eightbit-lab/data/ssh');
+    const deep = controlDirFor('/private/tmp/some/very/deep/folder/that/goes/on/and/on/office', '/Users/someone');
+    expect(deep).toMatch(/^\/Users\/someone\/\.ssh\/8bit-[0-9a-f]{8}$/);
+    // ssh appends a 40-character hash and a temporary suffix of about 17 more
+    for (const d of [controlDirFor('/home/me/eightbit-lab', '/home/me'), deep]) expect(d.length + 1 + 40 + 17).toBeLessThan(104);
+    expect(controlDirFor('/a/deep/install/number/one/of/the/office/app', '/h')).not.toBe(controlDirFor('/a/deep/install/number/two/of/the/office/app', '/h'));
+  });
+
+  it('a command with no master to ride fails on the spot instead of connecting by itself', async () => {
+    // the real ssh binary, a host name that does not exist, and no master socket: nothing may leave this machine
+    const { spawnSync } = await import('node:child_process');
+    const t0 = Date.now();
+    const r = spawnSync('ssh', [...SSH_MUX, 'no-such-host.invalid', 'true'], { encoding: 'utf8', timeout: 8000 });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('eightbit-no-master'); // it stopped at ProxyCommand: no DNS lookup, no connection
+    expect(r.stderr).not.toMatch(/Could not resolve hostname/);
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it('a session cannot be spawned on a host whose connection was never opened', () => {
+    setSshLimit(5, 4);
+    setMuxDeps({ check: async () => false, open: async () => ({ ok: true, err: '' }), now: () => Date.now() });
+    const cfg: any = { id: 't', name: 't', ssh: 'never-opened-host', projectRoot: '~/x', claudePath: '/bin/true' };
+    expect(() => spawnRemote(cfg, { command: 'claude', args: ['--version'], cwd: '/tmp', env: {} } as any)).toThrow(/No connection to never-opened-host/);
   });
 
   it('a reachable host gets checked once and then left alone', async () => {
@@ -1453,6 +1475,137 @@ describe('ssh connection pressure', async () => {
     expect(checks).toBeGreaterThan(1); // it kept trying
     expect(checks).toBeLessThan(9); // but the gap grew each time rather than staying at 10ms
   });
+
+  it('a host check on a host that is down does not connect: it is told to wait', async () => {
+    setSshLimit(5, 4);
+    let opens = 0;
+    let t = 1_000_000;
+    setMuxDeps({ check: async () => false, open: async () => (opens++, { ok: false, err: 'Connection refused' }), now: () => t });
+    const h = new Host({ id: 'g', name: 'g', ssh: 'down-host', projectRoot: '~/p' } as any);
+    await h.check();
+    expect(opens).toBe(1);
+    expect(h.view).toMatchObject({ ok: false });
+    expect(h.view.error).toContain('Connection refused');
+    t += 5_000;
+    await h.check(); // five seconds later: still being left alone
+    expect(opens).toBe(1);
+    expect(h.view.error).toMatch(/Not trying again for \d+s/);
+    await h.check(true); // the manager pressed "check again"
+    expect(opens).toBe(2);
+  });
+});
+
+describe('one ssh connection per host', async () => {
+  const { SshMux, BACKOFF_FIRST_MS, BACKOFF_MAX_MS, isChannelLimit } = await import('../src/sshMux.ts');
+  const { SshThrottle } = await import('../src/sshRate.ts');
+
+  /** a fake network: `up` hosts have a master; opening takes a moment and is counted */
+  function world(over: Partial<{ limit: number; total: number; openOk: boolean; openMs: number }> = {}) {
+    const o = { limit: 5, total: 4, openOk: true, openMs: 15, ...over };
+    const up = new Set<string>();
+    const opens: string[] = [];
+    let now = Date.now(); // the real clock as the base: reserve() waits on it
+    const throttle = new SshThrottle(o.limit, o.total);
+    const mux = new SshMux(() => throttle, {
+      check: async (a) => up.has(a),
+      open: async (a) => {
+        opens.push(a);
+        await new Promise((r) => setTimeout(r, o.openMs));
+        if (o.openOk) up.add(a);
+        return { ok: o.openOk, err: o.openOk ? '' : 'Connection timed out' };
+      },
+      now: () => now,
+    });
+    return { mux, throttle, up, opens, o, tick: (ms: number) => (now += ms), now: () => now };
+  }
+
+  it('opens one connection however many ask at the same moment', async () => {
+    const w = world();
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => w.mux.ensure('master', { wait: i % 2 === 0 })));
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(w.opens).toEqual(['master']); // the session, the poll and the transfer shared one attempt
+    expect(w.throttle.used('master', w.now())).toBe(1);
+    expect(w.mux.isReady('master')).toBe(true);
+  });
+
+  it('spends nothing while the connection is up, so polling never eats the room a session needs', async () => {
+    const w = world({ limit: 2, total: 2 });
+    await w.mux.ensure('master');
+    for (let i = 0; i < 100; i++) expect((await w.mux.ensure('master', { wait: false })).ok).toBe(true);
+    expect(w.opens).toHaveLength(1);
+    expect(w.throttle.used('master', w.now())).toBe(1); // 100 polls later, still one
+    expect((await w.mux.ensure('ai-master', { wait: false })).ok).toBe(true); // and there is room for another host
+  });
+
+  it('opens it again, once, after it has gone', async () => {
+    const w = world();
+    await w.mux.ensure('master');
+    w.up.delete('master'); // the master timed out or the network dropped
+    const again = await Promise.all([w.mux.ensure('master'), w.mux.ensure('master'), w.mux.ensure('master')]);
+    expect(again.every((r) => r.ok)).toBe(true);
+    expect(w.opens).toEqual(['master', 'master']);
+  });
+
+  it('counts different hosts against one machine-wide limit', async () => {
+    const w = world({ limit: 5, total: 2 });
+    expect((await w.mux.ensure('a', { wait: false })).ok).toBe(true);
+    expect((await w.mux.ensure('b', { wait: false })).ok).toBe(true);
+    const third = await w.mux.ensure('c', { wait: false });
+    expect(third).toMatchObject({ ok: false, reason: 'throttled' });
+    expect(w.opens).toEqual(['a', 'b']); // the third server was never contacted
+    expect(w.mux.isReady('c')).toBe(false);
+  });
+
+  it('leaves a host that does not answer alone, longer each time, and fails fast meanwhile', async () => {
+    const w = world({ openOk: false });
+    const first = await w.mux.ensure('master');
+    expect(first).toMatchObject({ ok: false, reason: 'failed', err: 'Connection timed out', retryInSec: BACKOFF_FIRST_MS / 1000 });
+    // instructions keep arriving for that host: none of them becomes a connection
+    for (let i = 0; i < 20; i++) expect(await w.mux.ensure('master')).toMatchObject({ ok: false, reason: 'down' });
+    expect(w.opens).toHaveLength(1);
+    w.tick(BACKOFF_FIRST_MS + 1);
+    expect(await w.mux.ensure('master')).toMatchObject({ reason: 'failed', retryInSec: (BACKOFF_FIRST_MS * 2) / 1000 });
+    expect(w.opens).toHaveLength(2);
+    // the gap keeps doubling up to the cap
+    let gap = BACKOFF_FIRST_MS * 2;
+    for (let i = 0; i < 6; i++) {
+      w.tick(gap + 61_000); // also lets the minute's budget clear
+      const r = await w.mux.ensure('master');
+      gap = Math.min(gap * 2, BACKOFF_MAX_MS);
+      expect(r).toMatchObject({ reason: 'failed', retryInSec: gap / 1000 });
+    }
+    expect(gap).toBe(BACKOFF_MAX_MS);
+  });
+
+  it('tries at once when a person asks, and forgets the failure once it works', async () => {
+    const w = world({ openOk: false });
+    await w.mux.ensure('master');
+    expect((await w.mux.ensure('master', { force: true })).ok).toBe(false);
+    expect(w.opens).toHaveLength(2); // forced through the wait
+    w.o.openOk = true;
+    w.tick(61_000);
+    expect((await w.mux.ensure('master', { force: true })).ok).toBe(true);
+    expect(w.mux.retryIn('master')).toBe(0);
+    w.up.delete('master');
+    expect((await w.mux.ensure('master', { wait: false })).ok).toBe(true); // no leftover wait from the old failure
+  });
+
+  it('a caller that can wait is not turned away by another one that could not', async () => {
+    const w = world({ limit: 1, total: 1 });
+    await w.mux.ensure('a'); // uses the minute's only slot
+    const poll = w.mux.ensure('b', { wait: false }); // gives up at once
+    const session = w.mux.ensure('b', { wait: true }); // joins that flight, then must go again and wait
+    expect(await poll).toMatchObject({ ok: false, reason: 'throttled' });
+    const raced = await Promise.race([session, new Promise((r) => setTimeout(() => r('still waiting'), 80))]);
+    expect(raced).toBe('still waiting');
+    expect(w.opens).toEqual(['a']);
+  });
+
+  it('recognises the error for too many channels on one connection', () => {
+    expect(isChannelLimit('channel 3: open failed: administratively prohibited: open failed')).toBe(true);
+    expect(isChannelLimit('mux_client_request_session: session request failed: Session open refused by peer')).toBe(true);
+    expect(isChannelLimit('Permission denied (publickey).')).toBe(false);
+  });
 });
 
 describe('ssh rate limit', async () => {
@@ -1465,6 +1618,25 @@ describe('ssh rate limit', async () => {
     expect(t.allow('gpu1', t0 + 5)).toBe(false); // over budget
     expect(t.allow('gpu2', t0 + 5)).toBe(true); // a different server has its own budget
     expect(t.used('gpu1', t0 + 5)).toBe(5);
+  });
+
+  it('caps the machine as a whole, whichever hosts the connections go to', () => {
+    const t = new SshThrottle(5, 4);
+    const t0 = 1_000_000;
+    expect(['a', 'b', 'c', 'a'].map((h, i) => t.allow(h, t0 + i))).toEqual([true, true, true, true]);
+    expect(t.allow('d', t0 + 5)).toBe(false); // a fifth connection in the minute, to a host never used
+    expect(t.usedTotal(t0 + 5)).toBe(4);
+    expect(t.used('d', t0 + 5)).toBe(0); // refused: nothing recorded for it
+    expect(t.waitMs('d', t0 + 5)).toBeGreaterThan(59_000); // until the first of the four ages out
+    expect(t.allow('d', t0 + 60_001)).toBe(true);
+  });
+
+  it('leaves a host with no limit out of the machine-wide count', () => {
+    const t = new SshThrottle(5, 2);
+    t.setLimit('localbox', 0);
+    for (let i = 0; i < 30; i++) expect(t.allow('localbox', 1_000_000)).toBe(true);
+    expect(t.usedTotal(1_000_000)).toBe(0);
+    expect(t.allow('a', 1_000_000)).toBe(true);
   });
 
   it('frees slots as the window slides, and says how long to wait', () => {
@@ -1483,11 +1655,21 @@ describe('ssh rate limit', async () => {
     expect(await t.reserve('gpu1', 100)).toBe(true); // free right away
     expect(await t.reserve('gpu1', 100)).toBe(false); // would need ~60s, deadline is 100ms
   });
+
+  it('takes several slots for one command all at once or not at all', () => {
+    const t = new SshThrottle(3, 4);
+    const t0 = 1_000_000;
+    expect(t.allowAll(['a', 'a', 'b'], t0)).toBeNull();
+    expect([t.used('a', t0), t.used('b', t0), t.usedTotal(t0)]).toEqual([2, 1, 3]);
+    expect(t.allowAll(['a', 'a'], t0)).toBe('a'); // a has room for one more, not two
+    expect(t.allowAll(['b', 'c'], t0)).not.toBeNull(); // per host fine, but the machine has room for one
+    expect([t.used('a', t0), t.used('b', t0), t.used('c', t0), t.usedTotal(t0)]).toEqual([2, 1, 0, 3]); // refusals took nothing
+  });
 });
 
 describe('ssh budget for agent commands', async () => {
   const { SshThrottle } = await import('../src/sshRate.ts');
-  const { sshBudgetVerdict } = await import('../src/agents/manager.ts');
+  const { sshBudgetVerdict, sshDenyText } = await import('../src/agents/manager.ts');
 
   it('works out which host a shell command would connect to', () => {
     expect(SshThrottle.targetOf('ssh srv1 hostname')).toBe('srv1');
@@ -1505,6 +1687,45 @@ describe('ssh budget for agent commands', async () => {
     expect(sshBudgetVerdict('ls -al', new SshThrottle(1))).toBeNull();
   });
 
+  it('counts every connection a command would open, not just the first', () => {
+    expect(SshThrottle.targetsOf('ssh a x; ssh a y && scp f b:/p')).toEqual(['a', 'a', 'b']);
+    expect(SshThrottle.targetsOf('ssh a "cmd1 && cmd2"')).toEqual(['a']); // one connection, however much it runs there
+    expect(SshThrottle.targetsOf('echo done')).toEqual([]);
+    const t = new SshThrottle(5, 4);
+    const t0 = 1_000_000;
+    expect(sshBudgetVerdict('ssh a x; ssh a y; ssh a z', t, t0)).toBeNull();
+    expect(t.used('a', t0)).toBe(3); // three slots, not one
+    const over = sshBudgetVerdict('ssh a x; ssh a y', t, t0);
+    expect(over).toMatchObject({ host: 'a', count: 2, loop: false });
+    expect(t.used('a', t0)).toBe(3); // the refused command took nothing
+    expect(sshDenyText(over!)).toContain('would open 2 connections');
+    expect(sshBudgetVerdict('ssh a x', t, t0)).toBeNull(); // one still fits
+  });
+
+  it('refuses ssh inside a loop, which nobody can count', () => {
+    const t = new SshThrottle(5, 4);
+    const loops = [
+      'for f in a b c; do ssh master "cat $f"; done',
+      'for h in master ai-master; do\n  ssh $h nvidia-smi\ndone',
+      'while read f; do scp "$f" master:~/in/; done < list.txt',
+      'ls *.pdb | xargs -I{} scp {} master:~/in/',
+      'cat hosts | parallel ssh {} uptime',
+      'watch -n 5 ssh master nvidia-smi',
+    ];
+    for (const c of loops) {
+      const v = sshBudgetVerdict(c, t, 1_000_000);
+      expect(v, c).toMatchObject({ loop: true });
+      expect(sshDenyText(v!)).toContain('ONE connection');
+    }
+    expect(t.usedTotal(1_000_000)).toBe(0); // refused before anything was counted
+    // a loop with no ssh in it, and ssh running a remote loop, are both fine
+    expect(sshBudgetVerdict('for f in *.txt; do wc -l "$f"; done', t, 1_000_000)).toBeNull();
+    expect(sshBudgetVerdict("ssh master 'for f in *.log; do tail -1 $f; done'", t, 1_000_000)).toBeNull();
+    expect(t.used('master', 1_000_000)).toBe(1);
+    // the manager can still name an exact looping command in autoAllow
+    expect(sshBudgetVerdict(loops[0], t, 1_000_000, true)).toBeNull();
+  });
+
   it('denies once the host is over budget, and says how long to wait', () => {
     const t = new SshThrottle(2);
     const t0 = 1_000_000;
@@ -1513,6 +1734,7 @@ describe('ssh budget for agent commands', async () => {
     const over = sshBudgetVerdict('ssh gpu1 ls', t, t0 + 2);
     expect(over).toMatchObject({ host: 'gpu1' });
     expect(over!.waitSec).toBeGreaterThan(55);
+    expect(sshDenyText(over!)).toMatch(/Retry in \d+s/);
     expect(sshBudgetVerdict('ssh gpu2 ls', t, t0 + 2)).toBeNull(); // another host is unaffected
   });
 
@@ -1532,17 +1754,6 @@ describe('ssh budget for agent commands', async () => {
 
 describe('ssh budget: nothing routes around it', async () => {
   const { SshThrottle } = await import('../src/sshRate.ts');
-  const { spawnRemote, setSshLimit, sshThrottle } = await import('../src/hosts.ts');
-
-  it('the spawn itself refuses when over budget, so a new caller cannot skip the check', () => {
-    setSshLimit(2);
-    const cfg: any = { id: 't', name: 't', ssh: 'nonexistent-test-host', projectRoot: '~/x', claudePath: '/bin/true' };
-    const args: any = { command: 'claude', args: ['--version'], cwd: '/tmp', env: {} };
-    // two go through (they fail to connect, which is fine — we only care that budget is spent)
-    for (let i = 0; i < 2; i++) spawnRemote(cfg, args).kill('SIGKILL');
-    expect(() => spawnRemote(cfg, args)).toThrow(/2 per minute/);
-    setSshLimit(5);
-  });
 
   it('waitForSlot does not consume, so the slot is counted exactly once', async () => {
     const t = new SshThrottle(1);
@@ -1558,6 +1769,29 @@ describe('ssh budget: nothing routes around it', async () => {
     t.setLimit('strict', 1);
     expect(t.limitFor('strict')).toBe(1);
     expect(t.limitFor('other')).toBe(5);
+  });
+
+  it('no file in the server starts ssh without going through the shared connection', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = join(process.cwd(), 'server/src');
+    const files: string[] = [];
+    const walk = (d: string) => readdirSync(d).forEach((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : n.endsWith('.ts') && files.push(join(d, n))));
+    walk(root);
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      // every place that runs the ssh binary: spawn('ssh', …) / execFile('ssh', …)
+      const starts = [...src.matchAll(/(?:spawn|execFile|spawnSync|execFileSync)\(\s*'(ssh|scp|rsync|sftp)'/g)];
+      if (!starts.length) continue;
+      const rel = f.slice(root.length + 1);
+      if (rel === 'sshMux.ts') continue; // the one place that opens the connection
+      // elsewhere each such file must attach to the master (control options) and never run scp/rsync/sftp
+      if (starts.some((m) => m[1] !== 'ssh')) offenders.push(`${rel}: runs ${starts.find((m) => m[1] !== 'ssh')![1]}`);
+      if (!/sshControlOpts\(\)|SSH_MUX/.test(src)) offenders.push(`${rel}: ssh without the shared-connection options`);
+      if (!/sshMux\.(ensure|isReady)\(/.test(src)) offenders.push(`${rel}: ssh without sshMux.ensure()/isReady()`);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

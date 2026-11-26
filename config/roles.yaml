@@ -32,6 +32,12 @@ common: |
   - Check a file's contents before overwriting it. If a file with the same name exists, append to it or use a new name instead of overwriting.
   - Leave intermediate state for long jobs. Avoid workflows that only leave a result once everything is finished.
 
+  ## Connecting to other machines
+  The network here treats repeated ssh connections as an attack and cuts the machine off, which takes days to undo.
+  - Never run ssh, scp or rsync inside a loop, with xargs or parallel, or once per file. That is one connection per round.
+  - Do the whole job in one connection: a single ssh that runs a remote loop or script, one tar or rsync for many files.
+  - The same goes for scripts you write: a script that calls ssh in a loop does the same damage, and nothing here can see it.
+
   ## Reading PDFs
   A PDF read as a PDF costs several times its text, because every page also goes in as an image.
   - An attached PDF usually comes with its extracted text: read that, and open only the PDF pages you need for a figure, table or equation.
