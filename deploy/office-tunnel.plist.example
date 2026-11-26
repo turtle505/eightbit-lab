@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.eightbit-lab.tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <!-- the loop does the retrying: launchd holds back a job that keeps exiting quickly -->
+    <string>while :; do /usr/bin/ssh -N office-tunnel; sleep 30; done</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/tmp/office-tunnel.log</string>
+  <key>StandardErrorPath</key><string>/tmp/office-tunnel.log</string>
+</dict>
+</plist>

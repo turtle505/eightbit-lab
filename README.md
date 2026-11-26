@@ -259,6 +259,21 @@ hosts:
 
 **Moving the backend to a server:** `git clone` → `npm ci` → `npm run build` → see `deploy/eightbit-lab.service`. Copy `data/office.db` and `workspaces/` across to keep tasks, routines and attachments. Don't run two backends at once, or routines will fire twice.
 
+**Opening it from another computer:** the backend listens on `127.0.0.1` only, so reach it through an ssh tunnel rather than opening the port. Give the tunnel its own alias in `~/.ssh/config` on the computer you sit at:
+
+```
+Host office-tunnel
+    HostName <server address>
+    User <you>
+    LocalForward 8787 127.0.0.1:8787
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    BatchMode yes
+```
+
+`ssh -N office-tunnel` then makes `http://localhost:8787` the office for as long as it runs. Keep the local port the same as the backend's: the office only accepts pages from its own port. To have it always there on a Mac, copy `deploy/office-tunnel.plist.example` to `~/Library/LaunchAgents/`, then `launchctl bootstrap gui/$(id -u) <that file>`; it reconnects by itself after sleep or a network change. The key has to work without a prompt (`ssh-add --apple-use-keychain` once if it has a passphrase). Don't bind the backend to a public address instead: whoever reaches the office can have employees run commands on that machine.
+
 **Updating it later:** `npm run update` on that machine. It checks that no employee is mid-work (a restart would cut them off), then pulls, rebuilds and restarts the systemd service. `npm run update -- --force` skips the check.
 
 You can also do it from the screen. The office looks at the git remote every 30 minutes (one `git fetch`; `updateCheck: false` in `office.local.yaml` turns that off), and when there are new commits the top bar shows **⬆ New version n**. Click it to see what changed, then **Update**: it runs the same script, refuses while anyone is working, shows the script's output, and reloads the page once the backend is back. The button appears only where the backend runs as the systemd service; anywhere else the dialog tells you to run `npm run update` yourself. There is no force option on the screen.

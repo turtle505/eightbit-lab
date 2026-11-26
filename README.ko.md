@@ -261,6 +261,21 @@ hosts:
 
 **백엔드를 서버로 옮기기:** `git clone` → `npm ci` → `npm run build` → `deploy/eightbit-lab.service` 참고. 작업·루틴·첨부를 그대로 가져가려면 `data/office.db`와 `workspaces/`를 복사하세요. 백엔드를 두 곳에서 동시에 돌리면 루틴이 두 번 돌므로 하나만 켜 두세요.
 
+**다른 컴퓨터에서 열기:** 백엔드는 `127.0.0.1`에서만 들으므로, 포트를 여는 대신 ssh 터널로 접속하세요. 내가 앉아 있는 컴퓨터의 `~/.ssh/config`에 터널 전용 별칭을 둡니다.
+
+```
+Host office-tunnel
+    HostName <서버 주소>
+    User <계정>
+    LocalForward 8787 127.0.0.1:8787
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    BatchMode yes
+```
+
+`ssh -N office-tunnel`이 켜져 있는 동안 `http://localhost:8787`이 그 사무실입니다. 로컬 포트는 백엔드 포트와 같게 두세요. 사무실은 자기 포트에서 열린 페이지만 받습니다. Mac에서 항상 켜 두려면 `deploy/office-tunnel.plist.example`을 `~/Library/LaunchAgents/`에 복사하고 `launchctl bootstrap gui/$(id -u) <그 파일>`을 실행하세요. 잠자기나 네트워크 전환 뒤에도 알아서 다시 붙습니다. 키는 암호를 묻지 않고 동작해야 합니다 (암호가 걸려 있으면 `ssh-add --apple-use-keychain`을 한 번). 백엔드를 공인 주소에 직접 여는 것은 하지 마세요. 사무실에 접속한 사람은 직원을 시켜 그 컴퓨터에서 명령을 실행할 수 있습니다.
+
 **나중에 업데이트할 때:** 그 컴퓨터에서 `npm run update`. 일하는 직원이 없는지 먼저 확인하고(재시작하면 하던 일이 끊기므로), pull → 빌드 → systemd 서비스 재시작까지 해 줍니다. 확인을 건너뛰려면 `npm run update -- --force`.
 
 화면에서도 할 수 있습니다. 사무실이 30분마다 git 원격 저장소를 확인하고(`git fetch` 한 번, `office.local.yaml`에 `updateCheck: false`를 두면 끔), 새 커밋이 있으면 상단 바에 **⬆ 새 버전 n**이 뜹니다. 누르면 무엇이 바뀌는지 보이고, **업데이트**를 누르면 같은 스크립트가 실행됩니다. 일하는 직원이 있으면 거부하고, 스크립트 출력을 보여 주며, 서버가 다시 뜨면 화면이 저절로 새로 열립니다. 버튼은 서버가 systemd 서비스로 돌 때만 나오고, 그 밖의 환경에서는 `npm run update`를 직접 실행하라는 안내만 나옵니다. 화면에는 강제 옵션이 없습니다.
