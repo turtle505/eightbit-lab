@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { tr } from '../../shared/i18n.ts';
 import type { AttachmentView } from '../../shared/protocol.ts';
@@ -59,11 +59,53 @@ export const toView = (r: AttachmentRow): AttachmentView => ({ id: r.id, name: r
 export function attachmentBlock(rows: AttachmentRow[]): string {
   if (!rows.length) return '';
   const lines = rows.map((r) => {
+    // a PDF read as a PDF costs several times its text (every page goes in as an image too): text first, pages on demand
+    if (r.textPath && /\.pdf$/i.test(r.name))
+      return (
+        `- #${r.id} ${r.name} (${humanSize(r.size)}, ${r.mime}): read the extracted text first: ${r.textPath}\n` +
+        `  Its "--- page N ---" lines tell you which PDF page you are on. Open the PDF itself (${r.path}) only for the pages where you need a figure, table or equation, with the Read tool's page range; do not read the whole PDF.`
+      );
     const extra = r.textPath ? `  (extracted text: ${r.textPath})` : /\.xlsx?$/i.test(r.name) ? '  (Excel: read it with pandas/openpyxl from Bash)' : '';
     return `- #${r.id} ${r.name} (${humanSize(r.size)}, ${r.mime}): ${r.path}${extra}`;
   });
   return `\n\n## Attachments (read-only originals: copy into your working folder to edit)\n${lines.join('\n')}`;
 }
+
+/** pdftotext separates pages with a form feed: turn each into a line that says which page starts. */
+export function markPages(text: string): string {
+  const pages = text.replace(/\f\s*$/, '').split('\f');
+  return pages.map((p, i) => `--- page ${i + 1} ---\n${p.trim()}\n`).join('\n');
+}
+
+/**
+ * Is the text taken out of a PDF worth reading instead of the PDF? A scan has next to none: under
+ * 200 characters in all, or under 100 per page on average, and the original is passed as before.
+ */
+export function pdfTextUsable(text: string): boolean {
+  const chars = text.replace(/\s+/g, '').length;
+  const pages = text.split('\f').filter((p) => p.trim()).length || 1;
+  return chars >= 200 && chars / pages >= 100;
+}
+
+/**
+ * The text of a PDF next to it, with page markers, by poppler's pdftotext (reading order, not -layout:
+ * that would set the two columns of a paper side by side). False when the tool is missing or the PDF has no text layer.
+ */
+async function pdfToText(src: string, out: string): Promise<boolean> {
+  const raw = `${out}.raw`;
+  try {
+    if (!(await run('pdftotext', ['-enc', 'UTF-8', src, raw], 60_000)) || !existsSync(raw)) return false;
+    const text = readFileSync(raw, 'utf8');
+    if (!pdfTextUsable(text)) return false;
+    writeFileSync(out, markPages(text));
+    return true;
+  } finally {
+    rmSync(raw, { force: true });
+  }
+}
+
+/** Can PDFs be turned into text here? (poppler's pdftotext on the PATH) */
+export const hasPdfToText = (): Promise<boolean> => run('pdftotext', ['-v'], 5_000);
 
 const run = (cmd: string, args: string[], ms = 120_000) =>
   new Promise<boolean>((res) => execFile(cmd, args, { timeout: ms }, (err) => res(!err)));
@@ -112,7 +154,8 @@ export class AttachmentLibrary {
     const path = resolve(dayDir, `${id}-${name}`);
     writeFileSync(path, data);
     let textPath: string | null = null;
-    if (CONVERTIBLE_EXT.has(extname(name).toLowerCase()) && (await toPlainText(path, `${path}.txt`))) textPath = `${path}.txt`;
+    const ext = extname(name).toLowerCase();
+    if (ext === '.pdf' ? await pdfToText(path, `${path}.txt`) : CONVERTIBLE_EXT.has(ext) && (await toPlainText(path, `${path}.txt`))) textPath = `${path}.txt`;
     this.store.updateAttachmentPaths(id, path, textPath);
     return toView(this.store.getAttachments([id])[0]);
   }

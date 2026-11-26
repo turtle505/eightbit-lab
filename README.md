@@ -40,7 +40,7 @@ Runs locally on macOS or Linux using your own CLI login. Claude Code requires a 
 
 - **Node.js 22.13 or newer** (24 recommended). The app uses the built-in `node:sqlite`, which older versions only offer behind a flag. With nvm, `nvm use` picks the right one (`.nvmrc`); `npm start` refuses older versions with a clear message.
 - **Claude Code CLI**, logged in with a Pro or Max plan. Run `claude` once and sign in. Check with `claude --version`.
-- macOS or Linux. On macOS, Word/RTF attachments are converted to text automatically.
+- macOS or Linux. Optional: `pdftotext` (poppler) so PDF attachments are handed over as text, which costs far fewer tokens.
 
 ### Run
 
@@ -318,8 +318,9 @@ Nothing is sent while an office tab is in front somewhere (`whenAway: false` to 
 
 Drop files on 📎 in the task form or on an employee's input box (up to 50 MB each). The employee gets the file paths with the instruction.
 
-- CSV, text, JSON, images and PDF are read directly.
-- On macOS, Word, RTF, ODT and HTML files also get a `.txt` conversion.
+- CSV, text, JSON and images are read directly.
+- A PDF's text is taken out when you upload it (needs `pdftotext`: `apt install poppler-utils` / `brew install poppler`), with a line marking where each page starts. The employee reads that text and opens the PDF only for the pages where it needs a figure, table or equation. A PDF read whole costs several times its text, since every page also goes in as an image. Without `pdftotext`, or for a scan with no text layer, the PDF is handed over as it is.
+- Word, RTF, ODT and HTML files also get a `.txt` conversion (`textutil` on macOS, LibreOffice elsewhere).
 - Excel files are read with pandas.
 - Uploads you never attach to anything are deleted after 24 hours.
 </details>

@@ -718,7 +718,7 @@ describe('permission mode', async () => {
 });
 
 describe('attachments', async () => {
-  const { safeName, attachmentBlock, AttachmentLibrary, PENDING_TTL_MS } = await import('../src/attachments.ts');
+  const { safeName, attachmentBlock, AttachmentLibrary, PENDING_TTL_MS, markPages, pdfTextUsable, hasPdfToText } = await import('../src/attachments.ts');
   const { mkdtempSync, existsSync, readFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -762,6 +762,79 @@ describe('attachments', async () => {
     expect(lib.cleanup(Date.now() + PENDING_TTL_MS + 1000)).toBe(1); // only the unlinked one goes
     expect(existsSync(cPath)).toBe(false);
     expect(lib.rows([a.id, b.id, c.id]).map((r) => r.id)).toEqual([a.id, b.id]);
+  });
+
+  it('tells the agent to read a PDF\'s text first and open only the pages it needs', () => {
+    const row = { id: 12, name: 'paper.PDF', path: '/w/att/12-paper.PDF', textPath: '/w/att/12-paper.PDF.txt', size: 1_200_000, mime: 'application/pdf', createdAt: 0, usedAt: null };
+    const withText = attachmentBlock([row]);
+    expect(withText).toContain('read the extracted text first: /w/att/12-paper.PDF.txt');
+    expect(withText).toContain('Open the PDF itself (/w/att/12-paper.PDF) only for the pages');
+    expect(withText).toContain('--- page N ---');
+    // a scan, or no pdftotext here: the original is listed as before
+    expect(attachmentBlock([{ ...row, textPath: null }])).toContain('#12 paper.PDF (1.1 MB, application/pdf): /w/att/12-paper.PDF');
+    expect(attachmentBlock([{ ...row, textPath: null }])).not.toContain('extracted text');
+    // other converted files keep their wording
+    expect(attachmentBlock([{ ...row, name: 'memo.docx', textPath: '/w/att/memo.docx.txt' }])).toContain('(extracted text: /w/att/memo.docx.txt)');
+  });
+
+  it('marks where each page of a PDF starts', () => {
+    expect(markPages('Title\nAbstract\n\fMethods\n\fFigure 3: x\n\f')).toBe('--- page 1 ---\nTitle\nAbstract\n\n--- page 2 ---\nMethods\n\n--- page 3 ---\nFigure 3: x\n');
+    expect(markPages('only one page')).toBe('--- page 1 ---\nonly one page\n');
+  });
+
+  it('does not take a scan\'s scraps for the text of a paper', () => {
+    expect(pdfTextUsable('word '.repeat(400))).toBe(true);
+    expect(pdfTextUsable('')).toBe(false);
+    expect(pdfTextUsable('3\f\f 12 \f')).toBe(false); // page numbers only
+    expect(pdfTextUsable(Array.from({ length: 30 }, () => 'p. 12 scanned').join('\f'))).toBe(false); // a little per page over many pages
+  });
+
+  it('keeps a PDF as it is when its text cannot be taken out', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'office-att-'));
+    const lib = new AttachmentLibrary(root, new Store(':memory:'));
+    const v = await lib.save('broken.pdf', Buffer.from('%PDF-1.4 not really a pdf'));
+    expect(v).toMatchObject({ name: 'broken.pdf', mime: 'application/pdf', hasText: false });
+    const r = lib.rows([v.id])[0];
+    expect(existsSync(r.path)).toBe(true);
+    expect(existsSync(`${r.path}.txt`)).toBe(false);
+    expect(existsSync(`${r.path}.txt.raw`)).toBe(false);
+  });
+
+  it.runIf(await hasPdfToText())('takes the text out of a PDF with page markers (needs pdftotext)', async () => {
+    // the smallest PDF with a text layer: two pages, one line each
+    const objs = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R /Resources << /Font << /F1 7 0 R >> >> >>',
+      null,
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>',
+      null,
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ];
+    const line = 'Designability of generated backbones improves with the larger model and the lower learning rate we tried. '.repeat(3);
+    const stream = (t: string) => {
+      const c = `BT /F1 6 Tf 10 100 Td (${t}) Tj ET`;
+      return `<< /Length ${c.length} >>\nstream\n${c}\nendstream`;
+    };
+    objs[3] = stream(`Page one. ${line}`);
+    objs[5] = stream(`Figure 3: page two. ${line}`);
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [];
+    objs.forEach((o, i) => {
+      offsets.push(pdf.length);
+      pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = pdf.length;
+    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    const root = mkdtempSync(join(tmpdir(), 'office-att-'));
+    const lib = new AttachmentLibrary(root, new Store(':memory:'));
+    const v = await lib.save('paper.pdf', Buffer.from(pdf, 'latin1'));
+    expect(v.hasText).toBe(true);
+    const r = lib.rows([v.id])[0];
+    const text = readFileSync(r.textPath!, 'utf8');
+    expect(text).toMatch(/^--- page 1 ---\nPage one\./);
+    expect(text).toMatch(/--- page 2 ---\nFigure 3: page two\./);
+    expect(attachmentBlock([r])).toContain('read the extracted text first');
   });
 
   it.runIf(process.platform === 'darwin')('docx gets a plain-text conversion via textutil', async () => {

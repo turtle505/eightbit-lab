@@ -40,7 +40,7 @@ macOS 또는 Linux에서 로컬로 실행하며 CLI 로그인으로 사용합니
 
 - **Node.js 22.13 이상** (24 권장): 내장 `node:sqlite`를 쓰는데, 그보다 낮은 버전에서는 플래그를 켜야만 쓸 수 있습니다. nvm을 쓴다면 `nvm use`로 맞는 버전이 잡히고(`.nvmrc`), 버전이 낮으면 `npm start`가 분명한 안내와 함께 멈춥니다.
 - **Claude Code CLI**에 Pro 또는 Max 요금제로 로그인. `claude`를 한 번 실행해 로그인하고, `claude --version`으로 확인하세요.
-- macOS 또는 Linux. macOS에서는 Word/RTF 첨부를 자동으로 텍스트로 바꿔 줍니다.
+- macOS 또는 Linux. 선택: `pdftotext`(poppler)가 있으면 PDF 첨부를 글로 넘겨서 토큰이 훨씬 덜 듭니다.
 
 ### 실행
 
@@ -320,8 +320,9 @@ obsidian:
 
 작업 폼의 📎이나 직원 입력칸에 파일을 끌어다 놓으세요(파일당 50 MB까지). 직원은 지시와 함께 파일 경로를 받습니다.
 
-- CSV, 텍스트, JSON, 이미지, PDF는 그대로 읽습니다.
-- macOS에서는 Word, RTF, ODT, HTML에 `.txt` 변환본도 함께 만들어집니다.
+- CSV, 텍스트, JSON, 이미지는 그대로 읽습니다.
+- PDF는 올릴 때 글을 뽑아 둡니다 (`pdftotext` 필요: `apt install poppler-utils` / `brew install poppler`). 글에는 쪽이 시작되는 자리마다 표시가 들어갑니다. 직원은 그 글을 읽고, 그림·표·수식이 필요한 쪽만 PDF로 엽니다. PDF를 통째로 읽으면 쪽마다 이미지도 같이 들어가서 글만 읽을 때보다 몇 배 듭니다. `pdftotext`가 없거나 글이 없는 스캔본이면 PDF를 그대로 넘깁니다.
+- Word, RTF, ODT, HTML에는 `.txt` 변환본도 함께 만들어집니다 (macOS는 `textutil`, 그 밖에는 LibreOffice).
 - 엑셀은 pandas로 읽습니다.
 - 어디에도 붙이지 않은 업로드는 24시간 뒤 지워집니다.
 </details>

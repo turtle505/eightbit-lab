@@ -25,7 +25,7 @@ import { CodexUsageMonitor } from './codexUsage.ts';
 import { Notifier } from './notify.ts';
 import { dueTasks, followBlock, isFinished, orphanedFollowers, readyFollowers, retryBlock, SCHEDULE_SLACK_MS, strandedTasks } from './schedule.ts';
 import { ProviderHub } from './providers.ts';
-import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock } from './attachments.ts';
+import { AttachmentLibrary, MAX_ATTACHMENT_BYTES, attachmentBlock, hasPdfToText } from './attachments.ts';
 import { allowedOrigin } from './origin.ts';
 import { cookieHeader, isAuthorized, loginPage, suggestToken, tokenMatches } from './auth.ts';
 import { HostRegistry, setSshLimit } from './hosts.ts';
@@ -704,6 +704,9 @@ http.listen(office.port, '127.0.0.1', () => {
     if (!office.updateCheck) return;
     void updater.check();
     setInterval(() => void updater.check(), UPDATE_CHECK_MS);
+  });
+  void hasPdfToText().then((ok) => {
+    if (!ok) console.log(tr({ ko: '· pdftotext가 없어 PDF 첨부는 원본 그대로 전달됩니다 (poppler 설치 시 글을 먼저 뽑아 토큰을 아낍니다)', en: '· pdftotext not found: PDF attachments are passed as they are (install poppler to hand over their text first and save tokens)' }));
   });
   registry.start();
   routines.start();
